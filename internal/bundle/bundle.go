@@ -28,19 +28,16 @@ var (
 		{Name: "tts", Source: "dist/tts"},
 	}
 	HosttoolAliases = []string{
-		"aeng-page-exec",
 		"agent-page-ping",
 		"cf-tunnel",
 		"cf-tunnel-py",
 		"cf-tunnel.py",
 		"cping",
 		"eng",
-		"fast-api",
 		"gemini-ask",
 		"gemini-vision",
 		"gpt",
 		"gpt-chat",
-		"grant-trial-credit",
 		"ipc-ping",
 		"mysql-exec",
 		"tg",
@@ -53,14 +50,19 @@ var (
 		{Name: "google", Source: "providers/google-node/google.js"},
 	}
 	DeprecatedProviderLinks = []string{"gmail"}
-	LegacyLinks             = []LinkSpec{
-		{Name: "ai-desktop-check", Source: "legacy/skills/cicy/ai-desktop-check.sh"},
+	RetiredLocalLinks       = []string{
+		"aeng-page-exec",
+		"ai-desktop-check",
+		"check-all",
+		"check-projects",
+		"electron-mcp-ui-check",
+		"fast-api",
+		"fast-api-check",
+		"grant-trial-credit",
+	}
+	LegacyLinks = []LinkSpec{
 		{Name: "ax-click", Source: "legacy/skills/dev/ax-click"},
 		{Name: "ax-tree", Source: "legacy/skills/dev/ax-tree"},
-		{Name: "check-all", Source: "legacy/skills/dev/check-all.sh"},
-		{Name: "check-projects", Source: "legacy/skills/dev/check-projects.sh"},
-		{Name: "electron-mcp-ui-check", Source: "legacy/skills/cicy/electron-mcp-ui-check.sh"},
-		{Name: "fast-api-check", Source: "legacy/skills/dev/fast-api-check.sh"},
 		{Name: "tg-bot-check", Source: "legacy/skills/services/tg-bot-check.sh"},
 		{Name: "vphone-ctl", Source: "legacy/skills/dev/vphone-ctl"},
 		{Name: "xui", Source: "legacy/skills/dev/xui"},
@@ -185,6 +187,9 @@ func Install(root, privateBinDir, globalBinDir string) error {
 			return err
 		}
 	}
+	if err := removeLinks(privateBinDir, RetiredLocalLinks); err != nil {
+		return err
+	}
 
 	for _, name := range AllCommands() {
 		if err := forceSymlink(filepath.Join(privateBinDir, name), filepath.Join(globalBinDir, name)); err != nil {
@@ -195,6 +200,9 @@ func Install(root, privateBinDir, globalBinDir string) error {
 		if err := removeLink(filepath.Join(globalBinDir, name)); err != nil {
 			return err
 		}
+	}
+	if err := removeLinks(globalBinDir, RetiredLocalLinks); err != nil {
+		return err
 	}
 	return nil
 }
@@ -262,6 +270,12 @@ func Remove(privateBinDir, globalBinDir string) error {
 			return err
 		}
 	}
+	if err := removeLinks(globalBinDir, RetiredLocalLinks); err != nil {
+		return err
+	}
+	if err := removeLinks(privateBinDir, RetiredLocalLinks); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -306,6 +320,15 @@ func forceSymlink(target, link string) error {
 func removeLink(path string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	return nil
+}
+
+func removeLinks(dir string, names []string) error {
+	for _, name := range names {
+		if err := removeLink(filepath.Join(dir, name)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

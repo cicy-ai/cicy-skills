@@ -25,9 +25,7 @@ Google API CLI tools with OAuth2: Gmail, Sheets, Drive, Calendar.
 ## Install
 
 ```bash
-ln -sf $(pwd)/cli.js ~/.local/bin/gmail
-ln -sf $(pwd)/google.js ~/.local/bin/google
-chmod +x cli.js google.js
+cicy-skills install google-node
 ```
 
 ## Usage
@@ -35,15 +33,10 @@ chmod +x cli.js google.js
 ### Gmail
 
 ```bash
-gmail list [count]                         # List recent emails
-gmail read <n>                             # Read email by index
-gmail read-all                             # Mark all as read
-gmail send <to> <subject> [body]           # Send email
-gmail watch [keyword]                      # Watch for verification codes
-
-# Or via google command
 google gmail list 5
 google gmail send user@x.com "Hi" "body"
+google gmail read 1
+google gmail watch "verification"
 ```
 
 ### Sheets

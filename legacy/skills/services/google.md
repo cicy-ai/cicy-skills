@@ -6,11 +6,11 @@ Google API CLI tools: Gmail, Sheets, Drive, Calendar.
 
 ### Gmail
 ```bash
-gmail list [count]                         # List recent emails
-gmail read <n>                             # Read email by index
-gmail read-all                             # Mark all as read
-gmail send <to> <subject> [body]           # Send email
-gmail watch [keyword]                      # Watch for verification codes
+google gmail list [count]                  # List recent emails
+google gmail read <n>                      # Read email by index
+google gmail read-all                      # Mark all as read
+google gmail send <to> <subject> [body]    # Send email
+google gmail watch [keyword]               # Watch for verification codes
 ```
 
 ### Sheets
@@ -43,9 +43,9 @@ google calendar create <summary> <start> <end>  # Create event
 
 ```bash
 # Gmail
-gmail list 5
-gmail watch "verification"
-gmail send user@x.com "Hi" "body"
+google gmail list 5
+google gmail watch "verification"
+google gmail send user@x.com "Hi" "body"
 
 # Sheets
 google sheets list
@@ -66,4 +66,4 @@ google calendar create "Meeting" "2026-03-10T10:00:00Z" "2026-03-10T11:00:00Z"
 
 **Project:** `~/projects/cicy-skills/providers/google-node`
 **GitHub:** https://github.com/cicy-ai/cicy-skills
-**Location:** `~/Private/skills/bin/gmail`, `~/Private/skills/bin/google`
+**Location:** `~/projects/cicy-skills/bin/google`, `~/.local/bin/google`

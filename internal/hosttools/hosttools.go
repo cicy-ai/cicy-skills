@@ -55,8 +55,6 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch cmd {
-	case "fast-api":
-		err = env.runFastAPI(args)
 	case "gpt":
 		err = env.runSimpleAI(args, "/api/ai/chat", "Usage: gpt <question>")
 	case "eng":
@@ -67,8 +65,6 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runTG(args)
 	case "tm":
 		err = env.runTM(args)
-	case "aeng-page-exec":
-		err = env.runEval(args)
 	case "agent-page-ping":
 		err = env.runDesktopPing("ping", "pong", "✅ 收到 pong！连通成功", args)
 	case "ipc-ping":
@@ -81,8 +77,6 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runGeminiAsk(args)
 	case "gemini-vision":
 		err = env.runGeminiVision(args)
-	case "grant-trial-credit":
-		err = env.runGrantTrialCredit(args)
 	case "mysql-exec":
 		err = env.runMySQLExec(args)
 	case "todo":
@@ -160,7 +154,7 @@ func anyString(v any) string {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: fast-api, gpt, gpt-chat, eng, tg, tm, aeng-page-exec, agent-page-ping, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, grant-trial-credit, mysql-exec, todo, cf-tunnel, cping")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-page-ping, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
@@ -249,50 +243,6 @@ func randomID(prefix string) string {
 func asMap(v any) map[string]any {
 	m, _ := v.(map[string]any)
 	return m
-}
-
-func (e *Env) runFastAPI(args []string) error {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		_, _ = fmt.Fprintln(e.Stdout, "Usage: fast-api <endpoint> [json_body]\n       fast-api --tools")
-		return nil
-	}
-	if args[0] == "--tools" {
-		if len(args) > 1 {
-			data, err := e.apiRequest(context.Background(), http.MethodGet, args[1], nil)
-			if err != nil {
-				return err
-			}
-			_, _ = e.Stdout.Write(data)
-			if len(data) == 0 || data[len(data)-1] != '\n' {
-				_, _ = fmt.Fprintln(e.Stdout)
-			}
-			return nil
-		}
-		_, _ = fmt.Fprintln(e.Stdout, "GET  /api/health\nGET  /api/ping\nGET  /api/tmux/panes\nGET  /api/tmux/list\nGET  /api/tmux/tree\nGET  /api/tmux/windows\nGET  /api/tmux/status\nPOST /api/tmux/send        {pane, text}\nPOST /api/tmux/send-keys   {pane, keys}\nPOST /api/tmux/send_wait   {pane, text, timeout, prompt_type}\nGET  /api/tmux/capture_pane?pane=<id>\nPOST /api/tmux/create      {name}\nPOST /api/chat/push        {pane, type, data}\nPOST /api/notify           {action, file, message}\nGET  /api/auth/verify\nGET  /api/workers/queue")
-		return nil
-	}
-
-	endpoint := args[0]
-	if len(args) > 1 {
-		var payload any
-		if err := json.Unmarshal([]byte(args[1]), &payload); err != nil {
-			return err
-		}
-		data, err := e.apiRequest(context.Background(), http.MethodPost, endpoint, payload)
-		if err != nil {
-			return err
-		}
-		_, _ = e.Stdout.Write(data)
-		_, _ = fmt.Fprintln(e.Stdout)
-		return nil
-	}
-	data, err := e.apiRequest(context.Background(), http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
-	}
-	_, _ = e.Stdout.Write(data)
-	_, _ = fmt.Fprintln(e.Stdout)
-	return nil
 }
 
 func (e *Env) runSimpleAI(args []string, endpoint, usage string) error {
@@ -532,42 +482,6 @@ func (e *Env) copyAPI(method, path string, payload any) error {
 	if len(data) == 0 || data[len(data)-1] != '\n' {
 		_, _ = fmt.Fprintln(e.Stdout)
 	}
-	return nil
-}
-
-func (e *Env) runEval(args []string) error {
-	if len(args) < 1 {
-		return errors.New("Usage: aeng-page-exec '<js代码>' [pane]")
-	}
-	pane := currentPane()
-	if len(args) > 1 {
-		pane = args[1]
-	}
-	rid := randomID("exec")
-	conn, err := e.wsConnect(pane)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-		"pane": pane,
-		"type": "desktop_event",
-		"data": map[string]any{"type": "eval", "code": args[0], "requestId": rid},
-	})
-	if err != nil {
-		return err
-	}
-	msg, err := e.waitForMessage(conn, 20*time.Second, func(m map[string]any) bool {
-		return anyString(m["type"]) == "pong" && anyString(asMap(m["data"])["requestId"]) == rid
-	})
-	if err != nil {
-		return err
-	}
-	data := asMap(msg["data"])
-	if errText := anyString(data["error"]); errText != "" {
-		return errors.New(errText)
-	}
-	_, _ = fmt.Fprintln(e.Stdout, data["result"])
 	return nil
 }
 
@@ -818,86 +732,6 @@ func (e *Env) runGeminiVision(args []string) error {
 	return nil
 }
 
-func (e *Env) runGrantTrialCredit(args []string) error {
-	if len(args) < 1 {
-		return errors.New("Usage: grant-trial-credit <claim-code> [credits] [note]")
-	}
-	code := onlyDigits(args[0])
-	if len(code) != 6 {
-		return errors.New("claim code must be a 6-digit number")
-	}
-	credits := "100"
-	if len(args) > 1 {
-		credits = args[1]
-	}
-	note := fmt.Sprintf("首次登录试用金 %s Credits", credits)
-	if len(args) > 2 {
-		note = args[2]
-	}
-	apiBase := strings.TrimRight(envOr("CICY_API_BASE", "https://api.cicy-ai.com"), "/")
-	adminKey := strings.TrimSpace(os.Getenv("TRIAL_CLAIM_ADMIN_KEY"))
-	if adminKey == "" {
-		adminKey = e.Token
-	}
-	if adminKey == "" {
-		return errors.New("TRIAL_CLAIM_ADMIN_KEY is required, or put api_token in ~/global.json")
-	}
-	payload := map[string]any{
-		"code":       code,
-		"credits":    parseFloat(credits),
-		"note":       note,
-		"granted_by": envOr("GRANTED_BY", "openclaw"),
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequest(http.MethodPost, apiBase+"/api/trial-claim/grant", bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+adminKey)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	_, _ = e.Stdout.Write(body)
-	_, _ = fmt.Fprintln(e.Stdout)
-	if resp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("grant failed")
-	}
-	return nil
-}
-
-func onlyDigits(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func parseFloat(s string) float64 {
-	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	return f
-}
-
-func envOr(key, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
 func (e *Env) runMySQLExec(args []string) error {
 	if len(args) < 1 {
 		return errors.New("Usage: mysql-exec \"SQL\" [database]")
@@ -933,6 +767,14 @@ func readEnvValue(path, key string) string {
 		}
 	}
 	return ""
+}
+
+func envOr(key, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func filterLines(s string, keep func(string) bool) string {

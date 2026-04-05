@@ -77,7 +77,7 @@ func baseSkillName(filename string) string {
 		return ""
 	}
 	switch base {
-	case "README", "TODO", "AGENTS", "CRITICAL-RULES", "QQ-DevTools-Guide", "link-skills":
+	case "README", "TODO", "AGENTS", "CRITICAL-RULES", "QQ-DevTools-Guide", "link-skills", "help":
 		return ""
 	}
 	return base

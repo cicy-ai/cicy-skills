@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export HOME="${HOME:-/root}"
-export PATH="$HOME/.local/bin:$HOME/Private/cicy-skills/bin:$PATH"
+if [[ ! -f /.dockerenv && "${SMOKE_ALLOW_HOST:-}" != "1" ]]; then
+  echo "refusing to run smoke.sh on host; use docker/google-smoke/run-in-base.sh or set SMOKE_ALLOW_HOST=1" >&2
+  exit 1
+fi
 
-mkdir -p "$HOME/.local/bin" "$HOME/Private/cicy-skills/bin" "$HOME/Private"
+SMOKE_HOME="${SMOKE_HOME:-}"
+if [[ -z "$SMOKE_HOME" ]]; then
+  SMOKE_HOME="$(mktemp -d "${TMPDIR:-/tmp}/cicy-skills-smoke-home.XXXXXX")"
+  trap 'rm -rf "$SMOKE_HOME"' EXIT
+fi
+
+export HOME="$SMOKE_HOME"
+export PATH="$HOME/.local/bin:$PATH"
+
+mkdir -p "$HOME/.local/bin" "$HOME/Private"
 
 cat > "$HOME/global.json" <<'JSON'
 {
@@ -24,18 +35,18 @@ cp ./dist/cicy-skillsd /tmp/cicy-skillsd
 cp ./dist/cicy-hosttools /tmp/cicy-hosttools
 
 /tmp/cicy-skills config-path >/tmp/cicy-skills-config-path.txt
-/tmp/cicy-skills init-config >/tmp/cicy-skills-init.txt
+if ! /tmp/cicy-skills init-config >/tmp/cicy-skills-init.txt 2>/tmp/cicy-skills-init.err; then
+  grep -q 'config already exists' /tmp/cicy-skills-init.err
+fi
 /tmp/cicy-skills install all
 
-test -L "$HOME/Private/cicy-skills/bin/gmail"
-test -L "$HOME/Private/cicy-skills/bin/google"
+test -L "./bin/google"
+test ! -e "./bin/gmail"
 test -L "$HOME/.local/bin/google"
+test ! -e "$HOME/.local/bin/gmail"
 test -L "$HOME/.local/bin/gpt"
-test -d "$HOME/Private/cicy-skills/generated/skills"
-test -f "$HOME/Private/cicy-skills/generated/agents/claude/CLAUDE.md"
 
-gmail | grep -q 'Usage: gmail <list|read|read-all|send|watch>'
 google | grep -q 'Available services:'
-fast-api --tools | grep -q '/api/ping'
+google gmail help | grep -q 'Usage: google gmail <list|read|read-all|send|watch>'
 
 echo "google-node smoke test passed"

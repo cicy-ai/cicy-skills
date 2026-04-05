@@ -1,8 +1,10 @@
 # AGENTS.md
 
-AI Agent 技能手册。统一管理所有 CLI 工具，位于 `~/Private/skills/`。
+AI Agent 技能手册。技能源文件在 `~/projects/cicy-skills/legacy/skills/`，CLI 入口在 `~/projects/cicy-skills/bin/`，全局软链接在 `~/.local/bin/`。
 
-## 常用命令（已加入 PATH）
+`cicy-skills list` 是当前技能清单的准源。
+
+## 常用命令
 
 直接运行即可，无需路径：
 
@@ -13,8 +15,6 @@ AI Agent 技能手册。统一管理所有 CLI 工具，位于 `~/Private/skills
 | `tm capture <pane>` | 捕获 pane 内容 |
 | `tm msg <pane> <text>` | 向 pane 发送消息 |
 | `tm send-keys <pane> <keys>` | 发送按键 |
-| `check-all` | 检查所有服务状态 |
-| `fast-api` | FastAPI 服务管理 |
 | `xui` | 面板管理工具 |
 | `todo` | TODO 管理 |
 | `cping <host>` | Cloudflare 延迟测试 |
@@ -26,17 +26,16 @@ AI Agent 技能手册。统一管理所有 CLI 工具，位于 `~/Private/skills
 | `gpt <prompt>` | GPT 问答 |
 | `eng <prompt>` | English 问答 |
 | `gpt-chat` | 交互式 GPT 对话 |
+| `google gmail list 5` | 查看最近邮件 |
 
 ## 完整 Skills 目录
 
 ```
-~/Private/skills/
-├── bin/              所有 CLI 入口
-├── infra/            Layer 1: 基础设施
-├── dev/              Layer 2: 开发工具
-├── ai/               Layer 3: AI 能力
-├── cicy/             Layer 4: CiCy 平台
-└── services/         Layer 5: 外部服务
+~/projects/cicy-skills/
+├── bin/              CLI 入口 symlink
+├── legacy/skills/    技能源文件
+├── providers/        外部 provider
+└── Makefile
 ```
 
 ### Layer 1: 基础设施 (infra/)
@@ -46,10 +45,11 @@ AI Agent 技能手册。统一管理所有 CLI 工具，位于 `~/Private/skills
 | `cf-tunnel` | Cloudflare Tunnel 管理 |
 | `cf-tunnel-py` | Cloudflare Tunnel (Python) |
 | `cping <host>` | Cloudflare 延迟测试 |
+| `ft` | 文件传输工具 |
 | `mysql-exec <sql>` | 执行 MySQL 查询 |
 | `vnc-proxy` | VNC 代理管理 |
-| `ft` | 文件传输工具 |
-| `llm-proxy` | LLM 代理配置 |
+| `vnc-proxy-check` | VNC 代理检查 |
+| `vnc-server` | VNC 服务说明 |
 
 ### Layer 2: 开发工具 (dev/)
 
@@ -57,13 +57,7 @@ AI Agent 技能手册。统一管理所有 CLI 工具，位于 `~/Private/skills
 |------|------|
 | `tm` | Tmux 会话管理（核心） |
 | `xui` | 面板 UI 管理 |
-| `fast-api` | FastAPI 服务控制 |
-| `check-all` | 全量健康检查 |
-| `check-projects` | 检查项目状态 |
 | `todo` | TODO 管理 |
-| `chrome-debugger` | Chrome 调试 |
-| `tmux-app` | Tmux 应用管理 |
-| `ttyd-proxy` | ttyd 代理管理 |
 | `vphone-ctl` | 虚拟手机控制 |
 | `ax-click` | AX 点击工具 |
 | `ax-tree` | AX 树工具 |
@@ -84,11 +78,11 @@ AI Agent 技能手册。统一管理所有 CLI 工具，位于 `~/Private/skills
 
 | 命令 | 说明 |
 |------|------|
-| `aeng-page-exec` | Agent 页面执行 |
 | `agent-page-ping` | Agent 页面状态 |
 | `ipc-ping` | IPC 通信测试 |
-| `ai-desktop` | AI Desktop 管理 |
-| `electron-mcp-ui` | Electron MCP UI |
+| `help` | CiCy 内部命令提示 |
+| `webpage` | 网页客户端控制 |
+| `webpage-ping` | 网页客户端快速探活 |
 | `cf-workers` | Cloudflare Workers |
 | `cf-pages` | Cloudflare Pages |
 
@@ -98,8 +92,9 @@ AI Agent 技能手册。统一管理所有 CLI 工具，位于 `~/Private/skills
 |------|------|
 | `tg <chat_id> <msg>` | 发送 Telegram |
 | `tg-bot` | Telegram Bot 管理 |
+| `tg-bot-check` | Telegram Bot 检查 |
+| `tg-sender` | Telegram 发送说明 |
 | `google` | Google 服务 |
-| `gmail` | Gmail 操作 |
 
 ## 常用操作示例
 
@@ -111,23 +106,17 @@ tm capture w-10001              # 捕获内容
 tm msg w-10001 "hello"          # 发消息
 tm send-keys w-10001 Enter      # 发送按键
 
-# 服务检查
-check-all                        # 全量检查
-fast-api status                 # FastAPI 状态
-
 # 消息通知
 tg 123456 "任务完成"            # 发 Telegram
+
+# Google
+google help
+google gmail list 5
 ```
 
-## 添加新 Skill
+## 当前路径
 
-1. 脚本放到对应层目录
-2. `chmod +x dev/my-tool.sh`
-3. `cd bin && ln -sf ../dev/my-tool.sh my-tool`
-
-## 工作目录
-
-- 根目录: `/home/w3c_offical/Private/`
+- 仓库: `/home/w3c_offical/projects/cicy-skills/`
 - Workers: `/home/w3c_offical/Private/workers/`
-- Skills: `/home/w3c_offical/Private/skills/`
+- Codex skills: `/home/w3c_offical/.codex/skills/`
 - 主控 pane: `w-10001`
