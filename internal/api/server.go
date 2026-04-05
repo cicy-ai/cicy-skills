@@ -21,7 +21,7 @@ func NewServer(cfg config.Config) http.Handler {
 	})
 
 	mux.HandleFunc("/v1/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, cfg)
+		writeJSON(w, http.StatusOK, cfg.Public())
 	})
 
 	mux.HandleFunc("/v1/skills", func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +38,15 @@ func NewServer(cfg config.Config) http.Handler {
 		})
 	})
 
-	return mux
+	mux.HandleFunc("/v1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"default_node": cfg.DefaultNode,
+			"nodes":        cfg.Public().Nodes,
+			"count":        len(cfg.Nodes),
+		})
+	})
+
+	return withAuth(cfg, mux)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

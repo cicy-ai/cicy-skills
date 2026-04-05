@@ -1,8 +1,17 @@
 {
   "listen": "127.0.0.1:7811",
+  "auth_token": "change-me",
   "skill_roots": [
     "~/Private/skills"
   ],
   "agent_profiles_dir": "~/Private/cicy-skills/agents",
-  "generated_dir": "~/Private/cicy-skills/generated"
+  "generated_dir": "~/Private/cicy-skills/generated",
+  "default_node": "local",
+  "nodes": [
+    {
+      "name": "local",
+      "base_url": "http://127.0.0.1:7811",
+      "token": "change-me"
+    }
+  ]
 }
