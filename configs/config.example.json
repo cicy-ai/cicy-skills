@@ -1,0 +1,8 @@
+{
+  "listen": "127.0.0.1:7811",
+  "skill_roots": [
+    "~/Private/skills"
+  ],
+  "agent_profiles_dir": "~/Private/cicy-skills/agents",
+  "generated_dir": "~/Private/cicy-skills/generated"
+}
