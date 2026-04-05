@@ -2,10 +2,10 @@
   "listen": "127.0.0.1:7811",
   "auth_token": "change-me",
   "skill_roots": [
-    "~/Private/skills"
+    "~/projects/cicy-skills/legacy/skills"
   ],
-  "agent_profiles_dir": "~/Private/cicy-skills/agents",
-  "generated_dir": "~/Private/cicy-skills/generated",
+  "agent_profiles_dir": "~/.codex/skills",
+  "generated_dir": "",
   "default_node": "local",
   "nodes": [
     {

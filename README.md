@@ -1,77 +1,121 @@
 # cicy-skills
 
-`cicy-skills` is the unified runtime for CiCy skills.
+`cicy-skills` manages the local CiCy command set and approved agent skill generation.
 
-It provides:
+## Layout
 
-- one HTTP entrypoint for skill discovery and execution
-- one CLI that calls the local HTTP runtime
-- one default config under `~/Private`
-- one registry view over the existing `~/Private/skills` tree
-- one node registry with a default node and per-node token
+- config only: `~/Private/cicy-skills/config.json`
+- repo-owned commands: `~/projects/cicy-skills/bin`
+- global entrypoints: `~/.local/bin`
+- Codex skills: `~/.codex/skills`
 
-## Defaults
+`~/Private/cicy-skills` should only contain the config file. It does not store generated skills or command binaries.
 
-- config path: `~/Private/cicy-skills/config.json`
-- listen address: `127.0.0.1:7811`
-- default skill root: `~/Private/skills`
-- default node: `local`
+## Current Rule
 
-## Binaries
+Agent skill generation is allowlist-based.
 
-- `cicy-skillsd`: HTTP runtime
-- `cicy-skills`: CLI
+- currently approved: `cf-tunnel`, `google`
+- current supported target agent: `codex`
+- generated target directory for Codex: `~/.codex/skills`
+
+Everything else is archived in-repo under [`legacy/skills`](./legacy/skills) but is not part of the approved generation list until you explicitly confirm it.
+
+## Install
+
+```bash
+make install-local-cli
+```
+
+This builds the binaries into `dist/`, materializes the command entrypoints in `~/projects/cicy-skills/bin`, and links them into `~/.local/bin`.
+
+## Local Command Management
+
+```bash
+cicy-skills install google-node
+cicy-skills update google-node
+cicy-skills remove google-node
+
+cicy-skills install all
+cicy-skills update all
+cicy-skills remove all
+```
+
+`install` and `update` refresh the current repo state. If you changed the Go binaries, use `make install-local-cli` so `dist/` is rebuilt before relinking.
 
 ## Commands
 
 ```bash
+cicy-skills help
 cicy-skills config-path
 cicy-skills init-config
 cicy-skills list
-cicy-skills nodes
-cicy-skills http-list --node local
-cicy-skills serve
+cicy-skills install all
+cicy-skills install google-node
+cicy-skills remove google-node
+cicy-skills update google-node
+cicy-skills agent list codex
+cicy-skills agent help codex cf-tunnel
+cicy-skills agent help codex google
+cicy-skills agent install codex cf-tunnel
+cicy-skills agent install codex google
+cicy-skills agent update codex cf-tunnel
+cicy-skills agent update codex google
+cicy-skills agent remove codex cf-tunnel
+cicy-skills agent remove codex google
+cicy-skills agent sync codex
+cicy-skills agent generate codex
 ```
 
-## HTTP
+## Codex Generation
 
-- `GET /healthz`
-- `GET /v1/config`
-- `GET /v1/nodes`
-- `GET /v1/skills`
-
-## Auth
-
-All `/v1/*` endpoints require a token when `auth_token` is set in config.
-
-Supported forms:
-
-- `Authorization: Bearer <token>`
-- `X-Cicy-Skills-Token: <token>`
-- `?token=<token>`
-
-`/healthz` stays open for liveness checks.
-
-## Nodes
-
-The runtime now supports a node registry in config:
-
-```json
-{
-  "default_node": "local",
-  "nodes": [
-    {
-      "name": "local",
-      "base_url": "http://127.0.0.1:7811",
-      "token": "cskills_xxx"
-    },
-    {
-      "name": "remote-a",
-      "base_url": "http://10.0.0.8:7811",
-      "token": "cskills_remote"
-    }
-  ]
-}
+```bash
+cicy-skills agent list codex
+cicy-skills agent help codex cf-tunnel
+cicy-skills agent help codex google
+cicy-skills agent install codex cf-tunnel
+cicy-skills agent install codex google
+cicy-skills agent update codex cf-tunnel
+cicy-skills agent update codex google
+cicy-skills agent remove codex cf-tunnel
+cicy-skills agent remove codex google
+cicy-skills agent sync codex
 ```
 
-CLI calls can target the default node or a specific node with `--node`.
+That currently generates:
+
+- [cf-tunnel/SKILL.md](/home/w3c_offical/.codex/skills/cf-tunnel/SKILL.md)
+- [help.md](/home/w3c_offical/.codex/skills/cf-tunnel/references/help.md)
+- [commands.md](/home/w3c_offical/.codex/skills/cf-tunnel/references/commands.md)
+- [google/SKILL.md](/home/w3c_offical/.codex/skills/google/SKILL.md)
+- [help.md](/home/w3c_offical/.codex/skills/google/references/help.md)
+- [commands.md](/home/w3c_offical/.codex/skills/google/references/commands.md)
+
+## Google
+
+The embedded Google provider lives in [`providers/google-node`](./providers/google-node) and exposes:
+
+- `google help`
+- `google gmail`
+- `google sheets`
+- `google drive`
+- `google calendar`
+
+These wrappers read credentials from `~/global.json`.
+
+## Cf Tunnel
+
+The local `cf-tunnel` wrapper is exposed through the migrated hosttools bundle and supports:
+
+- `cf-tunnel list`
+- `cf-tunnel add <port> [port2 ...]`
+- `cf-tunnel del <port> [port2 ...]`
+- `CF_ENV=dev cf-tunnel ...`
+
+This wrapper reads real Cloudflare config from `~/global.json`.
+
+## Archived Skills
+
+The historical skill docs and scripts are kept under [`legacy/skills`](./legacy/skills) for reference and future approval, but they are not automatically generated into agent skill directories.
+
+The agent install/remove/update interface already supports multiple names, but the allowlist is still explicit. Only approved and implemented skills will install.

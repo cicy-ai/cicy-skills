@@ -59,13 +59,12 @@ func Default() Config {
 	if err != nil {
 		home = "~"
 	}
-	privateDir := filepath.Join(home, "Private")
 	return Config{
 		Listen:           "127.0.0.1:7811",
 		AuthToken:        "",
-		SkillRoots:       []string{filepath.Join(privateDir, "skills")},
-		AgentProfilesDir: filepath.Join(privateDir, "cicy-skills", "agents"),
-		GeneratedDir:     filepath.Join(privateDir, "cicy-skills", "generated"),
+		SkillRoots:       []string{filepath.Join(home, "projects", "cicy-skills", "legacy", "skills")},
+		AgentProfilesDir: filepath.Join(home, ".codex", "skills"),
+		GeneratedDir:     "",
 		DefaultNode:      "local",
 		Nodes: []Node{
 			{
@@ -179,6 +178,23 @@ func WriteDefault(path string, overwrite bool) error {
 	cfg.AuthToken = token
 	if len(cfg.Nodes) > 0 && cfg.Nodes[0].Name == "local" {
 		cfg.Nodes[0].Token = token
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o644)
+}
+
+func Save(path string, cfg Config) error {
+	if path == "" {
+		path = DefaultPath()
+	}
+	path = ExpandPath(path)
+	cfg = Normalize(cfg)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
