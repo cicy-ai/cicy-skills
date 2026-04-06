@@ -230,7 +230,7 @@ func installAll(root string) error {
 
 func runAgent(args []string) {
 	if len(args) == 0 {
-		fatal(errors.New("usage: cicy-skills agent <list|help|generate|install|remove|update|sync> codex [args]"))
+		fatal(errors.New("usage: cicy-skills agent <list|help|generate|install|remove|update|sync> <codex|claude|openclaw> [args]"))
 	}
 	switch args[0] {
 	case "list":
@@ -239,7 +239,7 @@ func runAgent(args []string) {
 			fatal(err)
 		}
 		if len(extra) != 0 {
-			fatal(errors.New("usage: cicy-skills agent list codex [--target DIR]"))
+			fatal(errors.New("usage: cicy-skills agent list <codex|claude|openclaw> [--target DIR]"))
 		}
 		items, err := agentgen.List(profile, target)
 		if err != nil {
@@ -254,7 +254,7 @@ func runAgent(args []string) {
 			fatal(err)
 		}
 		if len(skills) != 1 {
-			fatal(errors.New("usage: cicy-skills agent help codex <skill> [--target DIR]"))
+			fatal(errors.New("usage: cicy-skills agent help <codex|claude|openclaw> <skill> [--target DIR]"))
 		}
 		help, err := agentgen.Help(profile, target, skills[0])
 		if err != nil {
@@ -272,10 +272,10 @@ func runAgent(args []string) {
 			fatal(err)
 		}
 		if target != "" && len(extra) != 0 {
-			fatal(errors.New("usage: cicy-skills agent generate codex [target]"))
+			fatal(errors.New("usage: cicy-skills agent generate <codex|claude|openclaw> [target]"))
 		}
 		if len(extra) > 1 {
-			fatal(errors.New("usage: cicy-skills agent generate codex [target]"))
+			fatal(errors.New("usage: cicy-skills agent generate <codex|claude|openclaw> [target]"))
 		}
 		if target == "" && len(extra) == 1 {
 			target = extra[0]
@@ -283,8 +283,8 @@ func runAgent(args []string) {
 		if err := agentgen.Generate(root, profile, target, bundle.RepoBinDir(root)); err != nil {
 			fatal(err)
 		}
-		if target == "" && strings.EqualFold(strings.TrimSpace(profile), "codex") {
-			target = agentgen.CodexSkillsDir()
+		if target == "" {
+			target = defaultAgentTarget(profile)
 		}
 		fmt.Println(target)
 	case "install":
@@ -297,7 +297,7 @@ func runAgent(args []string) {
 			fatal(err)
 		}
 		if len(skills) == 0 {
-			fatal(errors.New("usage: cicy-skills agent install codex <skill...|all> [--target DIR]"))
+			fatal(errors.New("usage: cicy-skills agent install <codex|claude|openclaw> <skill...|all> [--target DIR]"))
 		}
 		installed, err := agentgen.Install(root, profile, target, bundle.RepoBinDir(root), skills)
 		if err != nil {
@@ -310,7 +310,7 @@ func runAgent(args []string) {
 			fatal(err)
 		}
 		if len(skills) == 0 {
-			fatal(errors.New("usage: cicy-skills agent remove codex <skill...|all> [--target DIR]"))
+			fatal(errors.New("usage: cicy-skills agent remove <codex|claude|openclaw> <skill...|all> [--target DIR]"))
 		}
 		removed, err := agentgen.Remove(profile, target, skills)
 		if err != nil {
@@ -327,7 +327,7 @@ func runAgent(args []string) {
 			fatal(err)
 		}
 		if len(skills) == 0 {
-			fatal(errors.New("usage: cicy-skills agent update codex <skill...|all> [--target DIR]"))
+			fatal(errors.New("usage: cicy-skills agent update <codex|claude|openclaw> <skill...|all> [--target DIR]"))
 		}
 		updated, err := agentgen.Update(root, profile, target, bundle.RepoBinDir(root), skills)
 		if err != nil {
@@ -344,7 +344,7 @@ func runAgent(args []string) {
 			fatal(err)
 		}
 		if len(extra) != 0 {
-			fatal(errors.New("usage: cicy-skills agent sync codex [--target DIR]"))
+			fatal(errors.New("usage: cicy-skills agent sync <codex|claude|openclaw> [--target DIR]"))
 		}
 		synced, err := agentgen.Sync(root, profile, target, bundle.RepoBinDir(root))
 		if err != nil {
@@ -542,6 +542,10 @@ func defaultAgentTarget(profile string) string {
 	switch strings.ToLower(strings.TrimSpace(profile)) {
 	case "codex":
 		return agentgen.CodexSkillsDir()
+	case "claude":
+		return agentgen.ClaudeSkillsDir()
+	case "openclaw":
+		return agentgen.OpenClawSkillsDir()
 	default:
 		return ""
 	}
@@ -662,26 +666,40 @@ Refresh provider or local command links.
 For a full rebuild plus reinstall, use make install-local-cli.`, nil
 	case "agent":
 		return `Usage:
-  cicy-skills agent list codex [--target DIR]
-  cicy-skills agent help codex <skill> [--target DIR]
-  cicy-skills agent generate codex [target]
-  cicy-skills agent install codex <skill...|all> [--target DIR]
-  cicy-skills agent remove codex <skill...|all> [--target DIR]
-  cicy-skills agent update codex <skill...|all> [--target DIR]
-  cicy-skills agent sync codex [--target DIR]
+  cicy-skills agent list <codex|claude|openclaw> [--target DIR]
+  cicy-skills agent help <codex|claude|openclaw> <skill> [--target DIR]
+  cicy-skills agent generate <codex|claude|openclaw> [target]
+  cicy-skills agent install <codex|claude|openclaw> <skill...|all> [--target DIR]
+  cicy-skills agent remove <codex|claude|openclaw> <skill...|all> [--target DIR]
+  cicy-skills agent update <codex|claude|openclaw> <skill...|all> [--target DIR]
+  cicy-skills agent sync <codex|claude|openclaw> [--target DIR]
 
-Generate approved Codex skills into ~/.codex/skills.
+Generate approved skills into each profile's default skills directory.
+Default targets:
+  codex      -> ~/.codex/skills
+  claude     -> ~/.claude/skills
+  openclaw   -> ~/.openclaw/skills
+
 Currently approved:
   cf-tunnel
+  globalApiToken
   google
 
 Examples:
   cicy-skills agent help codex google
+  cicy-skills agent help claude globalApiToken
+  cicy-skills agent help openclaw cf-tunnel
   cicy-skills agent generate codex
+  cicy-skills agent generate claude
+  cicy-skills agent generate openclaw
   cicy-skills agent install codex cf-tunnel
-  cicy-skills agent install codex google
-  cicy-skills agent remove codex google
-  cicy-skills agent sync codex`, nil
+  cicy-skills agent install claude globalApiToken
+  cicy-skills agent install openclaw google
+  cicy-skills agent remove claude globalApiToken
+  cicy-skills agent remove openclaw google
+  cicy-skills agent sync codex
+  cicy-skills agent sync claude
+  cicy-skills agent sync openclaw`, nil
 	case "http-list":
 		return `Usage:
   cicy-skills http-list [--node NAME]

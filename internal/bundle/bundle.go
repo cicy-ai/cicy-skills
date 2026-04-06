@@ -36,6 +36,7 @@ var (
 		"eng",
 		"gemini-ask",
 		"gemini-vision",
+		"globalApiToken",
 		"gpt",
 		"gpt-chat",
 		"ipc-ping",

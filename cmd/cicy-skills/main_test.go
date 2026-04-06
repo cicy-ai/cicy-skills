@@ -80,16 +80,18 @@ func TestHelpTextAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("helpText(agent) error = %v", err)
 	}
-	if !strings.Contains(got, "cicy-skills agent generate codex [target]") {
+	if !strings.Contains(got, "cicy-skills agent generate <codex|claude|openclaw> [target]") {
 		t.Fatalf("agent help missing usage line: %q", got)
 	}
 	for _, want := range []string{
-		"cicy-skills agent list codex [--target DIR]",
-		"cicy-skills agent help codex <skill> [--target DIR]",
-		"cicy-skills agent install codex <skill...|all> [--target DIR]",
-		"cicy-skills agent remove codex <skill...|all> [--target DIR]",
-		"cicy-skills agent update codex <skill...|all> [--target DIR]",
-		"cicy-skills agent sync codex [--target DIR]",
+		"cicy-skills agent list <codex|claude|openclaw> [--target DIR]",
+		"cicy-skills agent help <codex|claude|openclaw> <skill> [--target DIR]",
+		"cicy-skills agent install <codex|claude|openclaw> <skill...|all> [--target DIR]",
+		"cicy-skills agent remove <codex|claude|openclaw> <skill...|all> [--target DIR]",
+		"cicy-skills agent update <codex|claude|openclaw> <skill...|all> [--target DIR]",
+		"cicy-skills agent sync <codex|claude|openclaw> [--target DIR]",
+		"claude     -> ~/.claude/skills",
+		"openclaw   -> ~/.openclaw/skills",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("agent help missing %q in %q", want, got)
@@ -100,5 +102,8 @@ func TestHelpTextAgent(t *testing.T) {
 	}
 	if !strings.Contains(got, "cf-tunnel") {
 		t.Fatalf("agent help missing cf-tunnel approved skill: %q", got)
+	}
+	if !strings.Contains(got, "globalApiToken") {
+		t.Fatalf("agent help missing globalApiToken approved skill: %q", got)
 	}
 }

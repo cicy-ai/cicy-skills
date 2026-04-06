@@ -7,7 +7,10 @@
 - config only: `~/Private/cicy-skills/config.json`
 - repo-owned commands: `~/projects/cicy-skills/bin`
 - global entrypoints: `~/.local/bin`
-- Codex skills: `~/.codex/skills`
+- agent skill targets:
+  - Codex: `~/.codex/skills`
+  - Claude: `~/.claude/skills`
+  - OpenClaw: `~/.openclaw/skills`
 
 `~/Private/cicy-skills` should only contain the config file. It does not store generated skills or command binaries.
 
@@ -15,9 +18,8 @@
 
 Agent skill generation is allowlist-based.
 
-- currently approved: `cf-tunnel`, `google`
-- current supported target agent: `codex`
-- generated target directory for Codex: `~/.codex/skills`
+- currently approved: `cf-tunnel`, `globalApiToken`, `google`
+- current supported target agents: `codex`, `claude`, `openclaw`
 
 Everything else is archived in-repo under [`legacy/skills`](./legacy/skills) but is not part of the approved generation list until you explicitly confirm it.
 
@@ -55,41 +57,68 @@ cicy-skills install google-node
 cicy-skills remove google-node
 cicy-skills update google-node
 cicy-skills agent list codex
+cicy-skills agent list claude
+cicy-skills agent list openclaw
 cicy-skills agent help codex cf-tunnel
-cicy-skills agent help codex google
+cicy-skills agent help claude globalApiToken
+cicy-skills agent help openclaw google
 cicy-skills agent install codex cf-tunnel
-cicy-skills agent install codex google
+cicy-skills agent install claude globalApiToken
+cicy-skills agent install openclaw google
 cicy-skills agent update codex cf-tunnel
-cicy-skills agent update codex google
+cicy-skills agent update claude globalApiToken
+cicy-skills agent update openclaw google
 cicy-skills agent remove codex cf-tunnel
-cicy-skills agent remove codex google
+cicy-skills agent remove claude globalApiToken
+cicy-skills agent remove openclaw google
 cicy-skills agent sync codex
+cicy-skills agent sync claude
+cicy-skills agent sync openclaw
 cicy-skills agent generate codex
+cicy-skills agent generate claude
+cicy-skills agent generate openclaw
 ```
 
-## Codex Generation
+## Agent Skill Generation
 
 ```bash
 cicy-skills agent list codex
+cicy-skills agent list claude
+cicy-skills agent list openclaw
 cicy-skills agent help codex cf-tunnel
-cicy-skills agent help codex google
+cicy-skills agent help claude globalApiToken
+cicy-skills agent help openclaw google
 cicy-skills agent install codex cf-tunnel
-cicy-skills agent install codex google
+cicy-skills agent install claude globalApiToken
+cicy-skills agent install openclaw google
 cicy-skills agent update codex cf-tunnel
-cicy-skills agent update codex google
+cicy-skills agent update claude globalApiToken
+cicy-skills agent update openclaw google
 cicy-skills agent remove codex cf-tunnel
-cicy-skills agent remove codex google
+cicy-skills agent remove claude globalApiToken
+cicy-skills agent remove openclaw google
 cicy-skills agent sync codex
+cicy-skills agent sync claude
+cicy-skills agent sync openclaw
 ```
 
-That currently generates:
+That currently generates the same approved skill set into each profile's default target:
 
 - [cf-tunnel/SKILL.md](/home/w3c_offical/.codex/skills/cf-tunnel/SKILL.md)
 - [help.md](/home/w3c_offical/.codex/skills/cf-tunnel/references/help.md)
 - [commands.md](/home/w3c_offical/.codex/skills/cf-tunnel/references/commands.md)
+- [globalApiToken/SKILL.md](/home/w3c_offical/.codex/skills/globalApiToken/SKILL.md)
+- [help.md](/home/w3c_offical/.codex/skills/globalApiToken/references/help.md)
+- [commands.md](/home/w3c_offical/.codex/skills/globalApiToken/references/commands.md)
 - [google/SKILL.md](/home/w3c_offical/.codex/skills/google/SKILL.md)
 - [help.md](/home/w3c_offical/.codex/skills/google/references/help.md)
 - [commands.md](/home/w3c_offical/.codex/skills/google/references/commands.md)
+
+And by default target:
+
+- Codex: `~/.codex/skills`
+- Claude: `~/.claude/skills`
+- OpenClaw: `~/.openclaw/skills`
 
 ## Google
 
@@ -113,6 +142,15 @@ The local `cf-tunnel` wrapper is exposed through the migrated hosttools bundle a
 - `CF_ENV=dev cf-tunnel ...`
 
 This wrapper reads real Cloudflare config from `~/global.json`.
+
+## Global API Token
+
+The local `globalApiToken` wrapper is exposed through the migrated hosttools bundle and supports:
+
+- `globalApiToken show`
+- `globalApiToken refresh`
+
+This wrapper reads and updates `~/global.json` field `api_token`.
 
 ## Archived Skills
 

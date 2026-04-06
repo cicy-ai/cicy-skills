@@ -89,6 +89,40 @@ func TestCodexInstallCFTunnel(t *testing.T) {
 	}
 }
 
+func TestCodexInstallGlobalAPIToken(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+
+	installed, err := Install("", "codex", targetRoot, commandBinDir, []string{"globalApiToken"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(installed) != 1 || installed[0] != "globalApiToken" {
+		t.Fatalf("Install() installed = %#v", installed)
+	}
+
+	skillPath := filepath.Join(targetRoot, "globalApiToken", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
+	}
+	text := string(data)
+	if !strings.Contains(text, commandBinDir) {
+		t.Fatalf("SKILL.md missing command bin dir %q: %s", commandBinDir, text)
+	}
+	if !strings.Contains(text, "`globalApiToken`") {
+		t.Fatalf("SKILL.md missing command reference: %s", text)
+	}
+	helpPath := filepath.Join(targetRoot, "globalApiToken", "references", "help.md")
+	helpData, err := os.ReadFile(helpPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", helpPath, err)
+	}
+	if !strings.Contains(string(helpData), "globalApiToken refresh") {
+		t.Fatalf("help.md missing refresh example: %s", string(helpData))
+	}
+}
+
 func TestCodexListShowsExternalDirs(t *testing.T) {
 	targetRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(targetRoot, "manual-skill"), 0o755); err != nil {
@@ -105,10 +139,14 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 
 	foundGoogle := false
 	foundCFTunnel := false
+	foundGlobalAPIToken := false
 	foundExternal := false
 	for _, item := range listed {
 		if item.Name == "cf-tunnel" && item.Status == "missing" {
 			foundCFTunnel = true
+		}
+		if item.Name == "globalApiToken" && item.Status == "missing" {
+			foundGlobalAPIToken = true
 		}
 		if item.Name == "google" && item.Status == "missing" {
 			foundGoogle = true
@@ -122,6 +160,9 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 	}
 	if !foundCFTunnel {
 		t.Fatalf("List() missing cf-tunnel status: %#v", listed)
+	}
+	if !foundGlobalAPIToken {
+		t.Fatalf("List() missing globalApiToken status: %#v", listed)
 	}
 	if !foundExternal {
 		t.Fatalf("List() missing external status: %#v", listed)

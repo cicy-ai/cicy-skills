@@ -19,16 +19,41 @@ type SkillHelp struct {
 	Text string
 }
 
-func CodexSkillsDir() string {
+func profileSkillsDir(dirname string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("~", ".codex", "skills")
+		return filepath.Join("~", dirname, "skills")
 	}
-	return filepath.Join(home, ".codex", "skills")
+	return filepath.Join(home, dirname, "skills")
+}
+
+func CodexSkillsDir() string {
+	return profileSkillsDir(".codex")
+}
+
+func ClaudeSkillsDir() string {
+	return profileSkillsDir(".claude")
+}
+
+func OpenClawSkillsDir() string {
+	return profileSkillsDir(".openclaw")
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"cf-tunnel", "google"}
+	return []string{"cf-tunnel", "globalApiToken", "google"}
+}
+
+func canonicalCodexSkillName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "cf-tunnel":
+		return "cf-tunnel"
+	case "globalapitoken", "global-api-token":
+		return "globalApiToken"
+	case "google":
+		return "google"
+	default:
+		return ""
+	}
 }
 
 func Generate(root, profileName, targetRoot, commandBinDir string) error {
@@ -38,28 +63,28 @@ func Generate(root, profileName, targetRoot, commandBinDir string) error {
 
 func List(profileName, targetRoot string) ([]SkillStatus, error) {
 	switch normalizeProfile(profileName) {
-	case "codex":
+	case "codex", "claude", "openclaw":
 		return listCodex(targetRoot)
 	default:
-		return nil, fmt.Errorf("only codex skill generation is enabled right now")
+		return nil, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
 }
 
 func Help(profileName, targetRoot, skillName string) (SkillHelp, error) {
 	switch normalizeProfile(profileName) {
-	case "codex":
+	case "codex", "claude", "openclaw":
 		return helpCodex(targetRoot, skillName)
 	default:
-		return SkillHelp{}, fmt.Errorf("only codex skill generation is enabled right now")
+		return SkillHelp{}, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
 }
 
 func Install(root, profileName, targetRoot, commandBinDir string, skillNames []string) ([]string, error) {
 	switch normalizeProfile(profileName) {
-	case "codex":
+	case "codex", "claude", "openclaw":
 		return installCodex(targetRoot, commandBinDir, skillNames)
 	default:
-		return nil, fmt.Errorf("only codex skill generation is enabled right now")
+		return nil, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
 }
 
@@ -69,19 +94,19 @@ func Update(root, profileName, targetRoot, commandBinDir string, skillNames []st
 
 func Remove(profileName, targetRoot string, skillNames []string) ([]string, error) {
 	switch normalizeProfile(profileName) {
-	case "codex":
+	case "codex", "claude", "openclaw":
 		return removeCodex(targetRoot, skillNames)
 	default:
-		return nil, fmt.Errorf("only codex skill generation is enabled right now")
+		return nil, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
 }
 
 func Sync(root, profileName, targetRoot, commandBinDir string) ([]string, error) {
 	switch normalizeProfile(profileName) {
-	case "codex":
+	case "codex", "claude", "openclaw":
 		return installCodex(targetRoot, commandBinDir, ApprovedCodexSkills())
 	default:
-		return nil, fmt.Errorf("only codex skill generation is enabled right now")
+		return nil, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
 }
 
@@ -175,7 +200,7 @@ func resolveCodexSkills(skillNames []string) ([]string, error) {
 	approved := ApprovedCodexSkills()
 	approvedSet := make(map[string]struct{}, len(approved))
 	for _, skill := range approved {
-		approvedSet[skill] = struct{}{}
+		approvedSet[strings.ToLower(skill)] = struct{}{}
 	}
 
 	normalizedNames := make([]string, 0, len(skillNames))
@@ -196,14 +221,18 @@ func resolveCodexSkills(skillNames []string) ([]string, error) {
 			}
 			return append([]string(nil), approved...), nil
 		}
-		if _, ok := approvedSet[normalized]; !ok {
+		canonical := canonicalCodexSkillName(normalized)
+		if canonical == "" {
 			return nil, fmt.Errorf("skill %q is not approved for codex; approved: %s", normalized, strings.Join(approved, ", "))
 		}
-		if _, ok := seen[normalized]; ok {
+		if _, ok := approvedSet[strings.ToLower(canonical)]; !ok {
+			return nil, fmt.Errorf("skill %q is not approved for codex; approved: %s", normalized, strings.Join(approved, ", "))
+		}
+		if _, ok := seen[canonical]; ok {
 			continue
 		}
-		seen[normalized] = struct{}{}
-		resolved = append(resolved, normalized)
+		seen[canonical] = struct{}{}
+		resolved = append(resolved, canonical)
 	}
 	if len(resolved) == 0 {
 		return nil, fmt.Errorf("at least one approved skill is required")
@@ -216,6 +245,8 @@ func generateCodexSkill(targetRoot, commandBinDir, skill string) error {
 	switch skill {
 	case "cf-tunnel":
 		return generateCodexCFTunnel(targetRoot, commandBinDir)
+	case "globalApiToken":
+		return generateCodexGlobalAPIToken(targetRoot, commandBinDir)
 	case "google":
 		return generateCodexGoogle(targetRoot, commandBinDir)
 	default:
@@ -251,6 +282,21 @@ func generateCodexGoogle(targetRoot, commandBinDir string) error {
 		return err
 	}
 	return writeText(filepath.Join(refsDir, "commands.md"), renderGoogleCommands())
+}
+
+func generateCodexGlobalAPIToken(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "globalApiToken")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderGlobalAPITokenSkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderGlobalAPITokenHelp(commandBinDir)); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), renderGlobalAPITokenCommands())
 }
 
 func helpCodex(targetRoot, skillName string) (SkillHelp, error) {
@@ -328,6 +374,42 @@ Read [commands.md](./references/commands.md) for the full command shapes.
 `, commandBinDir, commandBinDir)
 }
 
+func renderGlobalAPITokenSkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: globalApiToken
+description: Use the local globalApiToken wrapper from %s to show or refresh ~/global.json api_token on this host.
+---
+
+# Global API Token
+
+This skill covers the local `+"`globalApiToken`"+` wrapper installed from `+"`"+`%s`+"`"+`.
+
+Use this command directly from `+"`PATH`"+`. It reads and updates the real `+"`~/global.json`"+` file on this host.
+
+## Scope
+
+Use this skill when the task involves:
+
+- showing the current `+"`api_token`"+` from `+"`~/global.json`"+`
+- rotating or refreshing `+"`~/global.json api_token`"+`
+
+## Rules
+
+1. Prefer the local `+"`globalApiToken`"+` command first.
+2. Operate on the real `+"`~/global.json`"+`; do not fabricate token values.
+3. Only refresh the token when the user explicitly asks to rotate or refresh it.
+4. Report the resulting token value back to the user when requested.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Commands
+
+Read [commands.md](./references/commands.md) for the full command shapes.
+`, commandBinDir, commandBinDir)
+}
+
 func renderGoogleHelp(commandBinDir string) string {
 	return fmt.Sprintf(`# Google Help
 
@@ -350,6 +432,31 @@ func renderGoogleHelp(commandBinDir string) string {
 - use the real credentials in `+"`~/global.json`"+`
 - do not mock Google responses
 - report exact command output or concrete results back to the user
+
+## More
+
+- command map: [commands.md](./commands.md)
+`, commandBinDir)
+}
+
+func renderGlobalAPITokenHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# Global API Token Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`globalApiToken`"+`
+
+## Quick Start
+
+- show current token: `+"`globalApiToken show`"+`
+- refresh token: `+"`globalApiToken refresh`"+`
+
+## Rules
+
+- read the real token from `+"`~/global.json`"+`
+- refresh updates `+"`~/global.json api_token`"+` in place
+- do not rotate the token unless the user explicitly asks
 
 ## More
 
@@ -480,5 +587,21 @@ func renderCFTunnelCommands() string {
 - hostnames follow the pattern ` + "`g-<port>.<domain>`" + `
 - the command reads Cloudflare config from ` + "`~/global.json`" + `
 - it manages tunnel routes and DNS records, not the ` + "`cloudflared`" + ` process
+`
+}
+
+func renderGlobalAPITokenCommands() string {
+	return `# Global API Token Commands
+
+## Main
+
+- ` + "`globalApiToken show`" + `
+- ` + "`globalApiToken refresh`" + `
+
+## Notes
+
+- both commands operate on ` + "`~/global.json`" + `
+- ` + "`show`" + ` prints the current ` + "`api_token`" + `
+- ` + "`refresh`" + ` generates a new token and writes it back to ` + "`~/global.json`" + `
 `
 }

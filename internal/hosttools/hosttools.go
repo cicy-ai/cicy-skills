@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,6 +86,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runCFTunnel(args)
 	case "cping":
 		err = env.runCPing(args)
+	case "globalApiToken", "global-api-token", "global-api-token.py":
+		err = env.runGlobalAPIToken(args)
 	default:
 		fmt.Fprintf(stderr, "unsupported host tool: %s\n", cmd)
 		printAvailable(stderr)
@@ -124,7 +127,7 @@ func newEnv(stdout, stderr io.Writer) (*Env, error) {
 }
 
 func loadGlobalJSON() (map[string]any, error) {
-	path := filepath.Join(userHomeDir(), "global.json")
+	path := globalJSONPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -134,6 +137,10 @@ func loadGlobalJSON() (map[string]any, error) {
 		return nil, err
 	}
 	return raw, nil
+}
+
+func globalJSONPath() string {
+	return filepath.Join(userHomeDir(), "global.json")
 }
 
 func userHomeDir() string {
@@ -154,7 +161,7 @@ func anyString(v any) string {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-page-ping, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-page-ping, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
@@ -238,6 +245,14 @@ func (e *Env) waitForMessage(conn *websocket.Conn, timeout time.Duration, match 
 
 func randomID(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano()/1e6)
+}
+
+func newGlobalAPIToken() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("cicy_%x", buf), nil
 }
 
 func asMap(v any) map[string]any {
@@ -381,6 +396,47 @@ func (e *Env) runTG(args []string) error {
 		return printTelegramResult(e.Stdout, data)
 	default:
 		return errors.New("Usage: tg <send|photo> [args]")
+	}
+}
+
+func (e *Env) runGlobalAPIToken(args []string) error {
+	cmd := "show"
+	if len(args) > 0 {
+		cmd = strings.TrimSpace(args[0])
+	}
+
+	switch cmd {
+	case "show":
+		token := strings.TrimSpace(anyString(e.Global["api_token"]))
+		if token == "" {
+			return fmt.Errorf("api_token is empty in %s", globalJSONPath())
+		}
+		_, _ = fmt.Fprintln(e.Stdout, token)
+		return nil
+	case "refresh":
+		global, err := loadGlobalJSON()
+		if err != nil {
+			return err
+		}
+		token, err := newGlobalAPIToken()
+		if err != nil {
+			return err
+		}
+		global["api_token"] = token
+		data, err := json.MarshalIndent(global, "", "  ")
+		if err != nil {
+			return err
+		}
+		data = append(data, '\n')
+		if err := os.WriteFile(globalJSONPath(), data, 0o644); err != nil {
+			return err
+		}
+		e.Global = global
+		e.Token = token
+		_, _ = fmt.Fprintln(e.Stdout, token)
+		return nil
+	default:
+		return errors.New("Usage: globalApiToken <show|refresh>")
 	}
 }
 
