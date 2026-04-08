@@ -28,6 +28,29 @@ func TestRunCFTunnelHelpDoesNotRequireConfig(t *testing.T) {
 	}
 }
 
+func TestRunTMHelpDoesNotRequireConfig(t *testing.T) {
+	var stdout bytes.Buffer
+	env := &Env{
+		Stdout: &stdout,
+		Stderr: &bytes.Buffer{},
+	}
+
+	if err := env.runTM([]string{"help"}); err != nil {
+		t.Fatalf("runTM(help) error = %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Usage: tm [--node NAME] <command> [args]") {
+		t.Fatalf("unexpected stdout: %q", out)
+	}
+	if !strings.Contains(out, "TM_API_BASE or API_BASE") {
+		t.Fatalf("missing config priority: %q", out)
+	}
+	if !strings.Contains(out, "~/Private/tm.json") {
+		t.Fatalf("missing tm.json path: %q", out)
+	}
+}
+
 func TestRunGlobalAPITokenShow(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -82,5 +105,144 @@ func TestRunGlobalAPITokenRefresh(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "\"other\": 1") {
 		t.Fatalf("global.json lost unrelated fields: %s", string(data))
+	}
+}
+
+func TestResolveTMConfigUsesDefaultNodeFromGlobal(t *testing.T) {
+	env := &Env{
+		Global: map[string]any{
+			"api_token": "global_token",
+		},
+		TM: map[string]any{
+			"default": "prod",
+			"nodes": map[string]any{
+				"prod": map[string]any{
+					"api":       "http://10.0.0.12:8008",
+					"api_token": "tm_prod_token",
+				},
+			},
+		},
+	}
+
+	cfg, err := env.resolveTMConfig("")
+	if err != nil {
+		t.Fatalf("resolveTMConfig() error = %v", err)
+	}
+	if cfg.Node != "prod" {
+		t.Fatalf("cfg.Node = %q", cfg.Node)
+	}
+	if cfg.API != "http://10.0.0.12:8008" {
+		t.Fatalf("cfg.API = %q", cfg.API)
+	}
+	if cfg.Token != "tm_prod_token" {
+		t.Fatalf("cfg.Token = %q", cfg.Token)
+	}
+}
+
+func TestResolveTMConfigUsesTMNodeEnv(t *testing.T) {
+	t.Setenv("TM_NODE", "dev")
+	env := &Env{
+		Global: map[string]any{
+			"api_token": "global_token",
+		},
+		TM: map[string]any{
+			"nodes": map[string]any{
+				"dev": map[string]any{
+					"api":       "http://10.0.0.20:8008",
+					"api_token": "dev_token",
+				},
+			},
+		},
+	}
+
+	cfg, err := env.resolveTMConfig("")
+	if err != nil {
+		t.Fatalf("resolveTMConfig() error = %v", err)
+	}
+	if cfg.Node != "dev" {
+		t.Fatalf("cfg.Node = %q", cfg.Node)
+	}
+	if cfg.API != "http://10.0.0.20:8008" {
+		t.Fatalf("cfg.API = %q", cfg.API)
+	}
+	if cfg.Token != "dev_token" {
+		t.Fatalf("cfg.Token = %q", cfg.Token)
+	}
+}
+
+func TestResolveTMConfigUsesEnvOverride(t *testing.T) {
+	t.Setenv("TM_API_BASE", "http://127.0.0.1:9001")
+	t.Setenv("TM_TOKEN", "tm_env_token")
+	env := &Env{
+		Global: map[string]any{
+			"api_token": "global_token",
+		},
+		TM: map[string]any{
+			"default": "prod",
+			"nodes": map[string]any{
+				"prod": map[string]any{
+					"api":       "http://10.0.0.12:8008",
+					"api_token": "prod_token",
+				},
+			},
+		},
+	}
+
+	cfg, err := env.resolveTMConfig("")
+	if err != nil {
+		t.Fatalf("resolveTMConfig() error = %v", err)
+	}
+	if cfg.API != "http://127.0.0.1:9001" {
+		t.Fatalf("cfg.API = %q", cfg.API)
+	}
+	if cfg.Token != "tm_env_token" {
+		t.Fatalf("cfg.Token = %q", cfg.Token)
+	}
+}
+
+func TestResolveTMConfigUsesInMemoryDefaultWhenTMJSONMissing(t *testing.T) {
+	env := &Env{
+		Global: map[string]any{
+			"api_token": "cicy_root_token",
+		},
+		TM: map[string]any{},
+	}
+
+	cfg, err := env.resolveTMConfig("")
+	if err != nil {
+		t.Fatalf("resolveTMConfig() error = %v", err)
+	}
+	if cfg.Node != "default" {
+		t.Fatalf("cfg.Node = %q", cfg.Node)
+	}
+	if cfg.API != "http://127.0.0.1:8008" {
+		t.Fatalf("cfg.API = %q", cfg.API)
+	}
+	if cfg.Token != "cicy_root_token" {
+		t.Fatalf("cfg.Token = %q", cfg.Token)
+	}
+}
+
+func TestResolveTMConfigRequiresNodeSpecificToken(t *testing.T) {
+	env := &Env{
+		Global: map[string]any{
+			"api_token": "global_token",
+		},
+		TM: map[string]any{
+			"default": "prod",
+			"nodes": map[string]any{
+				"prod": map[string]any{
+					"api": "http://10.0.0.12:8008",
+				},
+			},
+		},
+	}
+
+	_, err := env.resolveTMConfig("")
+	if err == nil {
+		t.Fatal("resolveTMConfig() expected error for missing node token")
+	}
+	if !strings.Contains(err.Error(), "missing api_token") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

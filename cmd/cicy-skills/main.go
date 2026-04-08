@@ -230,7 +230,7 @@ func installAll(root string) error {
 
 func runAgent(args []string) {
 	if len(args) == 0 {
-		fatal(errors.New("usage: cicy-skills agent <list|help|generate|install|remove|update|sync> <codex|claude|openclaw> [args]"))
+		fatal(errors.New("usage: cicy-skills agent <list|help|tools|generate|install|remove|update|sync> <codex|claude|openclaw> [args]"))
 	}
 	switch args[0] {
 	case "list":
@@ -262,6 +262,20 @@ func runAgent(args []string) {
 		}
 		fmt.Printf("%s\n\n", help.Path)
 		fmt.Print(help.Text)
+	case "tools":
+		profile, target, skills, err := parseAgentProfileArgs(args[1:])
+		if err != nil {
+			fatal(err)
+		}
+		if len(skills) != 1 {
+			fatal(errors.New("usage: cicy-skills agent tools <codex|claude|openclaw> <skill> [--target DIR]"))
+		}
+		tools, err := agentgen.Tools(profile, target, skills[0])
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("%s\n\n", tools.Path)
+		fmt.Print(tools.Text)
 	case "generate":
 		root, err := projectRoot()
 		if err != nil {
@@ -668,6 +682,7 @@ For a full rebuild plus reinstall, use make install-local-cli.`, nil
 		return `Usage:
   cicy-skills agent list <codex|claude|openclaw> [--target DIR]
   cicy-skills agent help <codex|claude|openclaw> <skill> [--target DIR]
+  cicy-skills agent tools <codex|claude|openclaw> <skill> [--target DIR]
   cicy-skills agent generate <codex|claude|openclaw> [target]
   cicy-skills agent install <codex|claude|openclaw> <skill...|all> [--target DIR]
   cicy-skills agent remove <codex|claude|openclaw> <skill...|all> [--target DIR]
@@ -681,20 +696,28 @@ Default targets:
   openclaw   -> ~/.openclaw/skills
 
 Currently approved:
+  agent-webpage
   cf-tunnel
   globalApiToken
   google
+  tm
 
 Examples:
+  cicy-skills agent help codex agent-webpage
+  cicy-skills agent tools codex agent-webpage
   cicy-skills agent help codex google
+  cicy-skills agent help codex tm
   cicy-skills agent help claude globalApiToken
   cicy-skills agent help openclaw cf-tunnel
   cicy-skills agent generate codex
   cicy-skills agent generate claude
   cicy-skills agent generate openclaw
   cicy-skills agent install codex cf-tunnel
+  cicy-skills agent install codex tm
   cicy-skills agent install claude globalApiToken
+  cicy-skills agent install claude tm
   cicy-skills agent install openclaw google
+  cicy-skills agent install openclaw tm
   cicy-skills agent remove claude globalApiToken
   cicy-skills agent remove openclaw google
   cicy-skills agent sync codex

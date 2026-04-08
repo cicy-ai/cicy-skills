@@ -40,17 +40,21 @@ func OpenClawSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"cf-tunnel", "globalApiToken", "google"}
+	return []string{"agent-webpage", "cf-tunnel", "globalApiToken", "google", "tm"}
 }
 
 func canonicalCodexSkillName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "agent-webpage", "agentwebpage", "agent_webpage", "webpage", "agent-page-ping":
+		return "agent-webpage"
 	case "cf-tunnel":
 		return "cf-tunnel"
 	case "globalapitoken", "global-api-token":
 		return "globalApiToken"
 	case "google":
 		return "google"
+	case "tm":
+		return "tm"
 	default:
 		return ""
 	}
@@ -74,6 +78,15 @@ func Help(profileName, targetRoot, skillName string) (SkillHelp, error) {
 	switch normalizeProfile(profileName) {
 	case "codex", "claude", "openclaw":
 		return helpCodex(targetRoot, skillName)
+	default:
+		return SkillHelp{}, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
+	}
+}
+
+func Tools(profileName, targetRoot, skillName string) (SkillHelp, error) {
+	switch normalizeProfile(profileName) {
+	case "codex", "claude", "openclaw":
+		return toolsCodex(targetRoot, skillName)
 	default:
 		return SkillHelp{}, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
@@ -243,12 +256,16 @@ func resolveCodexSkills(skillNames []string) ([]string, error) {
 
 func generateCodexSkill(targetRoot, commandBinDir, skill string) error {
 	switch skill {
+	case "agent-webpage":
+		return generateCodexAgentWebpage(targetRoot, commandBinDir)
 	case "cf-tunnel":
 		return generateCodexCFTunnel(targetRoot, commandBinDir)
 	case "globalApiToken":
 		return generateCodexGlobalAPIToken(targetRoot, commandBinDir)
 	case "google":
 		return generateCodexGoogle(targetRoot, commandBinDir)
+	case "tm":
+		return generateCodexTM(targetRoot, commandBinDir)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
@@ -266,7 +283,11 @@ func generateCodexCFTunnel(targetRoot, commandBinDir string) error {
 	if err := writeText(filepath.Join(refsDir, "help.md"), renderCFTunnelHelp(commandBinDir)); err != nil {
 		return err
 	}
-	return writeText(filepath.Join(refsDir, "commands.md"), renderCFTunnelCommands())
+	tools := renderCFTunnelCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
 }
 
 func generateCodexGoogle(targetRoot, commandBinDir string) error {
@@ -281,7 +302,11 @@ func generateCodexGoogle(targetRoot, commandBinDir string) error {
 	if err := writeText(filepath.Join(refsDir, "help.md"), renderGoogleHelp(commandBinDir)); err != nil {
 		return err
 	}
-	return writeText(filepath.Join(refsDir, "commands.md"), renderGoogleCommands())
+	tools := renderGoogleCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
 }
 
 func generateCodexGlobalAPIToken(targetRoot, commandBinDir string) error {
@@ -296,29 +321,83 @@ func generateCodexGlobalAPIToken(targetRoot, commandBinDir string) error {
 	if err := writeText(filepath.Join(refsDir, "help.md"), renderGlobalAPITokenHelp(commandBinDir)); err != nil {
 		return err
 	}
-	return writeText(filepath.Join(refsDir, "commands.md"), renderGlobalAPITokenCommands())
+	tools := renderGlobalAPITokenCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexAgentWebpage(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "agent-webpage")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderAgentWebpageSkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderAgentWebpageHelp(commandBinDir)); err != nil {
+		return err
+	}
+	tools := renderAgentWebpageTools()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexTM(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "tm")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderTMSkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderTMHelp(commandBinDir)); err != nil {
+		return err
+	}
+	tools := renderTMCommands(commandBinDir)
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
 }
 
 func helpCodex(targetRoot, skillName string) (SkillHelp, error) {
+	return readCodexReference(targetRoot, skillName, "help.md")
+}
+
+func toolsCodex(targetRoot, skillName string) (SkillHelp, error) {
+	return readCodexReference(targetRoot, skillName, "tools.md", "commands.md")
+}
+
+func readCodexReference(targetRoot, skillName string, filenames ...string) (SkillHelp, error) {
 	targetRoot = defaultCodexTarget(targetRoot)
 	skills, err := resolveCodexSkills([]string{skillName})
 	if err != nil {
 		return SkillHelp{}, err
 	}
 	skill := skills[0]
-	path := filepath.Join(targetRoot, skill, "references", "help.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return SkillHelp{}, fmt.Errorf("skill %q help is missing at %s; install or update the skill first", skill, path)
+	var paths []string
+	for _, filename := range filenames {
+		path := filepath.Join(targetRoot, skill, "references", filename)
+		paths = append(paths, path)
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return SkillHelp{
+				Name: skill,
+				Path: path,
+				Text: string(data),
+			}, nil
 		}
-		return SkillHelp{}, err
+		if !os.IsNotExist(err) {
+			return SkillHelp{}, err
+		}
 	}
-	return SkillHelp{
-		Name: skill,
-		Path: path,
-		Text: string(data),
-	}, nil
+	return SkillHelp{}, fmt.Errorf("skill %q reference is missing at %s; install or update the skill first", skill, strings.Join(paths, ", "))
 }
 
 func dirExists(path string) bool {
@@ -368,9 +447,9 @@ Use this skill when the task involves:
 
 Read [help.md](./references/help.md) first for quick usage, rules, and examples.
 
-## Commands
+## Tools
 
-Read [commands.md](./references/commands.md) for the full command shapes.
+Read [tools.md](./references/tools.md) for the full tool and command shapes.
 `, commandBinDir, commandBinDir)
 }
 
@@ -404,9 +483,9 @@ Use this skill when the task involves:
 
 Read [help.md](./references/help.md) first for quick usage.
 
-## Commands
+## Tools
 
-Read [commands.md](./references/commands.md) for the full command shapes.
+Read [tools.md](./references/tools.md) for the full tool and command shapes.
 `, commandBinDir, commandBinDir)
 }
 
@@ -435,7 +514,7 @@ func renderGoogleHelp(commandBinDir string) string {
 
 ## More
 
-- command map: [commands.md](./commands.md)
+- tool map: [tools.md](./tools.md)
 `, commandBinDir)
 }
 
@@ -460,7 +539,7 @@ func renderGlobalAPITokenHelp(commandBinDir string) string {
 
 ## More
 
-- command map: [commands.md](./commands.md)
+- tool map: [tools.md](./tools.md)
 `, commandBinDir)
 }
 
@@ -496,10 +575,104 @@ Use this skill when the task involves:
 
 Read [help.md](./references/help.md) first for quick usage, rules, and examples.
 
-## Commands
+## Tools
 
-Read [commands.md](./references/commands.md) for the full command shapes.
+Read [tools.md](./references/tools.md) for the full tool and command shapes.
 `, commandBinDir, commandBinDir)
+}
+
+func renderAgentWebpageSkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: agent-webpage
+description: Use the local agent-webpage wrapper from %s to talk to the live webpage client for an agent on this host.
+---
+
+# Agent Webpage
+
+This skill covers the local `+"`agent-webpage`"+` wrapper installed from `+"`"+`%s`+"`"+`.
+
+Use this command directly from `+"`PATH`"+`. It talks to the real webpage client through the live chat websocket and returns the real webpage response.
+
+Legacy aliases still exist for compatibility:
+
+- `+"`webpage`"+`
+- `+"`webpage-ping`"+`
+- `+"`agent-page-ping`"+`
+- `+"`ipc-ping`"+`
+
+## Scope
+
+Use this skill when the task involves:
+
+- checking whether an agent's webpage client is connected
+- running JS in the live webpage client
+- sending webpage events and waiting for the response
+- checking connected webpage clients for an agent
+
+## Rules
+
+1. Prefer the local `+"`agent-webpage`"+` command first.
+2. Target a specific connected webpage by `+"`client_id`"+`.
+3. If no `+"`client_id`"+` is provided, only auto-target when the current agent has exactly one connected client.
+4. For response-oriented calls, wait for and report the actual webpage response instead of only reporting that the event was sent.
+5. Use `+"`agent-webpage help`"+` and `+"`agent-webpage tools`"+` before guessing subcommand shapes.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage, rules, and examples.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the supported tools, response types, and command shapes.
+`, commandBinDir, commandBinDir)
+}
+
+func renderTMSkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: tm
+description: Operate tmux panes and windows on this host with the local tm wrapper from %s. Prefer tm for quick local pane work and cicy-code for node-aware tmux APIs.
+---
+
+# tm
+
+This skill is for tmux-style pane and window operations in the CiCy environment.
+
+Primary tools:
+
+- `+"`tm`"+` for quick local pane operations
+- `+"`cicy-code`"+` for tmux and pane APIs, especially when node-aware or API-level control is needed
+
+Do not use `+"`fast-api`"+` for tmux work when `+"`tm`"+` or `+"`cicy-code`"+` covers it.
+
+## Scope
+
+Use this skill for:
+
+- listing panes
+- checking pane or window status
+- capturing pane output
+- sending text or keys to a pane
+- creating or restarting panes
+- clearing panes
+- listing, selecting, renaming, creating, or deleting tmux windows
+- doing the same on a selected `+"`cicy-code`"+` node via `+"`cicy-code -n <instance>`"+`
+
+## Rules
+
+1. Prefer `+"`tm`"+` for local convenience operations on this host.
+2. Prefer `+"`cicy-code`"+` when the task is node-aware, API-oriented, or needs features beyond the thin `+"`tm`"+` wrapper.
+3. Do not route tmux work through `+"`fast-api`"+` unless there is a specific reason `+"`tm`"+` and `+"`cicy-code`"+` cannot do it.
+4. The primary pane is usually `+"`w-10001`"+`.
+5. If targeting a node, use `+"`cicy-code -n <instance> ...`"+` and let the registry resolve the node.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the command map.
+`, commandBinDir)
 }
 
 func renderCFTunnelHelp(commandBinDir string) string {
@@ -527,7 +700,107 @@ func renderCFTunnelHelp(commandBinDir string) string {
 
 ## More
 
-- command map: [commands.md](./commands.md)
+- tool map: [tools.md](./tools.md)
+`, commandBinDir)
+}
+
+func renderAgentWebpageHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# Agent Webpage Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`agent-webpage`"+`
+
+## Quick Start
+
+- inspect usage: `+"`agent-webpage help`"+`
+- inspect tool map: `+"`agent-webpage tools`"+`
+- ping the current agent's only connected webpage client: `+"`agent-webpage ping`"+`
+- ping a specific client: `+"`agent-webpage ping web-abc123`"+`
+- run JS in a specific live webpage client: `+"`agent-webpage exec-js 'window.location.href' web-abc123`"+`
+- inspect connected clients: `+"`agent-webpage clients`"+`
+
+## Rules
+
+- use the real live webpage client, not mocks
+- identify the target by `+"`client_id`"+`; the tool resolves the owning `+"`agent_id`"+`
+- for response-oriented calls, report the actual returned payload
+- if you need the exact subcommand shape, read [tools.md](./tools.md)
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`, commandBinDir)
+}
+
+func renderTMHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# tm Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`tm`"+`
+
+## Quick Start
+
+- list panes: `+"`tm ls`"+`
+- capture pane output: `+"`tm capture w-10001`"+`
+- send a message: `+"`tm msg w-10001 \"hello\"`"+`
+- send a key: `+"`tm send-keys w-10001 Enter`"+`
+- inspect tmux windows: `+"`tm windows`"+`
+
+## Multi-Node
+
+- use the configured default target: `+"`tm ls`"+`
+- select a configured node: `+"`tm --node dev ls`"+`
+- select a configured node by env: `+"`TM_NODE=dev tm ls`"+`
+- bypass config and hit a specific API directly: `+"`TM_API_BASE=http://127.0.0.1:8021 tm ls`"+`
+
+How to configure and use multi-node:
+
+- create `+"`~/Private/tm.json`"+`
+- set top-level `+"`default`"+` to the node you want `+"`tm ls`"+` to use
+- define each node under `+"`nodes.<name>`"+`
+- use `+"`tm --node <name> ...`"+` when you want a non-default node
+
+Recommended `+"`~/Private/tm.json`"+` shape:
+
+    {
+      "default": "default",
+      "nodes": {
+        "default": {"api": "http://127.0.0.1:8008", "api_token": "<copy from ~/global.json api_token>"},
+        "dev": {"api": "http://127.0.0.1:8021", "api_token": "<copy from ~/global.json api_token>"}
+      }
+    }
+
+Resolution order:
+
+- `+"`TM_API_BASE`"+` or `+"`API_BASE`"+`
+- `+"`TM_NODE`"+` or `+"`--node`"+`, then `+"`~/Private/tm.json nodes[<name>]`"+`
+- `+"`~/Private/tm.json default`"+` -> `+"`nodes[<default>]`"+`
+- `+"`~/Private/tm.json api|api_base|url`"+`
+- local fallback `+"`http://127.0.0.1:${TM_API_PORT|API_PORT|8008}`"+`
+
+Token rules:
+
+- `+"`TM_TOKEN`"+` overrides everything
+- otherwise `+"`tm.nodes.<name>.api_token`"+` is used
+- if `+"`~/Private/tm.json`"+` is missing, `+"`tm`"+` uses an in-memory default:
+  - `+"`default = default`"+`
+  - `+"`nodes.default.api = http://127.0.0.1:8008`"+`
+  - `+"`nodes.default.api_token = ~/global.json api_token`"+`
+
+## Rules
+
+- prefer `+"`tm`"+` for quick local pane work
+- prefer `+"`cicy-code`"+` for node-aware tmux work such as `+"`cicy-code -n node-a panes`"+`
+- avoid `+"`fast-api`"+` for tmux work when `+"`tm`"+` or `+"`cicy-code`"+` covers it
+- the common primary pane is `+"`w-10001`"+`
+
+## More
+
+- tool map: [tools.md](./tools.md)
 `, commandBinDir)
 }
 
@@ -603,5 +876,134 @@ func renderGlobalAPITokenCommands() string {
 - both commands operate on ` + "`~/global.json`" + `
 - ` + "`show`" + ` prints the current ` + "`api_token`" + `
 - ` + "`refresh`" + ` generates a new token and writes it back to ` + "`~/global.json`" + `
+`
+}
+
+func renderTMCommands(commandBinDir string) string {
+	return fmt.Sprintf(`# tm Command Reference
+
+This skill uses two command families:
+
+- `+"`tm`"+` from `+"`%s`"+`
+- `+"`cicy-code`"+` from `+"`/home/w3c_offical/projects/cicy-code/skills/cicy-code`"+`
+
+## Prefer tm
+
+Use `+"`tm`"+` for quick local pane work:
+
+- `+"`tm ls`"+`
+- `+"`tm capture w-10001`"+`
+- `+"`tm msg w-10001 \"hello\"`"+`
+- `+"`tm send-keys w-10001 Enter`"+`
+- `+"`tm create my-pane`"+`
+- `+"`tm restart`"+`
+- `+"`tm clear w-10001`"+`
+
+Multi-node examples:
+
+- `+"`tm ls`"+` -> use configured default target
+- `+"`tm --node dev ls`"+` -> use `+"`tm.nodes.dev`"+`
+- `+"`TM_NODE=dev tm capture w-10001`"+` -> target `+"`dev`"+`
+- `+"`TM_API_BASE=http://127.0.0.1:8021 tm capture w-10001`"+` -> bypass node selection
+
+Supported `+"`~/Private/tm.json`"+` keys:
+
+- `+"`default`"+`
+- `+"`api | api_base | url`"+`
+- `+"`port`"+`
+- `+"`nodes.<name>.api | api_base | url`"+`
+- `+"`nodes.<name>.api_token`"+`
+- `+"`nodes.<name>.token`"+` for legacy compatibility
+- `+"`nodes.<name>.port`"+`
+
+Observed `+"`tm`"+` commands:
+
+- `+"`ls`"+`
+- `+"`tree`"+`
+- `+"`windows`"+`
+- `+"`capture <pane>`"+`
+- `+"`msg <pane> <text>`"+`
+- `+"`msg_wait <pane> <text> [timeout]`"+`
+- `+"`send-keys <pane> <keys>`"+`
+- `+"`create <name>`"+`
+- `+"`restart`"+`
+- `+"`clear <pane>`"+`
+
+## Prefer cicy-code for node-aware tmux work
+
+Use `+"`cicy-code`"+` when the operation should go through the node registry or the cicy-code API surface:
+
+- `+"`cicy-code panes`"+`
+- `+"`cicy-code status w-10001`"+`
+- `+"`cicy-code capture w-10001 200`"+`
+- `+"`cicy-code send w-10001 \"hello\"`"+`
+- `+"`cicy-code send-keys w-10001 Enter`"+`
+- `+"`cicy-code windows`"+`
+- `+"`cicy-code -n node-a panes`"+`
+
+Observed tmux-related `+"`cicy-code`"+` commands:
+
+- `+"`panes`"+`
+- `+"`ls`"+`
+- `+"`pane <pane_id>`"+`
+- `+"`create-pane <json>`"+`
+- `+"`update-pane <pane_id> <json>`"+`
+- `+"`delete-pane <pane_id>`"+`
+- `+"`restart-pane <pane_id>`"+`
+- `+"`restart-all`"+`
+- `+"`status [pane]`"+`
+- `+"`send <pane_id> <text>`"+`
+- `+"`send-keys <pane_id> <keys>`"+`
+- `+"`send-wait <pane_id> <text> [timeout]`"+`
+- `+"`capture <pane_id> [lines]`"+`
+- `+"`clear <pane_id>`"+`
+- `+"`tree`"+`
+- `+"`windows [session]`"+`
+- `+"`new-window <session> [name]`"+`
+- `+"`rename-window <session> <index> <name>`"+`
+- `+"`delete-window <session> <index>`"+`
+- `+"`select-window <session> <index>`"+`
+
+## Notes
+
+- avoid `+"`fast-api`"+` for tmux work; use `+"`tm`"+` or `+"`cicy-code`"+`
+- for remote node work, prefer `+"`cicy-code -n <instance> ...`"+`
+- the common primary pane is `+"`w-10001`"+`
+`, commandBinDir)
+}
+
+func renderAgentWebpageTools() string {
+	return `# Agent Webpage Tools
+
+## Main
+
+- ` + "`agent-webpage help`" + ` -> print usage and guidance
+- ` + "`agent-webpage tools`" + ` -> print this tool map
+- ` + "`agent-webpage ping [client_id]`" + ` -> sends ` + "`webpage_ping`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`webpage_pong`" + `
+- ` + "`agent-webpage ipc-ping [client_id]`" + ` -> sends ` + "`ipc_ping`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`ipc_pong`" + `
+- ` + "`agent-webpage exec-js '<js>' [client_id]`" + ` -> sends ` + "`exec_js`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`exec_js_result`" + `
+- ` + "`agent-webpage send <type> <data_json> [client_id] [expect_type]`" + ` -> sends a custom event directly to ` + "`client_id`" + ` and waits for a matching websocket response when possible
+- ` + "`agent-webpage clients`" + ` -> lists connected chat/webpage clients
+
+## Aliases
+
+- ` + "`webpage ...`" + ` -> legacy alias of ` + "`agent-webpage ...`" + `
+- ` + "`webpage-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ping [client_id]`" + `
+- ` + "`agent-page-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ping [client_id]`" + `
+- ` + "`ipc-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ipc-ping [client_id]`" + `
+
+## Response Rules
+
+- ` + "`ping`" + ` waits for ` + "`webpage_pong`" + `
+- ` + "`ipc-ping`" + ` waits for ` + "`ipc_pong`" + `
+- ` + "`exec-js`" + ` waits for ` + "`exec_js_result`" + `
+- ` + "`send`" + ` injects a ` + "`requestId`" + ` when the payload is a JSON object and waits for a response when it can match by ` + "`requestId`" + ` and/or ` + "`expect_type`" + `
+- when a response is captured, print the real response JSON or result body back to the caller
+
+## Notes
+
+- the preferred target is ` + "`client_id`" + ` such as ` + "`web-abc123`" + `
+- if ` + "`client_id`" + ` is omitted, the command only auto-targets when the current worker agent has exactly one connected client
+- the command resolves the owning ` + "`agent_id`" + ` and then talks to the live chat websocket using ` + "`agent_id + client_id`" + `
 `
 }

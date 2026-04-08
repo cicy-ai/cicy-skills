@@ -18,7 +18,7 @@ case "${1:-help}" in
   windows)  get /api/tmux/windows ;;
   capture)  post /api/tmux/capture_pane "{\"pane_id\":\"${2:?pane_id required}\"}" ;;
   msg)      post /api/tmux/send "{\"pane_id\":\"${2:?pane_id required}\",\"text\":\"${*:3}\"}" ;;
-  msg_wait) post /api/tmux/send_wait "{\"pane_id\":\"${2:?pane_id required}\",\"text\":\"${3:?text required}\",\"timeout\":${4:-60},\"prompt_type\":\"${5:-bash}\"}" ;;
+  msg_wait) post /api/tmux/send_wait "{\"pane_id\":\"${2:?pane_id required}\",\"text\":\"${3:?text required}\",\"timeout\":${4:-60}}" ;;
   send-keys) post /api/tmux/send-keys "{\"pane_id\":\"${2:?pane_id required}\",\"keys\":\"${*:3}\"}" ;;
   create)   post /api/tmux/create "{\"name\":\"${2:?name required}\"}" ;;
   restart)  post /api/tmux/restart_all '{}' ;;
@@ -30,7 +30,7 @@ case "${1:-help}" in
     echo "  tree                        Tmux tree"
     echo "  capture <pane>              Capture pane"
     echo "  msg <pane> <text>           Send message (auto Enter)"
-    echo "  msg_wait <pane> <text> [timeout] [prompt_type]"
+    echo "  msg_wait <pane> <text> [timeout]"
     echo "  send-keys <pane> <keys>     Send raw keys"
     echo "  create <name>               Create pane"
     echo "  restart                     Restart all"

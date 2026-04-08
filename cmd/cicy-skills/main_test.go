@@ -86,6 +86,7 @@ func TestHelpTextAgent(t *testing.T) {
 	for _, want := range []string{
 		"cicy-skills agent list <codex|claude|openclaw> [--target DIR]",
 		"cicy-skills agent help <codex|claude|openclaw> <skill> [--target DIR]",
+		"cicy-skills agent tools <codex|claude|openclaw> <skill> [--target DIR]",
 		"cicy-skills agent install <codex|claude|openclaw> <skill...|all> [--target DIR]",
 		"cicy-skills agent remove <codex|claude|openclaw> <skill...|all> [--target DIR]",
 		"cicy-skills agent update <codex|claude|openclaw> <skill...|all> [--target DIR]",
@@ -100,10 +101,16 @@ func TestHelpTextAgent(t *testing.T) {
 	if !strings.Contains(got, "google") {
 		t.Fatalf("agent help missing approved skill list: %q", got)
 	}
+	if !strings.Contains(got, "agent-webpage") {
+		t.Fatalf("agent help missing agent-webpage approved skill: %q", got)
+	}
 	if !strings.Contains(got, "cf-tunnel") {
 		t.Fatalf("agent help missing cf-tunnel approved skill: %q", got)
 	}
 	if !strings.Contains(got, "globalApiToken") {
 		t.Fatalf("agent help missing globalApiToken approved skill: %q", got)
+	}
+	if !strings.Contains(got, "tm") {
+		t.Fatalf("agent help missing tm approved skill: %q", got)
 	}
 }

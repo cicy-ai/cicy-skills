@@ -30,6 +30,7 @@ const (
 
 type Env struct {
 	Global map[string]any
+	TM     map[string]any
 	Token  string
 	API    string
 	WS     string
@@ -66,14 +67,14 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runTG(args)
 	case "tm":
 		err = env.runTM(args)
+	case "agent-webpage", "webpage":
+		err = env.runAgentWebpage(args)
 	case "agent-page-ping":
-		err = env.runDesktopPing("ping", "pong", "✅ 收到 pong！连通成功", args)
+		err = env.runAgentWebpage(append([]string{"ping"}, args...))
 	case "ipc-ping":
-		err = env.runIPCPing(args)
-	case "webpage":
-		err = env.runWebpage(args)
+		err = env.runAgentWebpage(append([]string{"ipc-ping"}, args...))
 	case "webpage-ping":
-		err = env.runWebpage([]string{"ping"})
+		err = env.runAgentWebpage(append([]string{"ping"}, args...))
 	case "gemini-ask":
 		err = env.runGeminiAsk(args)
 	case "gemini-vision":
@@ -106,6 +107,10 @@ func newEnv(stdout, stderr io.Writer) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
+	tm, err := loadTMJSON()
+	if err != nil {
+		return nil, err
+	}
 	api := strings.TrimSpace(os.Getenv("API_BASE"))
 	if api == "" {
 		port := strings.TrimSpace(os.Getenv("API_PORT"))
@@ -117,6 +122,7 @@ func newEnv(stdout, stderr io.Writer) (*Env, error) {
 	ws := "ws" + strings.TrimPrefix(api, "http")
 	return &Env{
 		Global: global,
+		TM:     tm,
 		Token:  strings.TrimSpace(anyString(global["api_token"])),
 		API:    strings.TrimRight(api, "/"),
 		WS:     strings.TrimRight(ws, "/"),
@@ -143,6 +149,10 @@ func globalJSONPath() string {
 	return filepath.Join(userHomeDir(), "global.json")
 }
 
+func tmJSONPath() string {
+	return filepath.Join(userHomeDir(), "Private", "tm.json")
+}
+
 func userHomeDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -160,11 +170,40 @@ func anyString(v any) string {
 	}
 }
 
+func loadTMJSON() (map[string]any, error) {
+	data, err := os.ReadFile(tmJSONPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
+		return nil, err
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+type tmOptions struct {
+	Node string
+}
+
+type tmConfig struct {
+	API   string
+	Token string
+	Node  string
+}
+
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-page-ping, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-page-ping, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
+	return e.apiRequestTo(ctx, e.API, e.Token, method, path, payload)
+}
+
+func (e *Env) apiRequestTo(ctx context.Context, apiBase, token, method, path string, payload any) ([]byte, error) {
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -173,12 +212,12 @@ func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) 
 		}
 		body = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, e.API+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(apiBase, "/")+path, body)
 	if err != nil {
 		return nil, err
 	}
-	if e.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+e.Token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -198,13 +237,13 @@ func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) 
 	return data, nil
 }
 
-func (e *Env) wsConnect(pane string) (*websocket.Conn, error) {
-	u := fmt.Sprintf("%s/api/chat/ws?pane=%s&token=%s", e.WS, url.QueryEscape(pane), url.QueryEscape(e.Token))
+func (e *Env) wsConnect(agentID string) (*websocket.Conn, error) {
+	u := fmt.Sprintf("%s/api/chat/ws?agent_id=%s&token=%s", e.WS, url.QueryEscape(agentID), url.QueryEscape(e.Token))
 	conn, _, err := websocket.DefaultDialer.Dial(u, nil)
 	return conn, err
 }
 
-func currentPane() string {
+func currentAgentID() string {
 	re := regexp.MustCompile(`(w-\d+)`)
 	if match := re.FindStringSubmatch(mustGetwd()); len(match) == 2 {
 		return match[1]
@@ -454,13 +493,26 @@ func printTelegramResult(w io.Writer, data []byte) error {
 }
 
 func (e *Env) runTM(args []string) error {
+	opts, rest, err := parseTMArgs(args)
+	if err != nil {
+		return err
+	}
 	cmd := "help"
-	if len(args) > 0 {
-		cmd = args[0]
+	if len(rest) > 0 {
+		cmd = rest[0]
+	}
+	switch cmd {
+	case "help", "-h", "--help":
+		_, _ = fmt.Fprintln(e.Stdout, tmUsage())
+		return nil
+	}
+	cfg, err := e.resolveTMConfig(opts.Node)
+	if err != nil {
+		return err
 	}
 	switch cmd {
 	case "ls":
-		data, err := e.apiRequest(context.Background(), http.MethodGet, "/api/tmux/panes", nil)
+		data, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodGet, "/api/tmux/panes", nil)
 		if err != nil {
 			return err
 		}
@@ -473,64 +525,58 @@ func (e *Env) runTM(args []string) error {
 		for _, pane := range out.Panes {
 			_, _ = fmt.Fprintf(e.Stdout, "%v\t%v\t%v\n", pane["pane_id"], pane["role"], pane["title"])
 		}
-	case "status":
-		path := "/api/tmux/status"
-		if len(args) > 1 {
-			path += "?pane=" + url.QueryEscape(args[1])
-		}
-		return e.copyAPI(http.MethodGet, path, nil)
 	case "tree":
-		return e.copyAPI(http.MethodGet, "/api/tmux/tree", nil)
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodGet, "/api/tmux/tree", nil)
 	case "windows":
-		return e.copyAPI(http.MethodGet, "/api/tmux/windows", nil)
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodGet, "/api/tmux/windows", nil)
 	case "capture":
-		if len(args) < 2 {
+		if len(rest) < 2 {
 			return errors.New("Usage: tm capture <pane>")
 		}
-		return e.copyAPI(http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": args[1]})
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": rest[1]})
 	case "msg":
-		if len(args) < 3 {
+		if len(rest) < 3 {
 			return errors.New("Usage: tm msg <pane> <text>")
 		}
-		return e.copyAPI(http.MethodPost, "/api/tmux/send", map[string]any{"pane_id": args[1], "text": strings.Join(args[2:], " ")})
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send", map[string]any{"pane_id": rest[1], "text": strings.Join(rest[2:], " ")})
 	case "msg_wait":
-		if len(args) < 3 {
-			return errors.New("Usage: tm msg_wait <pane> <text> [timeout] [prompt_type]")
+		if len(rest) < 3 {
+			return errors.New("Usage: tm msg_wait <pane> <text> [timeout]")
 		}
 		timeout := 60
-		if len(args) > 3 {
-			timeout, _ = strconv.Atoi(args[3])
+		if len(rest) > 3 {
+			timeout, _ = strconv.Atoi(rest[3])
 		}
-		promptType := "bash"
-		if len(args) > 4 {
-			promptType = args[4]
-		}
-		return e.copyAPI(http.MethodPost, "/api/tmux/send_wait", map[string]any{"pane_id": args[1], "text": args[2], "timeout": timeout, "prompt_type": promptType})
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send_wait", map[string]any{"target": rest[1], "text": rest[2], "timeout": timeout})
 	case "send-keys":
-		if len(args) < 3 {
+		if len(rest) < 3 {
 			return errors.New("Usage: tm send-keys <pane> <keys>")
 		}
-		return e.copyAPI(http.MethodPost, "/api/tmux/send-keys", map[string]any{"pane_id": args[1], "keys": strings.Join(args[2:], " ")})
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{"pane_id": rest[1], "keys": strings.Join(rest[2:], " ")})
 	case "create":
-		if len(args) < 2 {
+		if len(rest) < 2 {
 			return errors.New("Usage: tm create <name>")
 		}
-		return e.copyAPI(http.MethodPost, "/api/tmux/create", map[string]any{"name": args[1]})
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/create", map[string]any{"name": rest[1]})
 	case "restart":
-		return e.copyAPI(http.MethodPost, "/api/tmux/restart_all", map[string]any{})
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/restart_all", map[string]any{})
 	case "clear":
-		if len(args) < 2 {
+		if len(rest) < 2 {
 			return errors.New("Usage: tm clear <pane>")
 		}
-		return e.copyAPI(http.MethodPost, "/api/tmux/clear", map[string]any{"pane": args[1]})
+		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/clear", map[string]any{"pane": rest[1]})
 	default:
-		_, _ = fmt.Fprintln(e.Stdout, "Usage: tm <command> [args]\n  ls\n  status [pane]\n  tree\n  windows\n  capture <pane>\n  msg <pane> <text>\n  msg_wait <pane> <text> [timeout] [prompt_type]\n  send-keys <pane> <keys>\n  create <name>\n  restart\n  clear <pane>")
+		_, _ = fmt.Fprintln(e.Stdout, tmUsage())
 	}
 	return nil
 }
 
 func (e *Env) copyAPI(method, path string, payload any) error {
-	data, err := e.apiRequest(context.Background(), method, path, payload)
+	return e.copyAPITo(e.API, e.Token, method, path, payload)
+}
+
+func (e *Env) copyAPITo(apiBase, token, method, path string, payload any) error {
+	data, err := e.apiRequestTo(context.Background(), apiBase, token, method, path, payload)
 	if err != nil {
 		return err
 	}
@@ -541,21 +587,318 @@ func (e *Env) copyAPI(method, path string, payload any) error {
 	return nil
 }
 
+func parseTMArgs(args []string) (tmOptions, []string, error) {
+	opts := tmOptions{}
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "-n" || arg == "--node":
+			if i+1 >= len(args) {
+				return tmOptions{}, nil, errors.New("Usage: tm [--node NAME] <command> [args]")
+			}
+			opts.Node = strings.TrimSpace(args[i+1])
+			i++
+		case strings.HasPrefix(arg, "--node="):
+			opts.Node = strings.TrimSpace(strings.TrimPrefix(arg, "--node="))
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return opts, rest, nil
+}
+
+func (e *Env) resolveTMConfig(nodeOverride string) (tmConfig, error) {
+	apiBase := firstNonEmpty(
+		strings.TrimSpace(os.Getenv("TM_API_BASE")),
+		strings.TrimSpace(os.Getenv("API_BASE")),
+	)
+	nodeName := strings.TrimSpace(nodeOverride)
+	if nodeName == "" {
+		nodeName = strings.TrimSpace(os.Getenv("TM_NODE"))
+	}
+	tmRoot := e.effectiveTMConfig()
+	selected := tmRoot
+	defaultNodeName := strings.TrimSpace(anyString(tmRoot["default"]))
+	if nodeName == "" {
+		nodeName = defaultNodeName
+	}
+	if nodeName != "" {
+		nodes, _ := tmRoot["nodes"].(map[string]any)
+		nodeCfg, _ := nodes[nodeName].(map[string]any)
+		if len(nodeCfg) == 0 {
+			return tmConfig{}, fmt.Errorf("tm node %q not found in %s", nodeName, tmJSONPath())
+		}
+		selected = nodeCfg
+	}
+	if apiBase == "" {
+		apiBase = firstNonEmpty(
+			strings.TrimSpace(anyString(selected["api"])),
+			strings.TrimSpace(anyString(selected["api_base"])),
+			strings.TrimSpace(anyString(selected["url"])),
+			strings.TrimSpace(anyString(tmRoot["api"])),
+			strings.TrimSpace(anyString(tmRoot["api_base"])),
+			strings.TrimSpace(anyString(tmRoot["url"])),
+		)
+	}
+	if apiBase == "" {
+		port := firstNonEmpty(
+			strings.TrimSpace(os.Getenv("TM_API_PORT")),
+			strings.TrimSpace(os.Getenv("API_PORT")),
+			strings.TrimSpace(anyString(selected["port"])),
+			strings.TrimSpace(anyString(tmRoot["port"])),
+			"8008",
+		)
+		apiBase = "http://127.0.0.1:" + port
+	}
+	token := firstNonEmpty(
+		strings.TrimSpace(os.Getenv("TM_TOKEN")),
+		strings.TrimSpace(anyString(selected["api_token"])),
+		strings.TrimSpace(anyString(selected["token"])),
+	)
+	if token == "" {
+		nodeLabel := nodeName
+		if nodeLabel == "" {
+			nodeLabel = defaultNodeName
+		}
+		if nodeLabel == "" {
+			nodeLabel = "default"
+		}
+		return tmConfig{}, fmt.Errorf("tm node %q is missing api_token in %s", nodeLabel, tmJSONPath())
+	}
+	return tmConfig{
+		API:   strings.TrimRight(apiBase, "/"),
+		Token: token,
+		Node:  nodeName,
+	}, nil
+}
+
+func (e *Env) effectiveTMConfig() map[string]any {
+	root := e.TM
+	if len(root) == 0 {
+		root = map[string]any{}
+	}
+	hadConfiguredNodes := false
+	if nodes, _ := root["nodes"].(map[string]any); len(nodes) > 0 {
+		hadConfiguredNodes = true
+	}
+	out := map[string]any{}
+	for _, key := range []string{"default", "api", "api_base", "url", "port"} {
+		if value, ok := root[key]; ok {
+			out[key] = value
+		}
+	}
+	nodes, _ := root["nodes"].(map[string]any)
+	outNodes := map[string]any{}
+	for name, rawNode := range nodes {
+		node, ok := rawNode.(map[string]any)
+		if !ok || len(node) == 0 {
+			continue
+		}
+		copyNode := map[string]any{}
+		for _, key := range []string{"api", "api_base", "url", "port", "api_token", "token"} {
+			if value, ok := node[key]; ok {
+				copyNode[key] = value
+			}
+		}
+		outNodes[name] = copyNode
+	}
+	defaultNodeName := strings.TrimSpace(anyString(out["default"]))
+	if defaultNodeName == "" {
+		defaultNodeName = "default"
+		out["default"] = defaultNodeName
+	}
+	defaultNode, _ := outNodes[defaultNodeName].(map[string]any)
+	if len(defaultNode) == 0 {
+		defaultNode = map[string]any{}
+		outNodes[defaultNodeName] = defaultNode
+	}
+	if firstNonEmpty(
+		strings.TrimSpace(anyString(defaultNode["api"])),
+		strings.TrimSpace(anyString(defaultNode["api_base"])),
+		strings.TrimSpace(anyString(defaultNode["url"])),
+	) == "" {
+		defaultNode["api"] = defaultAPIBase
+	}
+	if firstNonEmpty(
+		strings.TrimSpace(anyString(defaultNode["api_token"])),
+		strings.TrimSpace(anyString(defaultNode["token"])),
+	) == "" {
+		if !hadConfiguredNodes {
+			if token := strings.TrimSpace(anyString(e.Global["api_token"])); token != "" {
+				defaultNode["api_token"] = token
+			}
+		}
+	}
+	out["nodes"] = outNodes
+	return out
+}
+
+func tmUsage() string {
+	return `Usage: tm [--node NAME] <command> [args]
+
+Commands:
+  help                                  Show tm help and config rules
+  ls                                    List panes
+  tree                                  Tmux tree
+  windows                               Window list
+  capture <pane>                        Capture pane output
+  msg <pane> <text>                     Send message with Enter
+  msg_wait <pane> <text> [timeout]
+  send-keys <pane> <keys>               Send raw keys
+  create <name>                         Create pane
+  restart                               Restart all panes
+  clear <pane>                          Clear pane
+
+Multi-node selection:
+  tm ls                                 Use the configured default target
+  tm --node dev ls                      Use nodes.dev
+  TM_NODE=dev tm ls                     Same as --node dev
+  TM_API_BASE=http://127.0.0.1:8021 tm ls
+                                         Bypass node lookup and hit this API directly
+
+How to use configured nodes:
+  1. Put node definitions in ~/Private/tm.json
+  2. Pick the default node with the top-level "default" field
+  3. Use tm directly for the default node
+  4. Use tm --node <name> ... for a specific node
+
+Config resolution order:
+  1. TM_API_BASE or API_BASE
+  2. TM_NODE / --node, then ~/Private/tm.json nodes[<name>]
+  3. ~/Private/tm.json default -> nodes[<default>]
+  4. ~/Private/tm.json api / api_base / url
+  5. http://127.0.0.1:${TM_API_PORT|API_PORT|8008}
+
+Token order:
+  1. TM_TOKEN
+  2. selected tm node api_token
+
+Default fallback:
+  - tm never writes config files
+  - if ~/Private/tm.json is missing or incomplete, tm uses an in-memory default:
+      default = "default"
+      nodes.default.api = "http://127.0.0.1:8008"
+      nodes.default.api_token = ~/global.json api_token
+
+Example ~/Private/tm.json:
+  {
+    "default": "default",
+    "nodes": {
+      "default": {
+        "api": "http://127.0.0.1:8008",
+        "api_token": "<copy from ~/global.json api_token>"
+      },
+      "dev": {
+        "api": "http://127.0.0.1:8021",
+        "api_token": "<copy from ~/global.json api_token>"
+      }
+    }
+  }
+
+Supported tm.json keys:
+  default                               Default node name
+  api | api_base | url                  Default API base when no node is selected
+  port                                  Default local port fallback
+  nodes.<name>.api                      Node API base
+  nodes.<name>.api_base                 Node API base alias
+  nodes.<name>.url                      Node API base alias
+  nodes.<name>.api_token                Node token
+  nodes.<name>.token                    Legacy node token alias
+  nodes.<name>.port                     Node-local port fallback
+
+Notes:
+  - --node wins over default
+  - TM_API_BASE wins over all tm config
+  - TM_TOKEN wins over node api_token
+  - tm config lives in ~/Private/tm.json
+  - tm never writes ~/global.json or ~/Private/tm.json
+  - if the selected node is missing, tm returns an explicit config error`
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (e *Env) chatClients() (map[string]map[string]map[string]any, error) {
+	data, err := e.apiRequest(context.Background(), http.MethodGet, "/api/chat/clients", nil)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]map[string]map[string]any{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (e *Env) resolveWebTarget(clientID string) (string, string, error) {
+	clients, err := e.chatClients()
+	if err != nil {
+		return "", "", err
+	}
+	clientID = strings.TrimSpace(clientID)
+	if clientID != "" {
+		var matchedAgentID string
+		for agentID, clientMap := range clients {
+			if _, ok := clientMap[clientID]; !ok {
+				continue
+			}
+			if matchedAgentID != "" {
+				return "", "", fmt.Errorf("client_id %s matched multiple agents; pass a unique client_id", clientID)
+			}
+			matchedAgentID = agentID
+		}
+		if matchedAgentID == "" {
+			return "", "", fmt.Errorf("client_id %s not found", clientID)
+		}
+		return matchedAgentID, clientID, nil
+	}
+
+	agentID := currentAgentID()
+	clientMap := clients[agentID]
+	switch len(clientMap) {
+	case 0:
+		return "", "", fmt.Errorf("current agent %s has no connected webpage client", agentID)
+	case 1:
+		for resolvedClientID := range clientMap {
+			return agentID, resolvedClientID, nil
+		}
+	}
+	return "", "", fmt.Errorf("current agent %s has multiple clients; pass client_id explicitly", agentID)
+}
+
+func (e *Env) printJSON(v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, _ = e.Stdout.Write(data)
+	_, _ = fmt.Fprintln(e.Stdout)
+	return nil
+}
+
 func (e *Env) runDesktopPing(kind, expectType, successText string, args []string) error {
-	pane := currentPane()
+	agentID := currentAgentID()
 	if len(args) > 0 {
-		pane = args[0]
+		agentID = args[0]
 	}
 	rid := randomID(kind)
-	conn, err := e.wsConnect(pane)
+	conn, err := e.wsConnect(agentID)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 	_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-		"pane": pane,
-		"type": "desktop_event",
-		"data": map[string]any{"type": kind, "requestId": rid},
+		"agent_id": agentID,
+		"type":     "desktop_event",
+		"data":     map[string]any{"type": kind, "requestId": rid},
 	})
 	if err != nil {
 		return err
@@ -572,25 +915,30 @@ func (e *Env) runDesktopPing(kind, expectType, successText string, args []string
 }
 
 func (e *Env) runIPCPing(args []string) error {
-	pane := currentPane()
+	clientID := ""
 	if len(args) > 0 {
-		pane = args[0]
+		clientID = args[0]
+	}
+	agentID, clientID, err := e.resolveWebTarget(clientID)
+	if err != nil {
+		return err
 	}
 	rid := randomID("ipc-ping")
-	conn, err := e.wsConnect(pane)
+	conn, err := e.wsConnect(agentID)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 	_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-		"pane": pane,
-		"type": "desktop_event",
-		"data": map[string]any{"type": "ipc_ping", "requestId": rid},
+		"agent_id":  agentID,
+		"client_id": clientID,
+		"type":      "desktop_event",
+		"data":      map[string]any{"type": "ipc_ping", "requestId": rid},
 	})
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 ipc_ping (%s)\n", rid)
+	_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 ipc_ping (%s) → client_id=%s agent_id=%s\n", rid, clientID, agentID)
 	msg, err := e.waitForMessage(conn, 15*time.Second, func(m map[string]any) bool {
 		return anyString(m["type"]) == "ipc_pong" && anyString(asMap(m["data"])["requestId"]) == rid
 	})
@@ -604,33 +952,44 @@ func (e *Env) runIPCPing(args []string) error {
 	return nil
 }
 
-func (e *Env) runWebpage(args []string) error {
+func (e *Env) runAgentWebpage(args []string) error {
 	cmd := "help"
 	if len(args) > 0 {
 		cmd = args[0]
 		args = args[1:]
 	}
 	switch cmd {
+	case "help", "-h", "--help":
+		_, _ = fmt.Fprintln(e.Stdout, "agent-webpage - CiCy live webpage client tool\n\nCommands:\n  help\n  tools\n  ping [client_id]\n  ipc-ping [client_id]\n  exec-js '<js>' [client_id]\n  send <type> <data_json> [client_id] [expect_type]\n  clients\n\nNotes:\n  - target by client_id, not agent_id\n  - if omitted, current agent must have exactly one connected client\n  - response-oriented commands wait for and print the real webpage response\n  - aliases: webpage, webpage-ping, agent-page-ping, ipc-ping")
+		return nil
+	case "tools":
+		_, _ = fmt.Fprintln(e.Stdout, "# agent-webpage tools\n\n- ping [client_id] -> direct push to client_id, waits for webpage_pong\n- ipc-ping [client_id] -> direct push to client_id, waits for ipc_pong\n- exec-js '<js>' [client_id] -> direct push to client_id, waits for exec_js_result\n- send <type> <data_json> [client_id] [expect_type] -> direct push to client_id, waits for matching response when requestId / expect_type is available\n- clients -> /api/chat/clients")
+		return nil
 	case "ping":
-		pane := currentPane()
+		clientID := ""
 		if len(args) > 0 {
-			pane = args[0]
+			clientID = args[0]
+		}
+		agentID, clientID, err := e.resolveWebTarget(clientID)
+		if err != nil {
+			return err
 		}
 		rid := randomID("webpage-ping")
-		conn, err := e.wsConnect(pane)
+		conn, err := e.wsConnect(agentID)
 		if err != nil {
 			return err
 		}
 		defer conn.Close()
 		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-			"pane": pane,
-			"type": "webpage_ping",
-			"data": map[string]any{"requestId": rid},
+			"agent_id":  agentID,
+			"client_id": clientID,
+			"type":      "webpage_ping",
+			"data":      map[string]any{"requestId": rid},
 		})
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 webpage_ping → pane=%s\n", pane)
+		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 webpage_ping → client_id=%s agent_id=%s\n", clientID, agentID)
 		msg, err := e.waitForMessage(conn, 15*time.Second, func(m map[string]any) bool {
 			return anyString(m["type"]) == "webpage_pong" && anyString(asMap(m["data"])["requestId"]) == rid
 		})
@@ -643,26 +1002,31 @@ func (e *Env) runWebpage(args []string) error {
 		}
 		_, _ = fmt.Fprintf(e.Stdout, "✅ 网页客户端在线 (v%s)\n", version)
 		return nil
-	case "ipc-ping":
+	case "ipc-ping", "ipc_ping":
 		return e.runIPCPing(args)
-	case "exec-js":
+	case "exec-js", "exec_js":
 		if len(args) < 1 {
-			return errors.New("Usage: webpage exec-js '<js代码>' [pane]")
+			return errors.New("Usage: agent-webpage exec-js '<js代码>' [client_id]")
 		}
-		pane := currentPane()
+		clientID := ""
 		if len(args) > 1 {
-			pane = args[1]
+			clientID = args[1]
+		}
+		agentID, clientID, err := e.resolveWebTarget(clientID)
+		if err != nil {
+			return err
 		}
 		rid := randomID("exec")
-		conn, err := e.wsConnect(pane)
+		conn, err := e.wsConnect(agentID)
 		if err != nil {
 			return err
 		}
 		defer conn.Close()
 		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-			"pane": pane,
-			"type": "exec_js",
-			"data": map[string]any{"code": args[0], "requestId": rid},
+			"agent_id":  agentID,
+			"client_id": clientID,
+			"type":      "exec_js",
+			"data":      map[string]any{"code": args[0], "requestId": rid},
 		})
 		if err != nil {
 			return err
@@ -681,31 +1045,68 @@ func (e *Env) runWebpage(args []string) error {
 		return nil
 	case "send":
 		if len(args) < 2 {
-			return errors.New("Usage: webpage send <type> <data_json> [pane]")
+			return errors.New("Usage: agent-webpage send <type> <data_json> [client_id] [expect_type]")
 		}
 		var payload any
 		if err := json.Unmarshal([]byte(args[1]), &payload); err != nil {
 			return err
 		}
-		pane := currentPane()
+		clientID := ""
 		if len(args) > 2 {
-			pane = args[2]
+			clientID = args[2]
 		}
-		_, err := e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-			"pane": pane,
-			"type": args[0],
-			"data": payload,
+		expectType := ""
+		if len(args) > 3 {
+			expectType = strings.TrimSpace(args[3])
+		}
+		agentID, clientID, err := e.resolveWebTarget(clientID)
+		if err != nil {
+			return err
+		}
+		requestID := ""
+		if payloadMap, ok := payload.(map[string]any); ok {
+			requestID = strings.TrimSpace(anyString(payloadMap["requestId"]))
+			if requestID == "" {
+				requestID = randomID(args[0])
+				payloadMap["requestId"] = requestID
+			}
+			payload = payloadMap
+		}
+		conn, err := e.wsConnect(agentID)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"agent_id":  agentID,
+			"client_id": clientID,
+			"type":      args[0],
+			"data":      payload,
 		})
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 %s → pane=%s\n", args[0], pane)
-		return nil
+		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 %s → client_id=%s agent_id=%s\n", args[0], clientID, agentID)
+		if requestID == "" && expectType == "" {
+			return nil
+		}
+		msg, err := e.waitForMessage(conn, 20*time.Second, func(m map[string]any) bool {
+			if expectType != "" && anyString(m["type"]) != expectType {
+				return false
+			}
+			if requestID == "" {
+				return true
+			}
+			return anyString(asMap(m["data"])["requestId"]) == requestID
+		})
+		if err != nil {
+			return err
+		}
+		return e.printJSON(msg)
 	case "clients":
 		return e.copyAPI(http.MethodGet, "/api/chat/clients", nil)
 	default:
-		_, _ = fmt.Fprintln(e.Stdout, "webpage - CiCy 网页客户端控制工具\n\n命令:\n  ping\n  ipc-ping\n  exec-js\n  send\n  clients\n\n用法: webpage <命令> [参数...]")
-		return nil
+		return e.runAgentWebpage([]string{"help"})
 	}
 }
 
@@ -717,9 +1118,9 @@ func (e *Env) runGeminiAsk(args []string) error {
 	if len(args) > 1 {
 		winID, _ = strconv.Atoi(args[1])
 	}
-	pane := currentPane()
+	agentID := currentAgentID()
 	rid := randomID("gemini")
-	conn, err := e.wsConnect(pane)
+	conn, err := e.wsConnect(agentID)
 	if err != nil {
 		return err
 	}
@@ -727,9 +1128,9 @@ func (e *Env) runGeminiAsk(args []string) error {
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		_, _ = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-			"pane": pane,
-			"type": "desktop_event",
-			"data": map[string]any{"type": "gemini_ask", "prompt": args[0], "win_id": winID, "requestId": rid},
+			"agent_id": agentID,
+			"type":     "desktop_event",
+			"data":     map[string]any{"type": "gemini_ask", "prompt": args[0], "win_id": winID, "requestId": rid},
 		})
 	}()
 	msg, err := e.waitForMessage(conn, 60*time.Second, func(m map[string]any) bool {
@@ -759,9 +1160,9 @@ func (e *Env) runGeminiVision(args []string) error {
 	if len(args) > 2 {
 		srcWinID, _ = strconv.Atoi(args[2])
 	}
-	pane := currentPane()
+	agentID := currentAgentID()
 	rid := randomID("vision")
-	conn, err := e.wsConnect(pane)
+	conn, err := e.wsConnect(agentID)
 	if err != nil {
 		return err
 	}
@@ -769,9 +1170,9 @@ func (e *Env) runGeminiVision(args []string) error {
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		_, _ = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
-			"pane": pane,
-			"type": "desktop_event",
-			"data": map[string]any{"type": "gemini_vision_request", "prompt": prompt, "win_id": winID, "src_win_id": srcWinID, "requestId": rid},
+			"agent_id": agentID,
+			"type":     "desktop_event",
+			"data":     map[string]any{"type": "gemini_vision_request", "prompt": prompt, "win_id": winID, "src_win_id": srcWinID, "requestId": rid},
 		})
 	}()
 	msg, err := e.waitForMessage(conn, 60*time.Second, func(m map[string]any) bool {

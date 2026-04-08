@@ -28,6 +28,7 @@ var (
 		{Name: "tts", Source: "dist/tts"},
 	}
 	HosttoolAliases = []string{
+		"agent-webpage",
 		"agent-page-ping",
 		"cf-tunnel",
 		"cf-tunnel-py",
