@@ -31,6 +31,30 @@ make install-local-cli
 
 This builds the binaries into `dist/`, materializes the command entrypoints in `~/projects/cicy-skills/bin`, and links them into `~/.local/bin`.
 
+## GitHub Release
+
+GitHub Actions can publish release bundles for the Go binaries in this repo.
+
+- tag-driven release: push a tag like `v0.1.0`
+- manual release: run the `release-go-binaries` workflow and pass a tag like `v0.1.0`
+
+Each release uploads bundled archives for:
+
+- `linux/amd64`
+- `linux/arm64`
+- `darwin/amd64`
+- `darwin/arm64`
+- `windows/amd64`
+- `windows/arm64`
+
+Each archive includes:
+
+- `cicy-skills`
+- `cicy-skillsd`
+- `cicy-hosttools`
+- `stt`
+- `tts`
+
 ## Local Command Management
 
 ```bash
