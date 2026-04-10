@@ -8,14 +8,12 @@
 - `未规划` `ax-tree`
 - `未规划` `tm`
 - `未规划` `todo`
-- `未规划` `xui`
 
 ## Infra
 
 - `未规划` `cf-tunnel`
 - `未规划` `cping`
 - `未规划` `ft`
-- `未规划` `mysql-exec`
 
 ## AI
 
@@ -29,13 +27,9 @@
 
 ## CiCy
 
-- `未规划` `agent-page-ping`
 - `未规划` `cf-pages`
 - `未规划` `cf-workers`
 - `未规划` `help`
-- `未规划` `ipc-ping`
-- `未规划` `webpage`
-- `未规划` `webpage-ping`
 
 ## Services
 
@@ -46,4 +40,4 @@
 
 ## Summary
 
-- 当前规划条目总数：`26`
+- 当前规划条目总数：`20`

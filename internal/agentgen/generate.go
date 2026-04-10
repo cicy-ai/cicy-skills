@@ -40,7 +40,7 @@ func OpenClawSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-webpage", "cf-tunnel", "globalApiToken", "google", "tm"}
+	return []string{"agent-webpage", "cf-tunnel", "cping", "globalApiToken", "google", "ssh", "tm"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -49,10 +49,14 @@ func canonicalCodexSkillName(name string) string {
 		return "agent-webpage"
 	case "cf-tunnel":
 		return "cf-tunnel"
+	case "cping":
+		return "cping"
 	case "globalapitoken", "global-api-token":
 		return "globalApiToken"
 	case "google":
 		return "google"
+	case "ssh":
+		return "ssh"
 	case "tm":
 		return "tm"
 	default:
@@ -260,10 +264,14 @@ func generateCodexSkill(targetRoot, commandBinDir, skill string) error {
 		return generateCodexAgentWebpage(targetRoot, commandBinDir)
 	case "cf-tunnel":
 		return generateCodexCFTunnel(targetRoot, commandBinDir)
+	case "cping":
+		return generateCodexCPing(targetRoot, commandBinDir)
 	case "globalApiToken":
 		return generateCodexGlobalAPIToken(targetRoot, commandBinDir)
 	case "google":
 		return generateCodexGoogle(targetRoot, commandBinDir)
+	case "ssh":
+		return generateCodexSSH(targetRoot, commandBinDir)
 	case "tm":
 		return generateCodexTM(targetRoot, commandBinDir)
 	default:
@@ -284,6 +292,25 @@ func generateCodexCFTunnel(targetRoot, commandBinDir string) error {
 		return err
 	}
 	tools := renderCFTunnelCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexCPing(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "cping")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderCPingSkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderCPingHelp(commandBinDir)); err != nil {
+		return err
+	}
+	tools := renderCPingCommands()
 	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
@@ -360,6 +387,25 @@ func generateCodexTM(targetRoot, commandBinDir string) error {
 		return err
 	}
 	tools := renderTMCommands(commandBinDir)
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexSSH(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "ssh")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderSSHSkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderSSHHelp()); err != nil {
+		return err
+	}
+	tools := renderSSHCommands()
 	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
@@ -581,6 +627,44 @@ Read [tools.md](./references/tools.md) for the full tool and command shapes.
 `, commandBinDir, commandBinDir)
 }
 
+func renderCPingSkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: cping
+description: Use the local cping wrapper from %s to check network latency to a domain or IP from this host, with emphasis on China-side reachability.
+---
+
+# cping
+
+This skill covers the local `+"`cping`"+` wrapper installed from `+"`%s`"+`.
+
+Use it when the user asks for latency checks, China-side ping quality, or quick network verification for a hostname or IP.
+
+## Scope
+
+Use this skill for:
+
+- checking latency for a domain or IP
+- comparing rough China-side network quality from this host
+- reporting target resolution from hostname to IP
+- verifying whether a public endpoint looks reachable and fast
+
+## Rules
+
+1. Prefer the local `+"`cping`"+` command first.
+2. Report the actual target used and the resolved IP when shown.
+3. Treat the output as observational network data; do not over-claim the cause of latency.
+4. If the user needs protocol-specific debugging beyond `+"`cping`"+`, say so and switch to other tools only after this quick check.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the supported command shapes.
+`, commandBinDir, commandBinDir)
+}
+
 func renderAgentWebpageSkill(commandBinDir string) string {
 	return fmt.Sprintf(`---
 name: agent-webpage
@@ -675,6 +759,50 @@ Read [tools.md](./references/tools.md) for the command map.
 `, commandBinDir)
 }
 
+func renderSSHSkill() string {
+	return `---
+name: ssh
+description: Use OpenSSH on this host. Trigger when the task mentions ssh, ~/.ssh/config, ssh config hosts, ssh aliases, remote login, jump hosts, or adding/listing/using SSH nodes from local config.
+---
+
+# ssh
+
+This skill is for SSH access and local SSH config management on this host.
+
+Use the real OpenSSH client and treat ` + "`~/.ssh/config`" + ` as the primary source of named nodes.
+
+## Scope
+
+Use this skill for:
+
+- explaining how SSH on this host is configured
+- reading ` + "`~/.ssh/config`" + ` first when the user asks about SSH nodes
+- listing configured ` + "`Host`" + ` entries
+- adding or updating SSH node entries in ` + "`~/.ssh/config`" + `
+- using configured nodes via ` + "`ssh <host>`" + `
+- running one-off remote commands via ` + "`ssh <host> '<cmd>'`" + `
+- checking jump-host settings, ports, users, and identity files
+
+## Rules
+
+1. Read ` + "`~/.ssh/config`" + ` before guessing host aliases.
+2. Prefer existing ` + "`Host`" + ` aliases from config over raw hostnames when both exist.
+3. Never overwrite ` + "`~/.ssh/config`" + `; preserve unrelated entries and edit surgically.
+4. If the config uses ` + "`Include`" + `, inspect ` + "`~/.ssh/config`" + ` first, then follow includes only when needed.
+5. When adding a node, keep the block minimal unless the user asks for extra options.
+6. For actual connections, use the real ` + "`ssh`" + ` command directly. Do not invent wrapper commands.
+7. If a command may prompt for a password, host-key trust, or MFA, note that interactive input may be required.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the common command shapes.
+`
+}
+
 func renderCFTunnelHelp(commandBinDir string) string {
 	return fmt.Sprintf(`# Cf Tunnel Help
 
@@ -697,6 +825,33 @@ func renderCFTunnelHelp(commandBinDir string) string {
 - do not mock Cloudflare responses
 - `+"`cf-tunnel`"+` manages route and DNS state only; it does not manage the `+"`cloudflared`"+` process
 - report exact hostname and port mappings back to the user
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`, commandBinDir)
+}
+
+func renderCPingHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# cping Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`cping`"+`
+
+## Quick Start
+
+- ping a domain: `+"`cping tn.cicy-ai.com`"+`
+- ping an IP: `+"`cping 35.241.97.128`"+`
+- compare a public hostname: `+"`cping baidu.com`"+`
+
+## Rules
+
+- use the real `+"`cping`"+` wrapper output, not a mocked summary
+- report the target and resolved IP when shown
+- treat this as a quick latency signal, not a full root-cause analysis
+- if the user needs deeper diagnosis, use `+"`cping`"+` first and then move to other network tools
 
 ## More
 
@@ -804,6 +959,43 @@ Token rules:
 `, commandBinDir)
 }
 
+func renderSSHHelp() string {
+	return `# ssh Help
+
+## Primary Files
+
+- main config: ` + "`~/.ssh/config`" + `
+- optional includes: inspect ` + "`Include`" + ` lines only when needed
+
+## Quick Start
+
+- list configured aliases from ` + "`~/.ssh/config`" + `
+- inspect one alias block before using it
+- connect with ` + "`ssh <alias>`" + `
+- run a remote command with ` + "`ssh <alias> '<command>'`" + `
+
+## Add Node Workflow
+
+Preferred minimal block:
+
+` + "```sshconfig" + `
+Host my-node
+  HostName 1.2.3.4
+  User root
+  Port 22
+` + "```" + `
+
+Only add ` + "`IdentityFile`" + `, ` + "`ProxyJump`" + `, or other advanced fields when the user asks or the existing config style clearly expects them.
+
+## Rules
+
+- always read ` + "`~/.ssh/config`" + ` before guessing aliases
+- preserve unrelated config when editing
+- prefer existing aliases from config over raw hostnames
+- after editing, re-read the affected block and report the alias used
+`
+}
+
 func renderGoogleCommands() string {
 	return `# Google Commands
 
@@ -860,6 +1052,27 @@ func renderCFTunnelCommands() string {
 - hostnames follow the pattern ` + "`g-<port>.<domain>`" + `
 - the command reads Cloudflare config from ` + "`~/global.json`" + `
 - it manages tunnel routes and DNS records, not the ` + "`cloudflared`" + ` process
+`
+}
+
+func renderCPingCommands() string {
+	return `# cping Commands
+
+## Main
+
+- ` + "`cping <domain_or_ip>`" + `
+
+## Examples
+
+- ` + "`cping tn.cicy-ai.com`" + `
+- ` + "`cping 35.241.97.128`" + `
+- ` + "`cping baidu.com`" + `
+
+## Notes
+
+- the command may resolve a hostname to an IP before reporting results
+- the output is a quick latency snapshot from this host's perspective
+- use it as a first-pass network check before deeper debugging
 `
 }
 
@@ -970,6 +1183,30 @@ Observed tmux-related `+"`cicy-code`"+` commands:
 - for remote node work, prefer `+"`cicy-code -n <instance> ...`"+`
 - the common primary pane is `+"`w-10001`"+`
 `, commandBinDir)
+}
+
+func renderSSHCommands() string {
+	return `# ssh Command Reference
+
+## Config Discovery
+
+- read ` + "`~/.ssh/config`" + `
+- parse ` + "`Host`" + ` entries to list known nodes
+- inspect ` + "`HostName`" + `, ` + "`User`" + `, ` + "`Port`" + `, ` + "`IdentityFile`" + `, and ` + "`ProxyJump`" + `
+
+## Common Commands
+
+- ` + "`ssh <alias>`" + `
+- ` + "`ssh <alias> '<command>'`" + `
+- ` + "`ssh -J <jump-host> <alias>`" + ` when a one-off jump is needed
+- ` + "`ssh -F ~/.ssh/config <alias>`" + ` when you need to force a specific config file
+
+## Editing Rules
+
+- append or edit host blocks surgically
+- do not replace the whole config file
+- keep new host blocks minimal unless the user asks for more options
+`
 }
 
 func renderAgentWebpageTools() string {

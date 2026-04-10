@@ -97,6 +97,50 @@ func TestCodexInstallCFTunnel(t *testing.T) {
 	}
 }
 
+func TestCodexInstallCPing(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+
+	installed, err := Install("", "codex", targetRoot, commandBinDir, []string{"cping"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(installed) != 1 || installed[0] != "cping" {
+		t.Fatalf("Install() installed = %#v", installed)
+	}
+
+	skillPath := filepath.Join(targetRoot, "cping", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "`cping`") {
+		t.Fatalf("SKILL.md missing cping command reference: %s", text)
+	}
+	if !strings.Contains(text, commandBinDir) {
+		t.Fatalf("SKILL.md missing command bin dir %q: %s", commandBinDir, text)
+	}
+
+	helpPath := filepath.Join(targetRoot, "cping", "references", "help.md")
+	helpData, err := os.ReadFile(helpPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", helpPath, err)
+	}
+	if !strings.Contains(string(helpData), "cping tn.cicy-ai.com") {
+		t.Fatalf("help.md missing cping example: %s", string(helpData))
+	}
+
+	toolsPath := filepath.Join(targetRoot, "cping", "references", "tools.md")
+	toolsData, err := os.ReadFile(toolsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", toolsPath, err)
+	}
+	if !strings.Contains(string(toolsData), "cping <domain_or_ip>") {
+		t.Fatalf("tools.md missing cping usage: %s", string(toolsData))
+	}
+}
+
 func TestCodexInstallGlobalAPIToken(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
@@ -214,6 +258,50 @@ func TestCodexInstallTM(t *testing.T) {
 	}
 }
 
+func TestCodexInstallSSH(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+
+	installed, err := Install("", "codex", targetRoot, commandBinDir, []string{"ssh"})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if len(installed) != 1 || installed[0] != "ssh" {
+		t.Fatalf("Install() installed = %#v", installed)
+	}
+
+	skillPath := filepath.Join(targetRoot, "ssh", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "`~/.ssh/config`") {
+		t.Fatalf("SKILL.md missing ssh config reference: %s", text)
+	}
+	if !strings.Contains(text, "`ssh <host>`") {
+		t.Fatalf("SKILL.md missing ssh command reference: %s", text)
+	}
+
+	helpPath := filepath.Join(targetRoot, "ssh", "references", "help.md")
+	helpData, err := os.ReadFile(helpPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", helpPath, err)
+	}
+	if !strings.Contains(string(helpData), "Host my-node") {
+		t.Fatalf("help.md missing host block example: %s", string(helpData))
+	}
+
+	toolsPath := filepath.Join(targetRoot, "ssh", "references", "tools.md")
+	toolsData, err := os.ReadFile(toolsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", toolsPath, err)
+	}
+	if !strings.Contains(string(toolsData), "ssh <alias>") {
+		t.Fatalf("tools.md missing ssh alias example: %s", string(toolsData))
+	}
+}
+
 func TestCodexListShowsExternalDirs(t *testing.T) {
 	targetRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(targetRoot, "manual-skill"), 0o755); err != nil {
@@ -230,8 +318,10 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 
 	foundGoogle := false
 	foundCFTunnel := false
+	foundCPing := false
 	foundGlobalAPIToken := false
 	foundAgentWebpage := false
+	foundSSH := false
 	foundTM := false
 	foundExternal := false
 	for _, item := range listed {
@@ -241,6 +331,9 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 		if item.Name == "cf-tunnel" && item.Status == "missing" {
 			foundCFTunnel = true
 		}
+		if item.Name == "cping" && item.Status == "missing" {
+			foundCPing = true
+		}
 		if item.Name == "globalApiToken" && item.Status == "missing" {
 			foundGlobalAPIToken = true
 		}
@@ -249,6 +342,9 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 		}
 		if item.Name == "tm" && item.Status == "missing" {
 			foundTM = true
+		}
+		if item.Name == "ssh" && item.Status == "missing" {
+			foundSSH = true
 		}
 		if item.Name == "manual-skill" && item.Status == "external" {
 			foundExternal = true
@@ -263,11 +359,17 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 	if !foundCFTunnel {
 		t.Fatalf("List() missing cf-tunnel status: %#v", listed)
 	}
+	if !foundCPing {
+		t.Fatalf("List() missing cping status: %#v", listed)
+	}
 	if !foundGlobalAPIToken {
 		t.Fatalf("List() missing globalApiToken status: %#v", listed)
 	}
 	if !foundTM {
 		t.Fatalf("List() missing tm status: %#v", listed)
+	}
+	if !foundSSH {
+		t.Fatalf("List() missing ssh status: %#v", listed)
 	}
 	if !foundExternal {
 		t.Fatalf("List() missing external status: %#v", listed)
@@ -352,6 +454,50 @@ func TestCodexHelpReadsGeneratedTMHelp(t *testing.T) {
 	}
 }
 
+func TestCodexHelpReadsGeneratedCPingHelp(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"cping"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	help, err := Help("codex", targetRoot, "cping")
+	if err != nil {
+		t.Fatalf("Help() error = %v", err)
+	}
+	if help.Name != "cping" {
+		t.Fatalf("Help() name = %q", help.Name)
+	}
+	if !strings.Contains(help.Path, "cping/references/help.md") {
+		t.Fatalf("Help() path = %q", help.Path)
+	}
+	if !strings.Contains(help.Text, "# cping Help") {
+		t.Fatalf("Help() text = %q", help.Text)
+	}
+}
+
+func TestCodexHelpReadsGeneratedSSHHelp(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"ssh"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	help, err := Help("codex", targetRoot, "ssh")
+	if err != nil {
+		t.Fatalf("Help() error = %v", err)
+	}
+	if help.Name != "ssh" {
+		t.Fatalf("Help() name = %q", help.Name)
+	}
+	if !strings.Contains(help.Path, "ssh/references/help.md") {
+		t.Fatalf("Help() path = %q", help.Path)
+	}
+	if !strings.Contains(help.Text, "# ssh Help") {
+		t.Fatalf("Help() text = %q", help.Text)
+	}
+}
+
 func TestCodexToolsReadsGeneratedTMTools(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
@@ -370,6 +516,50 @@ func TestCodexToolsReadsGeneratedTMTools(t *testing.T) {
 		t.Fatalf("Tools() path = %q", tools.Path)
 	}
 	if !strings.Contains(tools.Text, "tm Command Reference") {
+		t.Fatalf("Tools() text = %q", tools.Text)
+	}
+}
+
+func TestCodexToolsReadsGeneratedCPingTools(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"cping"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	tools, err := Tools("codex", targetRoot, "cping")
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	if tools.Name != "cping" {
+		t.Fatalf("Tools() name = %q", tools.Name)
+	}
+	if !strings.Contains(tools.Path, "cping/references/tools.md") {
+		t.Fatalf("Tools() path = %q", tools.Path)
+	}
+	if !strings.Contains(tools.Text, "cping Commands") {
+		t.Fatalf("Tools() text = %q", tools.Text)
+	}
+}
+
+func TestCodexToolsReadsGeneratedSSHTools(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"ssh"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	tools, err := Tools("codex", targetRoot, "ssh")
+	if err != nil {
+		t.Fatalf("Tools() error = %v", err)
+	}
+	if tools.Name != "ssh" {
+		t.Fatalf("Tools() name = %q", tools.Name)
+	}
+	if !strings.Contains(tools.Path, "ssh/references/tools.md") {
+		t.Fatalf("Tools() path = %q", tools.Path)
+	}
+	if !strings.Contains(tools.Text, "ssh Command Reference") {
 		t.Fatalf("Tools() text = %q", tools.Text)
 	}
 }

@@ -107,8 +107,14 @@ func TestHelpTextAgent(t *testing.T) {
 	if !strings.Contains(got, "cf-tunnel") {
 		t.Fatalf("agent help missing cf-tunnel approved skill: %q", got)
 	}
+	if !strings.Contains(got, "cping") {
+		t.Fatalf("agent help missing cping approved skill: %q", got)
+	}
 	if !strings.Contains(got, "globalApiToken") {
 		t.Fatalf("agent help missing globalApiToken approved skill: %q", got)
+	}
+	if !strings.Contains(got, "ssh") {
+		t.Fatalf("agent help missing ssh approved skill: %q", got)
 	}
 	if !strings.Contains(got, "tm") {
 		t.Fatalf("agent help missing tm approved skill: %q", got)

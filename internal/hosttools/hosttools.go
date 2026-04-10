@@ -1709,8 +1709,8 @@ func (e *Env) runCPing(args []string) error {
 		return errors.New("无法获取数据")
 	}
 	html := string(body)
-	rowRe := regexp.MustCompile(`<tr class="node_tr"[^>]*>(.*?)</tr>`)
-	ispRe := regexp.MustCompile(`badge[^"]*">(.*?)</span>\s*(.*?)\s*</td>`)
+	rowRe := regexp.MustCompile(`(?s)<tr class="node_tr"[^>]*>(.*?)</tr>`)
+	ispRe := regexp.MustCompile(`(?s)<span class="badge[^"]*">\s*(.*?)\s*</span>\s*(.*?)\s*</td>`)
 	avgRe := regexp.MustCompile(`id="avg_ping_\d+"[^>]*>([^<]+)`)
 	lossRe := regexp.MustCompile(`id="loss_\d+"[^>]*>([^<]+)`)
 	type result struct {
