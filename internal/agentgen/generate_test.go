@@ -55,6 +55,37 @@ func TestCodexInstallListRemove(t *testing.T) {
 	}
 }
 
+func TestProfileDefaultTargets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	commandBinDir := filepath.Join(home, "bin")
+
+	installed, err := Install("", "claude", "", commandBinDir, []string{"agent-code-server"})
+	if err != nil {
+		t.Fatalf("Install(claude) error = %v", err)
+	}
+	if len(installed) != 1 || installed[0] != "agent-code-server" {
+		t.Fatalf("Install(claude) installed = %#v", installed)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "agent-code-server", "SKILL.md")); err != nil {
+		t.Fatalf("claude skill missing in ~/.claude/skills: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "skills", "agent-code-server", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("claude install should not write ~/.codex/skills, err=%v", err)
+	}
+
+	installed, err = Install("", "openclaw", "", commandBinDir, []string{"agent-webpage"})
+	if err != nil {
+		t.Fatalf("Install(openclaw) error = %v", err)
+	}
+	if len(installed) != 1 || installed[0] != "agent-webpage" {
+		t.Fatalf("Install(openclaw) installed = %#v", installed)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".openclaw", "skills", "agent-webpage", "SKILL.md")); err != nil {
+		t.Fatalf("openclaw skill missing in ~/.openclaw/skills: %v", err)
+	}
+}
+
 func TestCodexInstallCFTunnel(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")

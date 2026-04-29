@@ -40,11 +40,13 @@ func OpenClawSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-webpage", "cf-tunnel", "cping", "globalApiToken", "google", "ssh", "tm"}
+	return []string{"agent-code-server", "agent-webpage", "cf-tunnel", "cping", "globalApiToken", "google", "ssh", "tm"}
 }
 
 func canonicalCodexSkillName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "agent-code-server", "agentcodeserver", "agent_code_server", "code-server", "codeserver":
+		return "agent-code-server"
 	case "agent-webpage", "agentwebpage", "agent_webpage", "webpage", "agent-page-ping":
 		return "agent-webpage"
 	case "cf-tunnel":
@@ -70,7 +72,9 @@ func Generate(root, profileName, targetRoot, commandBinDir string) error {
 }
 
 func List(profileName, targetRoot string) ([]SkillStatus, error) {
-	switch normalizeProfile(profileName) {
+	profileName = normalizeProfile(profileName)
+	targetRoot = defaultProfileTarget(profileName, targetRoot)
+	switch profileName {
 	case "codex", "claude", "openclaw":
 		return listCodex(targetRoot)
 	default:
@@ -79,7 +83,9 @@ func List(profileName, targetRoot string) ([]SkillStatus, error) {
 }
 
 func Help(profileName, targetRoot, skillName string) (SkillHelp, error) {
-	switch normalizeProfile(profileName) {
+	profileName = normalizeProfile(profileName)
+	targetRoot = defaultProfileTarget(profileName, targetRoot)
+	switch profileName {
 	case "codex", "claude", "openclaw":
 		return helpCodex(targetRoot, skillName)
 	default:
@@ -88,7 +94,9 @@ func Help(profileName, targetRoot, skillName string) (SkillHelp, error) {
 }
 
 func Tools(profileName, targetRoot, skillName string) (SkillHelp, error) {
-	switch normalizeProfile(profileName) {
+	profileName = normalizeProfile(profileName)
+	targetRoot = defaultProfileTarget(profileName, targetRoot)
+	switch profileName {
 	case "codex", "claude", "openclaw":
 		return toolsCodex(targetRoot, skillName)
 	default:
@@ -97,7 +105,9 @@ func Tools(profileName, targetRoot, skillName string) (SkillHelp, error) {
 }
 
 func Install(root, profileName, targetRoot, commandBinDir string, skillNames []string) ([]string, error) {
-	switch normalizeProfile(profileName) {
+	profileName = normalizeProfile(profileName)
+	targetRoot = defaultProfileTarget(profileName, targetRoot)
+	switch profileName {
 	case "codex", "claude", "openclaw":
 		return installCodex(targetRoot, commandBinDir, skillNames)
 	default:
@@ -110,7 +120,9 @@ func Update(root, profileName, targetRoot, commandBinDir string, skillNames []st
 }
 
 func Remove(profileName, targetRoot string, skillNames []string) ([]string, error) {
-	switch normalizeProfile(profileName) {
+	profileName = normalizeProfile(profileName)
+	targetRoot = defaultProfileTarget(profileName, targetRoot)
+	switch profileName {
 	case "codex", "claude", "openclaw":
 		return removeCodex(targetRoot, skillNames)
 	default:
@@ -119,7 +131,9 @@ func Remove(profileName, targetRoot string, skillNames []string) ([]string, erro
 }
 
 func Sync(root, profileName, targetRoot, commandBinDir string) ([]string, error) {
-	switch normalizeProfile(profileName) {
+	profileName = normalizeProfile(profileName)
+	targetRoot = defaultProfileTarget(profileName, targetRoot)
+	switch profileName {
 	case "codex", "claude", "openclaw":
 		return installCodex(targetRoot, commandBinDir, ApprovedCodexSkills())
 	default:
@@ -131,8 +145,23 @@ func normalizeProfile(profileName string) string {
 	return strings.ToLower(strings.TrimSpace(profileName))
 }
 
+func defaultProfileTarget(profileName, targetRoot string) string {
+	if strings.TrimSpace(targetRoot) != "" {
+		return targetRoot
+	}
+	switch normalizeProfile(profileName) {
+	case "codex":
+		return CodexSkillsDir()
+	case "claude":
+		return ClaudeSkillsDir()
+	case "openclaw":
+		return OpenClawSkillsDir()
+	default:
+		return targetRoot
+	}
+}
+
 func listCodex(targetRoot string) ([]SkillStatus, error) {
-	targetRoot = defaultCodexTarget(targetRoot)
 	approved := ApprovedCodexSkills()
 	approvedSet := make(map[string]struct{}, len(approved))
 	statuses := make([]SkillStatus, 0, len(approved))
@@ -172,7 +201,6 @@ func listCodex(targetRoot string) ([]SkillStatus, error) {
 }
 
 func installCodex(targetRoot, commandBinDir string, skillNames []string) ([]string, error) {
-	targetRoot = defaultCodexTarget(targetRoot)
 	skills, err := resolveCodexSkills(skillNames)
 	if err != nil {
 		return nil, err
@@ -191,7 +219,6 @@ func installCodex(targetRoot, commandBinDir string, skillNames []string) ([]stri
 }
 
 func removeCodex(targetRoot string, skillNames []string) ([]string, error) {
-	targetRoot = defaultCodexTarget(targetRoot)
 	skills, err := resolveCodexSkills(skillNames)
 	if err != nil {
 		return nil, err
@@ -204,13 +231,6 @@ func removeCodex(targetRoot string, skillNames []string) ([]string, error) {
 		removed = append(removed, skill)
 	}
 	return removed, nil
-}
-
-func defaultCodexTarget(targetRoot string) string {
-	if strings.TrimSpace(targetRoot) == "" {
-		return CodexSkillsDir()
-	}
-	return targetRoot
 }
 
 func resolveCodexSkills(skillNames []string) ([]string, error) {
@@ -260,6 +280,8 @@ func resolveCodexSkills(skillNames []string) ([]string, error) {
 
 func generateCodexSkill(targetRoot, commandBinDir, skill string) error {
 	switch skill {
+	case "agent-code-server":
+		return generateCodexAgentCodeServer(targetRoot, commandBinDir)
 	case "agent-webpage":
 		return generateCodexAgentWebpage(targetRoot, commandBinDir)
 	case "cf-tunnel":
@@ -355,6 +377,25 @@ func generateCodexGlobalAPIToken(targetRoot, commandBinDir string) error {
 	return writeText(filepath.Join(refsDir, "commands.md"), tools)
 }
 
+func generateCodexAgentCodeServer(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "agent-code-server")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderAgentCodeServerSkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderAgentCodeServerHelp(commandBinDir)); err != nil {
+		return err
+	}
+	tools := renderAgentCodeServerTools()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
 func generateCodexAgentWebpage(targetRoot, commandBinDir string) error {
 	skillDir := filepath.Join(targetRoot, "agent-webpage")
 	refsDir := filepath.Join(skillDir, "references")
@@ -421,7 +462,6 @@ func toolsCodex(targetRoot, skillName string) (SkillHelp, error) {
 }
 
 func readCodexReference(targetRoot, skillName string, filenames ...string) (SkillHelp, error) {
-	targetRoot = defaultCodexTarget(targetRoot)
 	skills, err := resolveCodexSkills([]string{skillName})
 	if err != nil {
 		return SkillHelp{}, err
@@ -859,6 +899,76 @@ func renderCPingHelp(commandBinDir string) string {
 `, commandBinDir)
 }
 
+func renderAgentCodeServerSkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: agent-code-server
+description: Use the local agent-code-server wrapper from %s to open a file in the current page-bound code-server on this host.
+---
+
+# Agent Code Server
+
+This skill covers the local `+"`agent-code-server`"+` wrapper installed from `+"`"+`%s`+"`"+`.
+
+Use this command directly from `+"`PATH`"+`. It sends the standard `+"`code.open_file`"+` event to the real page client.
+
+## Scope
+
+Use this skill when the task involves:
+
+- opening a file in the current page's code-server
+- targeting a specific connected page by `+"`page_client_id`"+`
+- checking available page clients before opening a file
+
+## Rules
+
+1. Prefer the local `+"`agent-code-server`"+` command first.
+2. Target a specific page by `+"`page_client_id`"+`.
+3. If no `+"`page_client_id`"+` is provided, only auto-target when the current agent has exactly one connected page client.
+4. `+"`ping`"+` checks whether the matching `+"`:code-ext`"+` client is online.
+5. The standard open action accepts plain paths, `+"`file://`"+` paths, and optional line/column suffixes.
+6. Use `+"`agent-code-server help`"+` and `+"`agent-code-server tools`"+` before guessing command shapes.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage and examples.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the supported commands.
+`, commandBinDir, commandBinDir)
+}
+
+func renderAgentCodeServerHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# Agent Code Server Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`agent-code-server`"+`
+
+## Quick Start
+
+- inspect usage: `+"`agent-code-server help`"+`
+- inspect tool map: `+"`agent-code-server tools`"+`
+- inspect current page clients: `+"`agent-code-server list`"+`
+- check whether code-server is connected for a page: `+"`agent-code-server ping web-abc123`"+`
+- open a file in the current page-bound code-server: `+"`agent-code-server open ~/.bashrc:12 web-abc123`"+`
+
+## Rules
+
+- use the real live page client, not mocks
+- identify the target by `+"`page_client_id`"+`
+- `+"`ping`"+` checks whether `+"`page_client_id:code-ext`"+` is connected
+- the standard event is `+"`code.open_file`"+`
+- the open path may include `+"`:line`"+`, `+"`:line:column`"+`, or range suffixes
+- if you need the exact command shape, read [tools.md](./tools.md)
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`, commandBinDir)
+}
+
 func renderAgentWebpageHelp(commandBinDir string) string {
 	return fmt.Sprintf(`# Agent Webpage Help
 
@@ -1209,6 +1319,16 @@ func renderSSHCommands() string {
 `
 }
 
+func renderAgentCodeServerTools() string {
+	return `# Agent Code Server Tools
+
+- ping [page_client_id] -> checks whether the matching :code-ext client is connected
+- list -> lists current page_client_id values and code-server connectivity
+- clients -> legacy alias of list
+- open <path> [page_client_id] -> direct push code.open_file to the page client; supports file:// and line/column suffixes
+`
+}
+
 func renderAgentWebpageTools() string {
 	return `# Agent Webpage Tools
 
@@ -1226,7 +1346,6 @@ func renderAgentWebpageTools() string {
 
 - ` + "`webpage ...`" + ` -> legacy alias of ` + "`agent-webpage ...`" + `
 - ` + "`webpage-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ping [client_id]`" + `
-- ` + "`agent-page-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ping [client_id]`" + `
 - ` + "`ipc-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ipc-ping [client_id]`" + `
 
 ## Response Rules

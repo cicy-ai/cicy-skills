@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -69,8 +70,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runTM(args)
 	case "agent-webpage", "webpage":
 		err = env.runAgentWebpage(args)
-	case "agent-page-ping":
-		err = env.runAgentWebpage(append([]string{"ping"}, args...))
+	case "agent-code-server":
+		err = env.runAgentCodeServer(args)
 	case "ipc-ping":
 		err = env.runAgentWebpage(append([]string{"ipc-ping"}, args...))
 	case "webpage-ping":
@@ -196,7 +197,7 @@ type tmConfig struct {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-page-ping, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-code-server, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
@@ -261,19 +262,17 @@ func mustGetwd() string {
 
 func (e *Env) waitForMessage(conn *websocket.Conn, timeout time.Duration, match func(map[string]any) bool) (map[string]any, error) {
 	deadline := time.Now().Add(timeout)
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	for time.Now().Before(deadline) {
+	_ = conn.SetReadDeadline(deadline)
+	for {
 		var msg map[string]any
 		if err := conn.ReadJSON(&msg); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 				break
 			}
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-				continue
+				return nil, fmt.Errorf("timeout waiting for response")
 			}
-			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-			continue
+			return nil, err
 		}
 		if match(msg) {
 			return msg, nil
@@ -952,6 +951,231 @@ func (e *Env) runIPCPing(args []string) error {
 	return nil
 }
 
+func expandHostPath(input string) string {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return ""
+	}
+	home := userHomeDir()
+	if value == "~" {
+		return home
+	}
+	if strings.HasPrefix(value, "~/") {
+		return filepath.Join(home, strings.TrimPrefix(value, "~/"))
+	}
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value)
+	}
+	wd := mustGetwd()
+	if wd == "" {
+		return filepath.Clean(value)
+	}
+	return filepath.Clean(filepath.Join(wd, value))
+}
+
+var codeServerLineSuffixRe = regexp.MustCompile(`^(.*?)(:\d+(?::\d+)?(?:-\d+:\d+)?)$`)
+
+func normalizeCodeServerOpenPath(input string) string {
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return ""
+	}
+	suffix := ""
+	if match := codeServerLineSuffixRe.FindStringSubmatch(value); len(match) == 3 {
+		value = strings.TrimSpace(match[1])
+		suffix = strings.TrimSpace(match[2])
+	}
+	if strings.HasPrefix(value, "file://") {
+		pathValue := strings.TrimSpace(strings.TrimPrefix(value, "file://"))
+		if pathValue != "" && !strings.HasPrefix(pathValue, "/") && !strings.HasPrefix(pathValue, "~/") && !strings.HasPrefix(pathValue, "./") && !strings.HasPrefix(pathValue, "../") && !regexp.MustCompile(`^[A-Za-z]:[\\/]`).MatchString(pathValue) {
+			pathValue = "/" + strings.TrimLeft(pathValue, "/")
+		}
+		return pathValue + suffix
+	}
+	return expandHostPath(value) + suffix
+}
+
+type codeServerTarget struct {
+	agentID            string
+	pageClientID       string
+	codeServerClientID string
+}
+
+func (e *Env) resolveCodeServerTarget(pageClientID string) (codeServerTarget, error) {
+	clients, err := e.chatClients()
+	if err != nil {
+		return codeServerTarget{}, err
+	}
+	pageClientID = strings.TrimSpace(pageClientID)
+	if pageClientID != "" {
+		for agentID, clientMap := range clients {
+			if _, ok := clientMap[pageClientID]; !ok {
+				continue
+			}
+			return codeServerTarget{agentID: agentID, pageClientID: pageClientID, codeServerClientID: pageClientID + ":code-ext"}, nil
+		}
+		return codeServerTarget{}, fmt.Errorf("page_client_id %s not found", pageClientID)
+	}
+	agentID := currentAgentID()
+	clientMap := clients[agentID]
+	var pageClients []string
+	for clientID := range clientMap {
+		if strings.HasSuffix(clientID, ":code-ext") {
+			continue
+		}
+		pageClients = append(pageClients, clientID)
+	}
+	switch len(pageClients) {
+	case 0:
+		return codeServerTarget{}, fmt.Errorf("current agent %s has no connected page client", agentID)
+	case 1:
+		return codeServerTarget{agentID: agentID, pageClientID: pageClients[0], codeServerClientID: pageClients[0] + ":code-ext"}, nil
+	default:
+		return codeServerTarget{}, fmt.Errorf("current agent %s has multiple page clients; pass page_client_id explicitly", agentID)
+	}
+}
+
+func (e *Env) listCodeServerTargets() ([]map[string]any, error) {
+	clients, err := e.chatClients()
+	if err != nil {
+		return nil, err
+	}
+	agentID := currentAgentID()
+	clientMap := clients[agentID]
+	out := []map[string]any{}
+	for clientID := range clientMap {
+		if strings.HasSuffix(clientID, ":code-ext") {
+			continue
+		}
+		codeClientID := clientID + ":code-ext"
+		_, codeReady := clientMap[codeClientID]
+		out = append(out, map[string]any{
+			"agent_id":              agentID,
+			"page_client_id":        clientID,
+			"code_server_client_id": codeClientID,
+			"code_server_connected": codeReady,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return anyString(out[i]["page_client_id"]) < anyString(out[j]["page_client_id"])
+	})
+	return out, nil
+}
+
+func (e *Env) runAgentCodeServer(args []string) error {
+	cmd := "help"
+	if len(args) > 0 {
+		cmd = args[0]
+		args = args[1:]
+	}
+	switch cmd {
+	case "help", "-h", "--help":
+		_, _ = fmt.Fprintln(e.Stdout, "agent-code-server - CiCy code-server open-file tool\n\nCommands:\n  help\n  tools\n  ping [page_client_id]\n  list\n  clients\n  open <path> [page_client_id]\n\nNotes:\n  - target by page_client_id, not agent_id\n  - if omitted, current agent must have exactly one connected page client\n  - ping sends host.ping to the matching :code-ext client and waits for code.pong\n  - open accepts plain paths, file:// paths, and optional :line[:column] or :line:column-endLine:endColumn suffixes\n  - open first tells the page client to show the files drawer, then waits for code.opened from :code-ext")
+		return nil
+	case "tools":
+		_, _ = fmt.Fprintln(e.Stdout, "# agent-code-server tools\n\n- ping [page_client_id] -> sends host.ping to the matching :code-ext client and waits for code.pong\n- list -> lists current page_client_id values and code-server connectivity\n- clients -> legacy alias of list\n- open <path> [page_client_id] -> asks the page client to open the files drawer and forwards the same requestId to :code-ext; supports file:// and line/column suffixes")
+		return nil
+	case "ping":
+		pageClientID := ""
+		if len(args) > 0 {
+			pageClientID = args[0]
+		}
+		target, err := e.resolveCodeServerTarget(pageClientID)
+		if err != nil {
+			return err
+		}
+		conn, err := e.wsConnect(target.agentID)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		rid := randomID("code-ping")
+		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+			"agent_id":  target.agentID,
+			"client_id": target.codeServerClientID,
+			"type":      "host.ping",
+			"data": map[string]any{
+				"requestId":      rid,
+				"page_client_id": target.pageClientID,
+				"code_client_id": target.codeServerClientID,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 host.ping → page_client_id=%s code_server_client_id=%s agent_id=%s\n", target.pageClientID, target.codeServerClientID, target.agentID)
+		msg, err := e.waitForMessage(conn, 15*time.Second, func(m map[string]any) bool {
+			data := asMap(m["data"])
+			return anyString(m["type"]) == "code.pong" &&
+				anyString(data["requestId"]) == rid &&
+				anyString(data["code_client_id"]) == target.codeServerClientID
+		})
+		if err != nil {
+			return err
+		}
+		data := asMap(msg["data"])
+		version := strings.TrimSpace(anyString(data["version"]))
+		if version == "" {
+			version = "unknown"
+		}
+		_, _ = fmt.Fprintf(e.Stdout, "✅ 收到 code.pong！code-server 在线 (v%s)\n", version)
+		return nil
+	case "list", "clients":
+		out, err := e.listCodeServerTargets()
+		if err != nil {
+			return err
+		}
+		return e.printJSON(out)
+	case "open":
+		if len(args) < 1 {
+			return errors.New("Usage: agent-code-server open <path> [page_client_id]")
+		}
+		pageClientID := ""
+		if len(args) > 1 {
+			pageClientID = args[1]
+		}
+		target, err := e.resolveCodeServerTarget(pageClientID)
+		if err != nil {
+			return err
+		}
+		conn, err := e.wsConnect(target.agentID)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		rid := randomID("code-open")
+		payload := map[string]any{
+			"path":      normalizeCodeServerOpenPath(args[0]),
+			"requestId": rid,
+		}
+		payload["page_client_id"] = target.pageClientID
+		payload["code_client_id"] = target.codeServerClientID
+		_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{"agent_id": target.agentID, "client_id": target.pageClientID, "type": "code.open_file", "data": payload})
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(e.Stdout, "✅ 发送 code.open_file → page_client_id=%s code_server_client_id=%s agent_id=%s\n", target.pageClientID, target.codeServerClientID, target.agentID)
+		msg, err := e.waitForMessage(conn, 15*time.Second, func(m map[string]any) bool {
+			data := asMap(m["data"])
+			if anyString(data["requestId"]) != rid || anyString(data["code_client_id"]) != target.codeServerClientID {
+				return false
+			}
+			typ := anyString(m["type"])
+			return typ == "code.opened" || typ == "code.open_file_error"
+		})
+		if err != nil {
+			return err
+		}
+		if anyString(msg["type"]) == "code.open_file_error" {
+			return fmt.Errorf("code-server open failed: %s", strings.TrimSpace(anyString(asMap(msg["data"])["error"])))
+		}
+		_, _ = fmt.Fprintf(e.Stdout, "✅ 收到 code.opened → %s\n", anyString(asMap(msg["data"])["path"]))
+		return nil
+	default:
+		return e.runAgentCodeServer([]string{"help"})
+	}
+}
+
 func (e *Env) runAgentWebpage(args []string) error {
 	cmd := "help"
 	if len(args) > 0 {
@@ -960,7 +1184,7 @@ func (e *Env) runAgentWebpage(args []string) error {
 	}
 	switch cmd {
 	case "help", "-h", "--help":
-		_, _ = fmt.Fprintln(e.Stdout, "agent-webpage - CiCy live webpage client tool\n\nCommands:\n  help\n  tools\n  ping [client_id]\n  ipc-ping [client_id]\n  exec-js '<js>' [client_id]\n  send <type> <data_json> [client_id] [expect_type]\n  clients\n\nNotes:\n  - target by client_id, not agent_id\n  - if omitted, current agent must have exactly one connected client\n  - response-oriented commands wait for and print the real webpage response\n  - aliases: webpage, webpage-ping, agent-page-ping, ipc-ping")
+		_, _ = fmt.Fprintln(e.Stdout, "agent-webpage - CiCy live webpage client tool\n\nCommands:\n  help\n  tools\n  ping [client_id]\n  ipc-ping [client_id]\n  exec-js '<js>' [client_id]\n  send <type> <data_json> [client_id] [expect_type]\n  clients\n\nNotes:\n  - target by client_id, not agent_id\n  - if omitted, current agent must have exactly one connected client\n  - response-oriented commands wait for and print the real webpage response\n  - aliases: webpage, webpage-ping, ipc-ping")
 		return nil
 	case "tools":
 		_, _ = fmt.Fprintln(e.Stdout, "# agent-webpage tools\n\n- ping [client_id] -> direct push to client_id, waits for webpage_pong\n- ipc-ping [client_id] -> direct push to client_id, waits for ipc_pong\n- exec-js '<js>' [client_id] -> direct push to client_id, waits for exec_js_result\n- send <type> <data_json> [client_id] [expect_type] -> direct push to client_id, waits for matching response when requestId / expect_type is available\n- clients -> /api/chat/clients")

@@ -225,6 +225,11 @@ func installAll(root string) error {
 	if err := bundle.Install(root, repoBinDir, bundle.DefaultGlobalBinDir()); err != nil {
 		return err
 	}
+	for _, profile := range []string{"codex", "claude"} {
+		if _, err := agentgen.Sync(root, profile, "", repoBinDir); err != nil {
+			return fmt.Errorf("sync %s skills: %w", profile, err)
+		}
+	}
 	return ensureConfigMigrated()
 }
 
@@ -666,7 +671,8 @@ Install providers and/or the local cicy-skills command bundle.
 Targets:
   google-node            Install the embedded Google provider commands
   all                    Install every migrated command into ~/.local/bin
-                         and the repo-owned bin directory`, nil
+                         and the repo-owned bin directory, then sync approved
+                         skills into ~/.codex/skills and ~/.claude/skills`, nil
 	case "remove":
 		return `Usage:
   cicy-skills remove <google-node|all>
@@ -677,6 +683,8 @@ Remove provider or local command links from ~/.local/bin and the repo-owned bin 
   cicy-skills update <google-node|all>
 
 Refresh provider or local command links.
+For target "all", this also refreshes approved skills in ~/.codex/skills
+and ~/.claude/skills.
 For a full rebuild plus reinstall, use make install-local-cli.`, nil
 	case "agent":
 		return `Usage:

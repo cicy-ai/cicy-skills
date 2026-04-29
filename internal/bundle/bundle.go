@@ -28,8 +28,8 @@ var (
 		{Name: "tts", Source: "dist/tts"},
 	}
 	HosttoolAliases = []string{
+		"agent-code-server",
 		"agent-webpage",
-		"agent-page-ping",
 		"cf-tunnel",
 		"cf-tunnel-py",
 		"cf-tunnel.py",
@@ -53,10 +53,12 @@ var (
 	}
 	DeprecatedProviderLinks = []string{"gmail"}
 	RetiredLocalLinks       = []string{
+		"agent-page-ping",
 		"aeng-page-exec",
 		"ai-desktop-check",
 		"check-all",
 		"check-projects",
+		"code-server",
 		"electron-mcp-ui-check",
 		"fast-api",
 		"fast-api-check",
