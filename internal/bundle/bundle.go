@@ -40,13 +40,10 @@ var (
 		"globalApiToken",
 		"gpt",
 		"gpt-chat",
-		"ipc-ping",
 		"mysql-exec",
 		"tg",
 		"tm",
 		"todo",
-		"webpage",
-		"webpage-ping",
 	}
 	ProviderLinks = []LinkSpec{
 		{Name: "google", Source: "providers/google-node/google.js"},
@@ -63,6 +60,9 @@ var (
 		"fast-api",
 		"fast-api-check",
 		"grant-trial-credit",
+		"ipc-ping",
+		"webpage",
+		"webpage-ping",
 	}
 	LegacyLinks = []LinkSpec{
 		{Name: "ax-click", Source: "legacy/skills/dev/ax-click"},

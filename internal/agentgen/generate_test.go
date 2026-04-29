@@ -227,6 +227,11 @@ func TestCodexInstallAgentWebpage(t *testing.T) {
 	if !strings.Contains(text, "`agent-webpage`") {
 		t.Fatalf("SKILL.md missing command reference: %s", text)
 	}
+	for _, banned := range []string{"Legacy aliases still exist", "`webpage`", "`webpage-ping`", "`agent-page-ping`"} {
+		if strings.Contains(text, banned) {
+			t.Fatalf("SKILL.md should not contain %q: %s", banned, text)
+		}
+	}
 	helpPath := filepath.Join(targetRoot, "agent-webpage", "references", "help.md")
 	helpData, err := os.ReadFile(helpPath)
 	if err != nil {
@@ -242,6 +247,11 @@ func TestCodexInstallAgentWebpage(t *testing.T) {
 	}
 	if !strings.Contains(string(toolsData), "exec_js_result") {
 		t.Fatalf("tools.md missing exec_js_result response mapping: %s", string(toolsData))
+	}
+	for _, banned := range []string{"## Aliases", "`webpage ...`", "`webpage-ping [client_id]`"} {
+		if strings.Contains(string(toolsData), banned) {
+			t.Fatalf("tools.md should not contain %q: %s", banned, string(toolsData))
+		}
 	}
 }
 

@@ -68,14 +68,10 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runTG(args)
 	case "tm":
 		err = env.runTM(args)
-	case "agent-webpage", "webpage":
+	case "agent-webpage":
 		err = env.runAgentWebpage(args)
 	case "agent-code-server":
 		err = env.runAgentCodeServer(args)
-	case "ipc-ping":
-		err = env.runAgentWebpage(append([]string{"ipc-ping"}, args...))
-	case "webpage-ping":
-		err = env.runAgentWebpage(append([]string{"ping"}, args...))
 	case "gemini-ask":
 		err = env.runGeminiAsk(args)
 	case "gemini-vision":
@@ -197,7 +193,7 @@ type tmConfig struct {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-code-server, ipc-ping, webpage, webpage-ping, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
@@ -1184,7 +1180,7 @@ func (e *Env) runAgentWebpage(args []string) error {
 	}
 	switch cmd {
 	case "help", "-h", "--help":
-		_, _ = fmt.Fprintln(e.Stdout, "agent-webpage - CiCy live webpage client tool\n\nCommands:\n  help\n  tools\n  ping [client_id]\n  ipc-ping [client_id]\n  exec-js '<js>' [client_id]\n  send <type> <data_json> [client_id] [expect_type]\n  clients\n\nNotes:\n  - target by client_id, not agent_id\n  - if omitted, current agent must have exactly one connected client\n  - response-oriented commands wait for and print the real webpage response\n  - aliases: webpage, webpage-ping, ipc-ping")
+		_, _ = fmt.Fprintln(e.Stdout, "agent-webpage - CiCy live webpage client tool\n\nCommands:\n  help\n  tools\n  ping [client_id]\n  ipc-ping [client_id]\n  exec-js '<js>' [client_id]\n  send <type> <data_json> [client_id] [expect_type]\n  clients\n\nNotes:\n  - target by client_id, not agent_id\n  - if omitted, current agent must have exactly one connected client\n  - response-oriented commands wait for and print the real webpage response")
 		return nil
 	case "tools":
 		_, _ = fmt.Fprintln(e.Stdout, "# agent-webpage tools\n\n- ping [client_id] -> direct push to client_id, waits for webpage_pong\n- ipc-ping [client_id] -> direct push to client_id, waits for ipc_pong\n- exec-js '<js>' [client_id] -> direct push to client_id, waits for exec_js_result\n- send <type> <data_json> [client_id] [expect_type] -> direct push to client_id, waits for matching response when requestId / expect_type is available\n- clients -> /api/chat/clients")

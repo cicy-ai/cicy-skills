@@ -47,7 +47,7 @@ func canonicalCodexSkillName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "agent-code-server", "agentcodeserver", "agent_code_server", "code-server", "codeserver":
 		return "agent-code-server"
-	case "agent-webpage", "agentwebpage", "agent_webpage", "webpage", "agent-page-ping":
+	case "agent-webpage", "agentwebpage", "agent_webpage":
 		return "agent-webpage"
 	case "cf-tunnel":
 		return "cf-tunnel"
@@ -717,13 +717,6 @@ This skill covers the local `+"`agent-webpage`"+` wrapper installed from `+"`"+`
 
 Use this command directly from `+"`PATH`"+`. It talks to the real webpage client through the live chat websocket and returns the real webpage response.
 
-Legacy aliases still exist for compatibility:
-
-- `+"`webpage`"+`
-- `+"`webpage-ping`"+`
-- `+"`agent-page-ping`"+`
-- `+"`ipc-ping`"+`
-
 ## Scope
 
 Use this skill when the task involves:
@@ -1341,12 +1334,6 @@ func renderAgentWebpageTools() string {
 - ` + "`agent-webpage exec-js '<js>' [client_id]`" + ` -> sends ` + "`exec_js`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`exec_js_result`" + `
 - ` + "`agent-webpage send <type> <data_json> [client_id] [expect_type]`" + ` -> sends a custom event directly to ` + "`client_id`" + ` and waits for a matching websocket response when possible
 - ` + "`agent-webpage clients`" + ` -> lists connected chat/webpage clients
-
-## Aliases
-
-- ` + "`webpage ...`" + ` -> legacy alias of ` + "`agent-webpage ...`" + `
-- ` + "`webpage-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ping [client_id]`" + `
-- ` + "`ipc-ping [client_id]`" + ` -> legacy alias of ` + "`agent-webpage ipc-ping [client_id]`" + `
 
 ## Response Rules
 

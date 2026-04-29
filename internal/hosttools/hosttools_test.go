@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -295,6 +296,31 @@ func TestRunAgentCodeServerHelp(t *testing.T) {
 	}
 }
 
+func TestRunAgentWebpageHelpDoesNotAdvertiseLegacyAliases(t *testing.T) {
+	var stdout bytes.Buffer
+	env := &Env{
+		Stdout: &stdout,
+		Stderr: &bytes.Buffer{},
+	}
+
+	if err := env.runAgentWebpage([]string{"help"}); err != nil {
+		t.Fatalf("runAgentWebpage(help) error = %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "agent-webpage - CiCy live webpage client tool") {
+		t.Fatalf("unexpected help output: %q", out)
+	}
+	for _, banned := range []string{"aliases:", "webpage-ping", "webpage, ", "agent-page-ping"} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("help output should not mention %q: %q", banned, out)
+		}
+	}
+	if !strings.Contains(out, "ipc-ping [client_id]") {
+		t.Fatalf("help output missing ipc-ping subcommand: %q", out)
+	}
+}
+
 func TestRunAgentCodeServerList(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat/clients", func(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +374,8 @@ func TestRunAgentCodeServerOpenPreservesFileURIAndLine(t *testing.T) {
 		upgrader = websocket.Upgrader{}
 		wsMu     sync.Mutex
 		wsConn   *websocket.Conn
+		wsReady  = make(chan struct{})
+		wsOnce   sync.Once
 	)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat/clients", func(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +394,7 @@ func TestRunAgentCodeServerOpenPreservesFileURIAndLine(t *testing.T) {
 		wsMu.Lock()
 		wsConn = conn
 		wsMu.Unlock()
+		wsOnce.Do(func() { close(wsReady) })
 	})
 	mux.HandleFunc("/api/chat/push", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -373,6 +402,11 @@ func TestRunAgentCodeServerOpenPreservesFileURIAndLine(t *testing.T) {
 			t.Fatalf("Decode(push) error = %v", err)
 		}
 		data, _ := pushed["data"].(map[string]any)
+		select {
+		case <-wsReady:
+		case <-time.After(2 * time.Second):
+			t.Fatal("ws not ready during push")
+		}
 		wsMu.Lock()
 		conn := wsConn
 		wsMu.Unlock()
@@ -428,6 +462,8 @@ func TestRunAgentCodeServerPingWaitsForPong(t *testing.T) {
 		upgrader = websocket.Upgrader{}
 		wsMu     sync.Mutex
 		wsConn   *websocket.Conn
+		wsReady  = make(chan struct{})
+		wsOnce   sync.Once
 	)
 
 	mux := http.NewServeMux()
@@ -447,6 +483,7 @@ func TestRunAgentCodeServerPingWaitsForPong(t *testing.T) {
 		wsMu.Lock()
 		wsConn = conn
 		wsMu.Unlock()
+		wsOnce.Do(func() { close(wsReady) })
 	})
 	mux.HandleFunc("/api/chat/push", func(w http.ResponseWriter, r *http.Request) {
 		var pushed map[string]any
@@ -455,6 +492,11 @@ func TestRunAgentCodeServerPingWaitsForPong(t *testing.T) {
 			t.Fatalf("Decode(push) error = %v", err)
 		}
 		data, _ := pushed["data"].(map[string]any)
+		select {
+		case <-wsReady:
+		case <-time.After(2 * time.Second):
+			t.Fatal("ws not ready during push")
+		}
 		wsMu.Lock()
 		conn := wsConn
 		wsMu.Unlock()

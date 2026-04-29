@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -196,6 +197,11 @@ func runUpdate(args []string) {
 			fatal(err)
 		}
 		fmt.Println("updated all local tools")
+	case "github":
+		if err := updateFromGitHub(root); err != nil {
+			fatal(err)
+		}
+		fmt.Println("updated from github")
 	default:
 		fatal(fmt.Errorf("unknown provider: %s", target))
 	}
@@ -231,6 +237,208 @@ func installAll(root string) error {
 		}
 	}
 	return ensureConfigMigrated()
+}
+
+func updateFromGitHub(currentRoot string) error {
+	sourceRoot, err := resolveGitHubUpdateSource(currentRoot)
+	if err != nil {
+		return err
+	}
+	if err := gitPullFFOnly(sourceRoot); err != nil {
+		return err
+	}
+	targetRoot := currentRoot
+	if targetRoot == "" {
+		targetRoot = sourceRoot
+	}
+	if !samePath(sourceRoot, targetRoot) {
+		if err := syncProjectTree(sourceRoot, targetRoot); err != nil {
+			return fmt.Errorf("sync project tree: %w", err)
+		}
+	}
+	if err := buildLocalBinaries(targetRoot); err != nil {
+		return err
+	}
+	if err := installAll(targetRoot); err != nil {
+		return err
+	}
+	if _, err := agentgen.Sync(targetRoot, "openclaw", "", bundle.RepoBinDir(targetRoot)); err != nil {
+		return fmt.Errorf("sync openclaw skills: %w", err)
+	}
+	return nil
+}
+
+func resolveGitHubUpdateSource(currentRoot string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	candidates := []string{
+		filepath.Join(home, "projects", "cicy-skills"),
+		currentRoot,
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if !isProjectRoot(candidate) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("cannot find git checkout for cicy-skills; expected ~/projects/cicy-skills or a project root with .git")
+}
+
+func gitPullFFOnly(root string) error {
+	proxyBase := githubProxyURL()
+	gitArgs := []string{}
+	if proxyBase != "" {
+		gitArgs = append(gitArgs, "-c", fmt.Sprintf("url.%sinsteadOf=%s", proxyBase+"https://github.com/", "https://github.com/"))
+	}
+	fetch := exec.Command("git", append(gitArgs, "-C", root, "fetch", "--tags", "--prune", "origin")...)
+	fetch.Stdout = os.Stdout
+	fetch.Stderr = os.Stderr
+	if err := fetch.Run(); err != nil {
+		return fmt.Errorf("git fetch %s: %w", root, err)
+	}
+	pull := exec.Command("git", append(gitArgs, "-C", root, "pull", "--ff-only")...)
+	pull.Stdout = os.Stdout
+	pull.Stderr = os.Stderr
+	if err := pull.Run(); err != nil {
+		return fmt.Errorf("git pull --ff-only %s: %w", root, err)
+	}
+	return nil
+}
+
+func githubProxyURL() string {
+	value := strings.TrimSpace(os.Getenv("GITHUB_PROXY"))
+	if value == "" {
+		value = "https://gh-proxy.com/"
+	}
+	if value == "" {
+		return ""
+	}
+	if !strings.HasSuffix(value, "/") {
+		value += "/"
+	}
+	return value
+}
+
+func buildLocalBinaries(root string) error {
+	cmds := []struct {
+		output string
+		pkg    string
+	}{
+		{output: filepath.Join(root, "dist", "cicy-skills"), pkg: "./cmd/cicy-skills"},
+		{output: filepath.Join(root, "dist", "cicy-skillsd"), pkg: "./cmd/cicy-skillsd"},
+		{output: filepath.Join(root, "dist", "cicy-hosttools"), pkg: "./cmd/cicy-hosttools"},
+		{output: filepath.Join(root, "dist", "stt"), pkg: "./cmd/stt"},
+		{output: filepath.Join(root, "dist", "tts"), pkg: "./cmd/tts"},
+	}
+	if err := os.MkdirAll(filepath.Join(root, "dist"), 0o755); err != nil {
+		return err
+	}
+	for _, item := range cmds {
+		cmd := exec.Command("go", "build", "-o", item.output, item.pkg)
+		cmd.Dir = root
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("build %s: %w", item.pkg, err)
+		}
+	}
+	return nil
+}
+
+func syncProjectTree(source, target string) error {
+	if samePath(source, target) {
+		return nil
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return err
+	}
+	skipDirs := map[string]bool{
+		".git":         true,
+		".github":      false,
+		"node_modules": true,
+	}
+	return filepath.WalkDir(source, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(target, 0o755)
+		}
+		if d.IsDir() {
+			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(target, rel), 0o755)
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return copySymlink(path, filepath.Join(target, rel))
+		}
+		return copyFile(path, filepath.Join(target, rel))
+	})
+}
+
+func copyFile(source, target string) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(target, info.Mode().Perm())
+}
+
+func copySymlink(source, target string) error {
+	value, err := os.Readlink(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	_ = os.Remove(target)
+	return os.Symlink(value, target)
+}
+
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	aa, errA := filepath.Abs(a)
+	bb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return aa == bb
 }
 
 func runAgent(args []string) {
@@ -610,7 +818,7 @@ Commands:
   nodes                  List configured nodes
   install <target>       Install providers / local command bundle
   remove <target>        Remove providers / local command bundle links
-  update <target>        Refresh providers / local command bundle links
+  update <target>        Refresh local links or pull latest code from GitHub
   agent <subcommand>     Manage agent-specific skill bundles
   http-list [--node N]   List skills from a configured node
   serve                  Check daemon status / hand off to cicy-skillsd
@@ -620,6 +828,7 @@ Examples:
   cicy-skills list
   cicy-skills install google-node
   cicy-skills install all
+  cicy-skills update github
   cicy-skills agent help codex google
   cicy-skills agent install codex google
   cicy-skills agent sync codex
@@ -680,12 +889,21 @@ Targets:
 Remove provider or local command links from ~/.local/bin and the repo-owned bin directory.`, nil
 	case "update":
 		return `Usage:
-  cicy-skills update <google-node|all>
+  cicy-skills update <google-node|all|github>
 
 Refresh provider or local command links.
-For target "all", this also refreshes approved skills in ~/.codex/skills
-and ~/.claude/skills.
-For a full rebuild plus reinstall, use make install-local-cli.`, nil
+Targets:
+  google-node            Re-run npm install for the embedded Google provider
+  all                    Refresh local links and approved skills from the
+                         current repo state
+  github                 Fetch the latest cicy-skills checkout from GitHub,
+                         rebuild dist binaries, reinstall local tools, and sync
+                         approved skills including openclaw
+
+For target "github", cicy-skills prefers ~/projects/cicy-skills when it is a
+git checkout. Otherwise it uses the current project root if that root has .git.
+Git fetch/pull goes through GITHUB_PROXY and defaults to https://gh-proxy.com/.
+For a local-only rebuild without pulling, use make install-local-cli.`, nil
 	case "agent":
 		return `Usage:
   cicy-skills agent list <codex|claude|openclaw> [--target DIR]

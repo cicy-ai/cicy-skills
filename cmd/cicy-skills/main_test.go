@@ -57,11 +57,26 @@ func TestHelpTextUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("helpText(update) error = %v", err)
 	}
-	if !strings.Contains(got, "cicy-skills update <google-node|all>") {
+	if !strings.Contains(got, "cicy-skills update <google-node|all|github>") {
 		t.Fatalf("update help missing usage line: %q", got)
 	}
 	if !strings.Contains(got, "make install-local-cli") {
 		t.Fatalf("update help missing rebuild guidance: %q", got)
+	}
+	if !strings.Contains(got, "https://gh-proxy.com/") {
+		t.Fatalf("update help missing github proxy note: %q", got)
+	}
+}
+
+func TestGitHubProxyURL(t *testing.T) {
+	t.Setenv("GITHUB_PROXY", "")
+	if got := githubProxyURL(); got != "https://gh-proxy.com/" {
+		t.Fatalf("githubProxyURL() = %q", got)
+	}
+
+	t.Setenv("GITHUB_PROXY", "https://mirror.example.com")
+	if got := githubProxyURL(); got != "https://mirror.example.com/" {
+		t.Fatalf("githubProxyURL(custom) = %q", got)
 	}
 }
 
