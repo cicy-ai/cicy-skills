@@ -49,9 +49,9 @@ type PublicNode struct {
 func DefaultPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "~/Private/cicy-skills/config.json"
+		return "~/cicy-ai/skills/config.json"
 	}
-	return filepath.Join(home, "Private", "cicy-skills", "config.json")
+	return filepath.Join(home, "cicy-ai", "skills", "config.json")
 }
 
 func Default() Config {

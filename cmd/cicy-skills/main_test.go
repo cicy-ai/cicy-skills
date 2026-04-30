@@ -1,8 +1,12 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cicy-ai/cicy-skills/internal/config"
 )
 
 func TestHelpTextGeneral(t *testing.T) {
@@ -133,5 +137,41 @@ func TestHelpTextAgent(t *testing.T) {
 	}
 	if !strings.Contains(got, "tm") {
 		t.Fatalf("agent help missing tm approved skill: %q", got)
+	}
+}
+
+func TestEnsureConfigMigratedMovesLegacyConfigToCicyAISkillsDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	legacyPath := filepath.Join(home, "Private", "cicy-skills", "config.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("mkdir legacy config dir: %v", err)
+	}
+	cfg := config.Default()
+	cfg.SkillRoots = []string{filepath.Join(home, "Private", "skills")}
+	cfg.AgentProfilesDir = filepath.Join(home, "Private", "cicy-skills", "agents")
+	cfg.GeneratedDir = filepath.Join(home, "Private", "cicy-skills", "generated")
+	if err := config.Save(legacyPath, cfg); err != nil {
+		t.Fatalf("save legacy config: %v", err)
+	}
+
+	if err := ensureConfigMigrated(); err != nil {
+		t.Fatalf("ensureConfigMigrated() error = %v", err)
+	}
+
+	newPath := filepath.Join(home, "cicy-ai", "skills", "config.json")
+	migrated, err := config.Load(newPath)
+	if err != nil {
+		t.Fatalf("load migrated config: %v", err)
+	}
+	if got, want := migrated.SkillRoots, []string{filepath.Join(home, "projects", "cicy-skills", "legacy", "skills")}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("SkillRoots = %#v, want %#v", got, want)
+	}
+	if got, want := migrated.AgentProfilesDir, filepath.Join(home, ".codex", "skills"); got != want {
+		t.Fatalf("AgentProfilesDir = %q, want %q", got, want)
+	}
+	if migrated.GeneratedDir != "" {
+		t.Fatalf("GeneratedDir = %q, want empty", migrated.GeneratedDir)
 	}
 }

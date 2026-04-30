@@ -4,7 +4,7 @@
 
 ## Layout
 
-- config only: `~/Private/cicy-skills/config.json`
+- config only: `~/cicy-ai/skills/config.json`
 - repo-owned commands: `~/projects/cicy-skills/bin`
 - global entrypoints: `~/.local/bin`
 - agent skill targets:
@@ -12,7 +12,7 @@
   - Claude: `~/.claude/skills`
   - OpenClaw: `~/.openclaw/skills`
 
-`~/Private/cicy-skills` should only contain the config file. It does not store generated skills or command binaries.
+`~/cicy-ai/skills` stores the `cicy-skills` runtime config and installed repo copy. It does not own the global command entrypoints in `~/.local/bin`.
 
 ## Current Rule
 

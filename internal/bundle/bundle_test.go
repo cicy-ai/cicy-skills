@@ -21,3 +21,11 @@ func TestAgentWebpageLegacyAliasesAreRetired(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeServerBinaryIsNotRetired(t *testing.T) {
+	for _, name := range RetiredLocalLinks {
+		if name == "code-server" {
+			t.Fatalf("RetiredLocalLinks should not contain %q", name)
+		}
+	}
+}

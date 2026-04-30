@@ -55,7 +55,6 @@ var (
 		"ai-desktop-check",
 		"check-all",
 		"check-projects",
-		"code-server",
 		"electron-mcp-ui-check",
 		"fast-api",
 		"fast-api-check",
@@ -91,9 +90,9 @@ func commandNames(items []LinkSpec) []string {
 func DefaultPrivateDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("~", "Private", "cicy-skills")
+		return filepath.Join("~", "cicy-ai", "skills")
 	}
-	return filepath.Join(home, "Private", "cicy-skills")
+	return filepath.Join(home, "cicy-ai", "skills")
 }
 
 func RepoBinDir(root string) string {

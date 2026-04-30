@@ -585,17 +585,35 @@ func runAgent(args []string) {
 
 func ensureConfigMigrated() error {
 	path := config.DefaultPath()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	legacyPath := filepath.Join(home, "Private", "cicy-skills", "config.json")
+
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if _, legacyErr := os.Stat(legacyPath); legacyErr == nil {
+			cfg, loadErr := config.Load(legacyPath)
+			if loadErr != nil {
+				return loadErr
+			}
+			cfg, _ = migrateConfigPaths(cfg, home)
+			return config.Save(path, cfg)
+		}
 		return config.WriteDefault("", false)
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
 		return err
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
+	cfg, updated := migrateConfigPaths(cfg, home)
+	if !updated {
+		return nil
 	}
+	return config.Save(path, cfg)
+}
+
+func migrateConfigPaths(cfg config.Config, home string) (config.Config, bool) {
 	oldSkillRoot := filepath.Join(home, "Private", "skills")
 	oldGeneratedRoot := filepath.Join(home, "Private", "cicy-skills", "generated", "skills")
 	newSkillRoot := filepath.Join(home, "projects", "cicy-skills", "legacy", "skills")
@@ -623,13 +641,13 @@ func ensureConfigMigrated() error {
 		updated = true
 	}
 	if !updated {
-		return nil
+		return cfg, false
 	}
 	cfg = config.Normalize(cfg)
 	cfg.SkillRoots = []string{newSkillRoot}
 	cfg.AgentProfilesDir = agentgen.CodexSkillsDir()
 	cfg.GeneratedDir = ""
-	return config.Save(path, cfg)
+	return cfg, true
 }
 
 func projectRoot() (string, error) {

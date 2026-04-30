@@ -22,7 +22,7 @@ build-local-binaries: ## Build Linux CLI binaries locally into dist/
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/stt ./cmd/stt
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -o dist/tts ./cmd/tts
 
-install-local-cli: ## Install the full local command bundle into ~/.local/bin and ~/Private/cicy-skills/bin
+install-local-cli: ## Install the full local command bundle into ~/.local/bin using the repo-owned bin dir
 install-local-cli: build-local-binaries
 	CICY_SKILLS_ROOT=$(CURDIR) ./dist/cicy-skills install all
 
