@@ -41,12 +41,6 @@ type Env struct {
 }
 
 func Run(invoked string, args []string, stdout, stderr io.Writer) int {
-	env, err := newEnv(stdout, stderr)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
 	cmd := filepath.Base(strings.TrimSpace(invoked))
 	if cmd == "cicy-hosttools" {
 		if len(args) == 0 {
@@ -55,6 +49,27 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		}
 		cmd = args[0]
 		args = args[1:]
+	}
+
+	if cmd == "frp-server" {
+		if err := newFRPTool(frpServerKind, stdout, stderr).run(args); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
+	if cmd == "frp-client" {
+		if err := newFRPTool(frpClientKind, stdout, stderr).run(args); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
+	}
+
+	env, err := newEnv(stdout, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
 
 	switch cmd {
@@ -86,6 +101,10 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runCPing(args)
 	case "globalApiToken", "global-api-token", "global-api-token.py":
 		err = env.runGlobalAPIToken(args)
+	case "frp-server":
+		err = env.runFRPServer(args)
+	case "frp-client":
+		err = env.runFRPClient(args)
 	default:
 		fmt.Fprintf(stderr, "unsupported host tool: %s\n", cmd)
 		printAvailable(stderr)
@@ -193,7 +212,7 @@ type tmConfig struct {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {

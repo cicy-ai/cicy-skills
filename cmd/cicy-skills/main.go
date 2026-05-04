@@ -943,6 +943,8 @@ Currently approved:
   agent-webpage
   cf-tunnel
   cping
+  frp-client
+  frp-server
   globalApiToken
   google
   ssh
@@ -952,6 +954,8 @@ Examples:
   cicy-skills agent help codex agent-webpage
   cicy-skills agent tools codex agent-webpage
   cicy-skills agent help codex cping
+  cicy-skills agent help codex frp-client
+  cicy-skills agent help codex frp-server
   cicy-skills agent help codex google
   cicy-skills agent help codex ssh
   cicy-skills agent help codex tm
@@ -962,13 +966,17 @@ Examples:
   cicy-skills agent generate openclaw
   cicy-skills agent install codex cf-tunnel
   cicy-skills agent install codex cping
+  cicy-skills agent install codex frp-client
+  cicy-skills agent install codex frp-server
   cicy-skills agent install codex tm
   cicy-skills agent install claude globalApiToken
   cicy-skills agent install claude cping
+  cicy-skills agent install claude frp-client
   cicy-skills agent install claude ssh
   cicy-skills agent install claude tm
   cicy-skills agent install openclaw google
   cicy-skills agent install openclaw cping
+  cicy-skills agent install openclaw frp-server
   cicy-skills agent install openclaw ssh
   cicy-skills agent install openclaw tm
   cicy-skills agent remove claude globalApiToken

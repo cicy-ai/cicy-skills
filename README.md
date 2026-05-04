@@ -18,7 +18,7 @@
 
 Agent skill generation is allowlist-based.
 
-- currently approved: `agent-webpage`, `cf-tunnel`, `globalApiToken`, `google`, `tm`
+- currently approved: `agent-webpage`, `cf-tunnel`, `cping`, `frp-client`, `frp-server`, `globalApiToken`, `google`, `ssh`, `tm`
 - current supported target agents: `codex`, `claude`, `openclaw`
 
 Everything else is archived in-repo under [`legacy/skills`](./legacy/skills) but is not part of the approved generation list until you explicitly confirm it.
@@ -85,17 +85,25 @@ cicy-skills agent list claude
 cicy-skills agent list openclaw
 cicy-skills agent tools codex agent-webpage
 cicy-skills agent help codex cf-tunnel
+cicy-skills agent help codex frp-client
+cicy-skills agent help codex frp-server
 cicy-skills agent help codex tm
 cicy-skills agent help claude globalApiToken
+cicy-skills agent help claude frp-client
 cicy-skills agent help claude tm
 cicy-skills agent help openclaw google
+cicy-skills agent help openclaw frp-server
 cicy-skills agent help openclaw tm
 cicy-skills agent install codex agent-webpage
 cicy-skills agent install codex cf-tunnel
+cicy-skills agent install codex frp-client
+cicy-skills agent install codex frp-server
 cicy-skills agent install codex tm
 cicy-skills agent install claude globalApiToken
+cicy-skills agent install claude frp-client
 cicy-skills agent install claude tm
 cicy-skills agent install openclaw google
+cicy-skills agent install openclaw frp-server
 cicy-skills agent install openclaw tm
 cicy-skills agent update codex agent-webpage
 cicy-skills agent update codex cf-tunnel
@@ -121,17 +129,25 @@ cicy-skills agent list claude
 cicy-skills agent list openclaw
 cicy-skills agent tools codex agent-webpage
 cicy-skills agent help codex cf-tunnel
+cicy-skills agent help codex frp-client
+cicy-skills agent help codex frp-server
 cicy-skills agent help codex tm
 cicy-skills agent help claude globalApiToken
+cicy-skills agent help claude frp-client
 cicy-skills agent help claude tm
 cicy-skills agent help openclaw google
+cicy-skills agent help openclaw frp-server
 cicy-skills agent help openclaw tm
 cicy-skills agent install codex agent-webpage
 cicy-skills agent install codex cf-tunnel
+cicy-skills agent install codex frp-client
+cicy-skills agent install codex frp-server
 cicy-skills agent install codex tm
 cicy-skills agent install claude globalApiToken
+cicy-skills agent install claude frp-client
 cicy-skills agent install claude tm
 cicy-skills agent install openclaw google
+cicy-skills agent install openclaw frp-server
 cicy-skills agent install openclaw tm
 cicy-skills agent update codex agent-webpage
 cicy-skills agent update codex cf-tunnel

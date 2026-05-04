@@ -40,6 +40,8 @@ var (
 		"globalApiToken",
 		"gpt",
 		"gpt-chat",
+		"frp-client",
+		"frp-server",
 		"mysql-exec",
 		"tg",
 		"tm",

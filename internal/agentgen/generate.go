@@ -2,6 +2,7 @@ package agentgen
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,7 +41,7 @@ func OpenClawSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-webpage", "cf-tunnel", "cping", "globalApiToken", "google", "ssh", "tm"}
+	return []string{"agent-code-server", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "ssh", "tm"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -53,6 +54,12 @@ func canonicalCodexSkillName(name string) string {
 		return "cf-tunnel"
 	case "cping":
 		return "cping"
+	case "docker-build-github-action", "dockerbuildgithubaction", "docker_build_github_action", "docker-github-action", "dockerhub-build", "docker-build":
+		return "docker-build-github-action"
+	case "frp-client", "frpclient", "frpc", "frp-client-skill":
+		return "frp-client"
+	case "frp-server", "frpserver", "frps", "frp-server-skill":
+		return "frp-server"
 	case "globalapitoken", "global-api-token":
 		return "globalApiToken"
 	case "google":
@@ -109,7 +116,7 @@ func Install(root, profileName, targetRoot, commandBinDir string, skillNames []s
 	targetRoot = defaultProfileTarget(profileName, targetRoot)
 	switch profileName {
 	case "codex", "claude", "openclaw":
-		return installCodex(targetRoot, commandBinDir, skillNames)
+		return installCodex(root, targetRoot, commandBinDir, skillNames)
 	default:
 		return nil, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
@@ -135,7 +142,7 @@ func Sync(root, profileName, targetRoot, commandBinDir string) ([]string, error)
 	targetRoot = defaultProfileTarget(profileName, targetRoot)
 	switch profileName {
 	case "codex", "claude", "openclaw":
-		return installCodex(targetRoot, commandBinDir, ApprovedCodexSkills())
+		return installCodex(root, targetRoot, commandBinDir, ApprovedCodexSkills())
 	default:
 		return nil, fmt.Errorf("only codex, claude, and openclaw skill generation are enabled right now")
 	}
@@ -200,7 +207,7 @@ func listCodex(targetRoot string) ([]SkillStatus, error) {
 	return statuses, nil
 }
 
-func installCodex(targetRoot, commandBinDir string, skillNames []string) ([]string, error) {
+func installCodex(root, targetRoot, commandBinDir string, skillNames []string) ([]string, error) {
 	skills, err := resolveCodexSkills(skillNames)
 	if err != nil {
 		return nil, err
@@ -210,7 +217,7 @@ func installCodex(targetRoot, commandBinDir string, skillNames []string) ([]stri
 	}
 	installed := make([]string, 0, len(skills))
 	for _, skill := range skills {
-		if err := generateCodexSkill(targetRoot, commandBinDir, skill); err != nil {
+		if err := generateCodexSkill(root, targetRoot, commandBinDir, skill); err != nil {
 			return nil, err
 		}
 		installed = append(installed, skill)
@@ -278,7 +285,7 @@ func resolveCodexSkills(skillNames []string) ([]string, error) {
 	return resolved, nil
 }
 
-func generateCodexSkill(targetRoot, commandBinDir, skill string) error {
+func generateCodexSkill(root, targetRoot, commandBinDir, skill string) error {
 	switch skill {
 	case "agent-code-server":
 		return generateCodexAgentCodeServer(targetRoot, commandBinDir)
@@ -288,6 +295,12 @@ func generateCodexSkill(targetRoot, commandBinDir, skill string) error {
 		return generateCodexCFTunnel(targetRoot, commandBinDir)
 	case "cping":
 		return generateCodexCPing(targetRoot, commandBinDir)
+	case "docker-build-github-action":
+		return generateStaticSkill(root, targetRoot, "infra", "docker-build-github-action")
+	case "frp-client":
+		return generateCodexFRPClient(targetRoot, commandBinDir)
+	case "frp-server":
+		return generateCodexFRPServer(targetRoot, commandBinDir)
 	case "globalApiToken":
 		return generateCodexGlobalAPIToken(targetRoot, commandBinDir)
 	case "google":
@@ -299,6 +312,93 @@ func generateCodexSkill(targetRoot, commandBinDir, skill string) error {
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
+}
+
+func generateStaticSkill(root, targetRoot, category, skill string) error {
+	if strings.TrimSpace(root) == "" {
+		var err error
+		root, err = findRepoRoot()
+		if err != nil {
+			return err
+		}
+	}
+	src := filepath.Join(root, "legacy", "skills", category, skill)
+	dst := filepath.Join(targetRoot, skill)
+	if !dirExists(src) {
+		return fmt.Errorf("static skill source %q does not exist", src)
+	}
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	return copyDir(src, dst)
+}
+
+func findRepoRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if dirExists(filepath.Join(dir, "legacy", "skills")) {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("could not find repository root containing legacy/skills")
+		}
+		dir = parent
+	}
+}
+
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if err := copyFile(srcPath, dstPath, info.Mode().Perm()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func generateCodexCFTunnel(targetRoot, commandBinDir string) error {
@@ -371,6 +471,44 @@ func generateCodexGlobalAPIToken(targetRoot, commandBinDir string) error {
 		return err
 	}
 	tools := renderGlobalAPITokenCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexFRPServer(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "frp-server")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderFRPServerSkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderFRPServerHelp(commandBinDir)); err != nil {
+		return err
+	}
+	tools := renderFRPServerCommands()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func generateCodexFRPClient(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "frp-client")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderFRPClientSkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderFRPClientHelp(commandBinDir)); err != nil {
+		return err
+	}
+	tools := renderFRPClientCommands()
 	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
 		return err
 	}
@@ -572,6 +710,88 @@ Read [help.md](./references/help.md) first for quick usage.
 ## Tools
 
 Read [tools.md](./references/tools.md) for the full tool and command shapes.
+`, commandBinDir, commandBinDir)
+}
+
+func renderFRPServerSkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: frp-server
+description: Use the local frp-server wrapper from %s to manage a local frps process with background start, status, connections, hot reload, and stop/start controls.
+---
+
+# FRP Server
+
+This skill covers the local `+"`frp-server`"+` wrapper installed from `+"`"+`%s`+"`"+`.
+
+Use this command directly from `+"`PATH`"+`. It manages the real `+"`frps`"+` process on this host.
+
+## Scope
+
+Use this skill when the task involves:
+
+- starting `+"`frps`"+` as a background service
+- checking whether the FRP server is running
+- checking listeners or current connections
+- reloading or restarting the FRP server after config changes
+- stopping the FRP server cleanly
+
+## Rules
+
+1. Prefer the local `+"`frp-server`"+` wrapper first.
+2. Use the real config file on disk; do not invent FRP state.
+3. Use `+"`status`"+` before destructive actions when the user asks to inspect the current state.
+4. Prefer `+"`reload`"+` for hot reload; the wrapper may fall back to restart when the installed FRP build does not support native reload.
+5. Report the real config path, log path, pid, and connection/listener data back to the user.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the supported commands.
+`, commandBinDir, commandBinDir)
+}
+
+func renderFRPClientSkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: frp-client
+description: Use the local frp-client wrapper from %s to manage a local frpc process with background start, status, proxy connections, hot reload, and stop/start controls, including remote client management over ssh.
+---
+
+# FRP Client
+
+This skill covers the local `+"`frp-client`"+` wrapper installed from `+"`"+`%s`+"`"+`.
+
+Use this command directly from `+"`PATH`"+`. It manages the real `+"`frpc`"+` process on this host.
+
+## Scope
+
+Use this skill when the task involves:
+
+- starting `+"`frpc`"+` as a background service
+- checking whether the FRP client is running
+- checking current proxy status or connections
+- reloading or restarting the FRP client after config changes
+- stopping the FRP client cleanly
+- managing a remote FRP client machine over `+"`ssh`"+`
+
+## Rules
+
+1. Prefer the local `+"`frp-client`"+` wrapper first.
+2. Use the real config file on disk; do not invent FRP state.
+3. Prefer `+"`connections`"+` or `+"`status`"+` before changing a working client.
+4. Prefer `+"`reload`"+` for hot reload; the wrapper may fall back to restart when the installed FRP build does not support native reload.
+5. Report the real config path, log path, pid, and proxy status back to the user.
+6. When the target FRP client is on another machine, manage it through `+"`ssh <host> '<command>'`"+` using the remote machine's own `+"`frpc`"+`, config files, and service manager.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the supported commands.
 `, commandBinDir, commandBinDir)
 }
 
@@ -892,6 +1112,176 @@ func renderCPingHelp(commandBinDir string) string {
 `, commandBinDir)
 }
 
+func renderFRPServerHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# FRP Server Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`frp-server`"+`
+
+## Quick Start
+
+- inspect usage: `+"`frp-server help`"+`
+- start in background: `+"`frp-server start`"+`
+- check status: `+"`frp-server status`"+`
+- inspect listeners or sockets: `+"`frp-server connections`"+`
+- list currently connected clients: `+"`frp-server clients`"+`
+- hot reload config: `+"`frp-server reload`"+`
+- restart after a larger change: `+"`frp-server restart`"+`
+- stop the service: `+"`frp-server stop`"+`
+
+## Defaults
+
+- wrapper config lookup: `+"`~/data/frp/frps.toml`"+`, `+"`~/data/frp/frps.yaml`"+`, `+"`~/data/frp/frps.yml`"+`, `+"`~/data/frp/frps.ini`"+`
+- wrapper binary lookup: `+"`frps`"+` on `+"`PATH`"+`, then common local install locations
+- wrapper state dir: `+"`~/.local/state/cicy-skills/frp/server`"+`
+
+## Port Plan
+
+- default public control port: `+"`bindPort = 9500`"+`
+- keep `+"`9500/tcp`"+` open in the firewall for remote `+"`frpc`"+` clients
+- allocate proxy `+"`remotePort`"+` values from `+"`9501`"+` upward
+- suggested convention:
+  - `+"`9501`"+` first test or bootstrap proxy
+  - `+"`9510-9599`"+` long-lived service ports
+  - `+"`9600-9999`"+` temporary or per-device ports
+- the local dashboard can stay on `+"`127.0.0.1:7500`"+` and does not need public firewall exposure
+
+## Token Rule
+
+- on `+"`frp-server start`"+`, if `+"`auth.token`"+` is missing, the wrapper generates a random token automatically
+- for local loopback testing, the wrapper also syncs the token into `+"`~/data/frp/frpc.toml`"+` when that client points back to this server
+- for Mac, Linux, or Windows clients, copy the generated token into their installer prompt or `+"`frpc.toml`"+`
+
+## Client Install And Start
+
+Use the server skill itself to tell the user how to install the client.
+
+### macOS / Linux one-line install
+
+China-friendly GitHub raw proxy URL:
+
+- `+"`curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash`"+`
+
+What it does:
+
+- downloads and installs `+"`frpc`"+`
+- writes `+"`~/.config/frp/frpc.toml`"+`
+- prompts the user to enter the FRP token interactively
+- installs a service automatically
+  - macOS -> LaunchAgent
+  - Linux -> systemd service
+- defaults to exposing local `+"`127.0.0.1:22`"+` as remote `+"`9502`"+`
+
+### Windows one-line install
+
+PowerShell bootstrap URL through the same China-friendly proxy:
+
+- `+"`$u='https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.ps1'; $p=Join-Path $env:TEMP 'install-frpc-client.ps1'; irm $u -OutFile $p; powershell -ExecutionPolicy Bypass -File $p`"+`
+
+What it does:
+
+- downloads and installs `+"`frpc.exe`"+`
+- writes the Windows client config
+- prompts the user to enter the FRP token interactively
+- self-elevates and installs a Windows service through `+"`WinSW`"+`
+- defaults to exposing local `+"`127.0.0.1:22`"+` as remote `+"`9502`"+`
+
+### After install
+
+Default SSH access path:
+
+- `+"`ssh -p 9502 <client-user>@47.114.96.114`"+`
+
+If the client machine is not serving SSH yet:
+
+- macOS: enable `+"`Remote Login`"+`
+- Linux: ensure `+"`sshd`"+` is installed and listening on port `+"`22`"+`
+- Windows: enable `+"`OpenSSH Server`"+` if the user wants SSH-based access
+
+### Alternate ports and local services
+
+Examples:
+
+- expose local `+"`3000`"+` on remote `+"`9503`"+` with the shell installer:
+  - `+"`curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash -s -- --local-port 3000 --remote-port 9503 --name web-3000`"+`
+- expose local `+"`5173`"+` on remote `+"`9504`"+` with the shell installer:
+  - `+"`curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash -s -- --local-port 5173 --remote-port 9504 --name web-5173`"+`
+
+## Rules
+
+- use the wrapper first instead of running ad-hoc background shell jobs
+- use `+"`status`"+` to report pid, config, log path, and parsed bind/dashboard info
+- use `+"`connections`"+` to inspect current sockets for the live process
+- prefer `+"`reload`"+` for hot reload; if native reload is unavailable, the wrapper restarts with the same config
+- when the user asks how to install a client, answer from this server skill help directly instead of assuming they already have `+"`frpc`"+`
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`, commandBinDir)
+}
+
+func renderFRPClientHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# FRP Client Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`frp-client`"+`
+
+## Quick Start
+
+- inspect usage: `+"`frp-client help`"+`
+- start in background: `+"`frp-client start`"+`
+- check status: `+"`frp-client status`"+`
+- inspect proxy status or sockets: `+"`frp-client connections`"+`
+- hot reload config: `+"`frp-client reload`"+`
+- restart after a larger change: `+"`frp-client restart`"+`
+- stop the service: `+"`frp-client stop`"+`
+
+## Defaults
+
+- wrapper config lookup: `+"`~/data/frp/frpc.toml`"+`, `+"`~/data/frp/frpc.yaml`"+`, `+"`~/data/frp/frpc.yml`"+`, `+"`~/data/frp/frpc.ini`"+`
+- wrapper binary lookup: `+"`frpc`"+` on `+"`PATH`"+`, then common local install locations
+- wrapper state dir: `+"`~/.local/state/cicy-skills/frp/client`"+`
+
+## Remote Management Over SSH
+
+When the FRP client runs on another machine, manage it over `+"`ssh`"+` instead of pretending the local host owns that process.
+
+Typical remote commands:
+
+- remote status:
+  - `+"`ssh ton-mac '~/.local/bin/frpc status -c ~/.config/frp/frpc.toml'`"+`
+- remote logs:
+  - `+"`ssh ton-mac 'tail -100 ~/.local/frp/frpc.log'`"+`
+- remote config:
+  - `+"`ssh ton-mac 'sed -n \"1,160p\" ~/.config/frp/frpc.toml'`"+`
+- remote restart on macOS:
+  - `+"`ssh ton-mac 'launchctl kickstart -k \"gui/$(id -u)/com.cicy.frpc\"'`"+`
+- remote service check on macOS:
+  - `+"`ssh ton-mac 'launchctl list | grep com.cicy.frpc'`"+`
+- remote restart on Linux:
+  - `+"`ssh my-linux 'sudo systemctl restart frpc-cicy-$USER.service'`"+`
+- remote service status on Linux:
+  - `+"`ssh my-linux 'systemctl status frpc-cicy-$USER.service --no-pager'`"+`
+
+## Rules
+
+- use the wrapper first instead of running ad-hoc background shell jobs
+- use `+"`status`"+` to report pid, config, log path, and parsed upstream/admin info
+- use `+"`connections`"+` to inspect native proxy status when available
+- prefer `+"`reload`"+` for hot reload; if native reload is unavailable, the wrapper restarts with the same config
+- when managing a remote client machine, use `+"`ssh`"+` to run the remote machine's own `+"`frpc`"+` and service commands
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`, commandBinDir)
+}
+
 func renderAgentCodeServerSkill(commandBinDir string) string {
 	return fmt.Sprintf(`---
 name: agent-code-server
@@ -1192,6 +1582,76 @@ func renderGlobalAPITokenCommands() string {
 - both commands operate on ` + "`~/global.json`" + `
 - ` + "`show`" + ` prints the current ` + "`api_token`" + `
 - ` + "`refresh`" + ` generates a new token and writes it back to ` + "`~/global.json`" + `
+`
+}
+
+func renderFRPServerCommands() string {
+	return `# FRP Server Commands
+
+## Main
+
+- ` + "`frp-server start [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-server run [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-server stop`" + `
+- ` + "`frp-server restart [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-server status [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-server connections`" + `
+- ` + "`frp-server clients`" + `
+- ` + "`frp-server reload [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-server logs [N]`" + `
+- ` + "`frp-server raw -- <real frps args...>`" + `
+
+## Defaults
+
+- config search: ` + "`~/data/frp/frps.toml`" + `, ` + "`~/data/frp/frps.yaml`" + `, ` + "`~/data/frp/frps.yml`" + `, ` + "`~/data/frp/frps.ini`" + `
+- binary search: ` + "`frps`" + ` on PATH, then common local install locations
+- state dir: ` + "`~/.local/state/cicy-skills/frp/server`" + `
+
+## Port Plan
+
+- use ` + "`bindPort = 9500`" + ` for the public FRP control port
+- keep ` + "`9500/tcp`" + ` open in the firewall for remote clients
+- assign ` + "`remotePort`" + ` from ` + "`9501`" + ` upward
+- reserve ` + "`9501`" + ` as the first smoke-test or bootstrap proxy port
+
+## Notes
+
+- ` + "`start`" + ` runs the server in the background and records pid/config/log state
+- when ` + "`auth.token`" + ` is missing, ` + "`start`" + ` generates a random token automatically
+- ` + "`status`" + ` reports pid, config path, log path, bind address, dashboard address, and live listeners when available
+- ` + "`connections`" + ` reports current process sockets for the live FRP server
+- ` + "`reload`" + ` attempts native reload first and falls back to restart when needed
+`
+}
+
+func renderFRPClientCommands() string {
+	return `# FRP Client Commands
+
+## Main
+
+- ` + "`frp-client start [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-client run [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-client stop`" + `
+- ` + "`frp-client restart [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-client status [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-client connections`" + `
+- ` + "`frp-client reload [--config PATH] [--bin PATH]`" + `
+- ` + "`frp-client logs [N]`" + `
+- ` + "`frp-client raw -- <real frpc args...>`" + `
+
+## Remote Management Over SSH
+
+- ` + "`ssh ton-mac '~/.local/bin/frpc status -c ~/.config/frp/frpc.toml'`" + `
+- ` + "`ssh ton-mac 'tail -100 ~/.local/frp/frpc.log'`" + `
+- ` + "`ssh ton-mac 'sed -n \"1,160p\" ~/.config/frp/frpc.toml'`" + `
+- ` + "`ssh ton-mac 'launchctl kickstart -k \"gui/$(id -u)/com.cicy.frpc\"'`" + `
+- ` + "`ssh my-linux 'sudo systemctl restart frpc-cicy-$USER.service'`" + `
+
+## Notes
+
+- local wrapper commands manage the current host's own frpc process
+- for a client machine reached through FRP SSH, manage its frpc through ` + "`ssh <host> '<cmd>'`" + `
+- prefer the remote machine's native service manager over ad-hoc background shell jobs
 `
 }
 
