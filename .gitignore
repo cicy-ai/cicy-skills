@@ -5,3 +5,5 @@ node_modules/
 /cicy-skills
 /cicy-skillsd
 cf/install-worker/.wrangler/
+__pycache__/
+*.pyc
