@@ -1160,9 +1160,9 @@ Use the server skill itself to tell the user how to install the client.
 
 ### macOS / Linux one-line install
 
-China-friendly GitHub raw proxy URL:
+Direct install URL:
 
-- `+"`curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash`"+`
+- `+"`curl -fsSL https://install.cicy-ai.com/frp | bash`"+`
 
 What it does:
 
@@ -1176,9 +1176,13 @@ What it does:
 
 ### Windows one-line install
 
-PowerShell bootstrap URL through the same China-friendly proxy:
+Use the same `+"`/frp`"+` endpoint, but save it to a file and run it with PowerShell:
 
-- `+"`$u='https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.ps1'; $p=Join-Path $env:TEMP 'install-frpc-client.ps1'; irm $u -OutFile $p; powershell -ExecutionPolicy Bypass -File $p`"+`
+- `+"`$u='https://install.cicy-ai.com/frp'; $p=Join-Path $env:TEMP 'install-frpc-client.ps1'; irm $u -OutFile $p; powershell -ExecutionPolicy Bypass -File $p`"+`
+
+Why it is file-based instead of `+"`irm ... | iex`"+`:
+
+- the installer needs to relaunch from a script file so it can self-elevate and install the Windows service
 
 What it does:
 
@@ -1200,14 +1204,24 @@ If the client machine is not serving SSH yet:
 - Linux: ensure `+"`sshd`"+` is installed and listening on port `+"`22`"+`
 - Windows: enable `+"`OpenSSH Server`"+` if the user wants SSH-based access
 
-### Alternate ports and local services
+### Alternate ports and multi-client checks
 
 Examples:
 
 - expose local `+"`3000`"+` on remote `+"`9503`"+` with the shell installer:
-  - `+"`curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash -s -- --local-port 3000 --remote-port 9503 --name web-3000`"+`
+  - `+"`curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --local-port 3000 --remote-port 9503 --name web-3000`"+`
 - expose local `+"`5173`"+` on remote `+"`9504`"+` with the shell installer:
-  - `+"`curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash -s -- --local-port 5173 --remote-port 9504 --name web-5173`"+`
+  - `+"`curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --local-port 5173 --remote-port 9504 --name web-5173`"+`
+- validate extra clients from the server side with a fresh port such as `+"`9511`"+` or `+"`9512`"+`, then check:
+  - `+"`frp-server clients`"+`
+  - `+"`frp-server connections`"+`
+  - `+"`ssh -p <remote-port> <client-user>@47.114.96.114`"+`
+
+Verified flows:
+
+- Linux Docker client tested successfully on `+"`9511`"+`
+- macOS extra client tested successfully on `+"`9512`"+`
+- both were visible in `+"`frp-server clients`"+` and `+"`frp-server connections`"+`
 
 ## Rules
 

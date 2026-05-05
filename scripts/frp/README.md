@@ -1,13 +1,13 @@
 # FRP Client Installer
 
-GitHub-hosted installers for connecting a client machine to the CiCy FRP server.
+Short installer entrypoints for connecting a client machine to the CiCy FRP server.
 
-## China-friendly bootstrap URLs
+## Install commands
 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash
+curl -fsSL https://install.cicy-ai.com/frp | bash
 ```
 
 The installer prompts for the FRP token if you do not pass `--token`.
@@ -26,7 +26,7 @@ Default behavior:
 Run in PowerShell:
 
 ```powershell
-$u='https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.ps1';
+$u='https://install.cicy-ai.com/frp';
 $p=Join-Path $env:TEMP 'install-frpc-client.ps1';
 irm $u -OutFile $p; powershell -ExecutionPolicy Bypass -File $p
 ```

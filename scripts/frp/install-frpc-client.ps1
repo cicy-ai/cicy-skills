@@ -18,8 +18,8 @@ function Write-Usage {
 Usage:
   powershell -ExecutionPolicy Bypass -File .\install-frpc-client.ps1
 
-Typical China-friendly bootstrap:
-  `$u='https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.ps1';
+Typical bootstrap:
+  `$u='https://install.cicy-ai.com/frp';
   `$p=Join-Path `$env:TEMP 'install-frpc-client.ps1';
   irm `$u -OutFile `$p; powershell -ExecutionPolicy Bypass -File `$p
 "@

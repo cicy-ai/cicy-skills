@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<USAGE
 Usage:
-  curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash
+  curl -fsSL https://install.cicy-ai.com/frp | bash
 
 Options:
   --token <TOKEN>            FRP auth token. If omitted, prompt interactively.
@@ -22,9 +22,9 @@ Options:
   -h, --help                 Show this help
 
 Examples:
-  curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash
-  curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash -s -- --remote-port 9503
-  curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/scripts/frp/install-frpc-client.sh | bash -s -- --local-port 3000 --remote-port 9504 --name mac-web-3000
+  curl -fsSL https://install.cicy-ai.com/frp | bash
+  curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --remote-port 9503
+  curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --local-port 3000 --remote-port 9504 --name mac-web-3000
 USAGE
 }
 

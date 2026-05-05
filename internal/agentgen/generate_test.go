@@ -706,11 +706,17 @@ func TestCodexInstallFRPServer(t *testing.T) {
 	if !strings.Contains(string(helpData), "bindPort = 9500") {
 		t.Fatalf("help.md missing bindPort planning note: %s", string(helpData))
 	}
-	if !strings.Contains(string(helpData), "install-frpc-client.sh") {
+	if !strings.Contains(string(helpData), "https://install.cicy-ai.com/frp") {
 		t.Fatalf("help.md missing shell installer reference: %s", string(helpData))
 	}
-	if !strings.Contains(string(helpData), "install-frpc-client.ps1") {
+	if !strings.Contains(string(helpData), "$u='https://install.cicy-ai.com/frp'") {
 		t.Fatalf("help.md missing PowerShell installer reference: %s", string(helpData))
+	}
+	if !strings.Contains(string(helpData), "self-elevate") {
+		t.Fatalf("help.md missing Windows file-based explanation: %s", string(helpData))
+	}
+	if !strings.Contains(string(helpData), "Linux Docker client tested successfully on `9511`") {
+		t.Fatalf("help.md missing verified multi-client note: %s", string(helpData))
 	}
 
 	toolsPath := filepath.Join(targetRoot, "frp-server", "references", "tools.md")
