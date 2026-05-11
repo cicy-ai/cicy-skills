@@ -1,7 +1,7 @@
 const { google } = require('googleapis')
 const { resolve } = require('path')
 
-const GLOBAL = require(resolve(process.env.HOME, 'global.json'))
+const GLOBAL = require(resolve(process.env.HOME, 'cicy-ai', 'global.json'))
 
 function getAuth() {
   const oauth2 = new google.auth.OAuth2(GLOBAL.GMAIL_WEB_CLIENT_ID || GLOBAL.GMAIL_CLIENT_ID, GLOBAL.GMAIL_WEB_CLIENT_SECRET || GLOBAL.GMAIL_CLIENT_SECRET)

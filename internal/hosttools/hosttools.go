@@ -81,7 +81,7 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runGPTChat(args)
 	case "tg":
 		err = env.runTG(args)
-	case "tm":
+	case "cicy-agent":
 		err = env.runTM(args)
 	case "agent-webpage":
 		err = env.runAgentWebpage(args)
@@ -105,6 +105,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runFRPServer(args)
 	case "frp-client":
 		err = env.runFRPClient(args)
+	case "cicy-mihome":
+		err = env.runCicyMihome(args)
 	default:
 		fmt.Fprintf(stderr, "unsupported host tool: %s\n", cmd)
 		printAvailable(stderr)
@@ -162,11 +164,11 @@ func loadGlobalJSON() (map[string]any, error) {
 }
 
 func globalJSONPath() string {
-	return filepath.Join(userHomeDir(), "global.json")
+	return filepath.Join(userHomeDir(), "cicy-ai", "global.json")
 }
 
 func tmJSONPath() string {
-	return filepath.Join(userHomeDir(), "Private", "tm.json")
+	return filepath.Join(userHomeDir(), "cicy-ai", "db", "cicy-agent.json")
 }
 
 func userHomeDir() string {
@@ -212,7 +214,7 @@ type tmConfig struct {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, tm, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, cicy-agent, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client, cicy-mihome")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
@@ -545,17 +547,17 @@ func (e *Env) runTM(args []string) error {
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodGet, "/api/tmux/windows", nil)
 	case "capture":
 		if len(rest) < 2 {
-			return errors.New("Usage: tm capture <pane>")
+			return errors.New("Usage: cicy-agent capture <pane>")
 		}
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": rest[1]})
 	case "msg":
 		if len(rest) < 3 {
-			return errors.New("Usage: tm msg <pane> <text>")
+			return errors.New("Usage: cicy-agent msg <pane> <text>")
 		}
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send", map[string]any{"pane_id": rest[1], "text": strings.Join(rest[2:], " ")})
 	case "msg_wait":
 		if len(rest) < 3 {
-			return errors.New("Usage: tm msg_wait <pane> <text> [timeout]")
+			return errors.New("Usage: cicy-agent msg_wait <pane> <text> [timeout]")
 		}
 		timeout := 60
 		if len(rest) > 3 {
@@ -564,25 +566,512 @@ func (e *Env) runTM(args []string) error {
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send_wait", map[string]any{"target": rest[1], "text": rest[2], "timeout": timeout})
 	case "send-keys":
 		if len(rest) < 3 {
-			return errors.New("Usage: tm send-keys <pane> <keys>")
+			return errors.New("Usage: cicy-agent send-keys <pane> <keys>")
 		}
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{"pane_id": rest[1], "keys": strings.Join(rest[2:], " ")})
 	case "create":
-		if len(rest) < 2 {
-			return errors.New("Usage: tm create <name>")
-		}
-		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/create", map[string]any{"name": rest[1]})
+		return e.runTMCreate(cfg, rest[1:])
+	case "upgrade":
+		return e.runTMUpgrade(cfg, rest[1:])
 	case "restart":
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/restart_all", map[string]any{})
 	case "clear":
 		if len(rest) < 2 {
-			return errors.New("Usage: tm clear <pane>")
+			return errors.New("Usage: cicy-agent clear <pane>")
 		}
 		return e.copyAPITo(cfg.API, cfg.Token, http.MethodPost, "/api/tmux/clear", map[string]any{"pane": rest[1]})
 	default:
 		_, _ = fmt.Fprintln(e.Stdout, tmUsage())
 	}
 	return nil
+}
+
+func (e *Env) runTMCreate(cfg tmConfig, args []string) error {
+	title := "全栈软件工程师"
+	agentType := "claude"
+	allowAllActions := true
+	replyInChinese := true
+	master := strings.TrimSpace(os.Getenv("X_AGENT_SHORT_ID"))
+	if master == "" {
+		master = "w-10001"
+	}
+	forkFrom := ""
+
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "--title" || arg == "-t":
+			if i+1 < len(args) {
+				title = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case strings.HasPrefix(arg, "--title="):
+			title = strings.TrimSpace(strings.TrimPrefix(arg, "--title="))
+		case arg == "--type" || arg == "--agent-type":
+			if i+1 < len(args) {
+				agentType = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case strings.HasPrefix(arg, "--type="):
+			agentType = strings.TrimSpace(strings.TrimPrefix(arg, "--type="))
+		case strings.HasPrefix(arg, "--agent-type="):
+			agentType = strings.TrimSpace(strings.TrimPrefix(arg, "--agent-type="))
+		case arg == "--master" || arg == "-m":
+			if i+1 < len(args) {
+				master = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case strings.HasPrefix(arg, "--master="):
+			master = strings.TrimSpace(strings.TrimPrefix(arg, "--master="))
+		case arg == "--fork" || arg == "-f":
+			if i+1 < len(args) {
+				forkFrom = strings.TrimSpace(args[i+1])
+				i++
+			}
+		case strings.HasPrefix(arg, "--fork="):
+			forkFrom = strings.TrimSpace(strings.TrimPrefix(arg, "--fork="))
+		case arg == "--no-allow-all":
+			allowAllActions = false
+		case arg == "--allow-all":
+			allowAllActions = true
+		case arg == "--no-chinese":
+			replyInChinese = false
+		case arg == "-h" || arg == "--help":
+			_, _ = fmt.Fprintln(e.Stdout, tmCreateUsage())
+			return nil
+		default:
+			if !strings.HasPrefix(arg, "-") && title == "全栈软件工程师" {
+				title = arg
+			}
+		}
+	}
+
+	_, _ = fmt.Fprintf(e.Stdout, "创建新员工...\n")
+	_, _ = fmt.Fprintf(e.Stdout, "  title: %s\n", title)
+	_, _ = fmt.Fprintf(e.Stdout, "  agent_type: %s\n", agentType)
+	_, _ = fmt.Fprintf(e.Stdout, "  allow_all_actions: %v\n", allowAllActions)
+	_, _ = fmt.Fprintf(e.Stdout, "  master: %s\n", master)
+	if forkFrom != "" {
+		_, _ = fmt.Fprintf(e.Stdout, "  fork_from: %s\n", forkFrom)
+	}
+	_, _ = fmt.Fprintln(e.Stdout)
+
+	data, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/create", map[string]any{
+		"title":            title,
+		"agent_type":       agentType,
+		"allow_all_actions": allowAllActions,
+		"reply_in_chinese": replyInChinese,
+	})
+	if err != nil {
+		return err
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return err
+	}
+
+	if success, _ := result["success"].(bool); !success {
+		errMsg := anyString(result["error"])
+		if errMsg == "" {
+			errMsg = "创建失败"
+		}
+		return errors.New(errMsg)
+	}
+
+	paneID := anyString(result["pane_id"])
+	session := anyString(result["session"])
+	port := result["ttyd_port"]
+
+	_, _ = fmt.Fprintf(e.Stdout, "✅ 创建成功: %s (session=%s, port=%v)\n", paneID, session, port)
+
+	if master != "" && master != "-" {
+		_, _ = fmt.Fprintf(e.Stdout, "\n绑定到 %s...\n", master)
+		bindData, bindErr := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/agents/bind", map[string]any{
+			"pane_id":    master,
+			"agent_name": paneID,
+		})
+		if bindErr != nil {
+			_, _ = fmt.Fprintf(e.Stdout, "⚠️  绑定失败: %v\n", bindErr)
+		} else {
+			var bindResult map[string]any
+			if json.Unmarshal(bindData, &bindResult) == nil {
+				if bindSuccess, _ := bindResult["success"].(bool); bindSuccess {
+					if alreadyBound, _ := bindResult["already_bound"].(bool); alreadyBound {
+						_, _ = fmt.Fprintf(e.Stdout, "✅ 已绑定到 %s (已存在)\n", master)
+					} else {
+						_, _ = fmt.Fprintf(e.Stdout, "✅ 已绑定到 %s\n", master)
+					}
+				} else {
+					_, _ = fmt.Fprintf(e.Stdout, "⚠️  绑定失败: %v\n", bindResult["error"])
+				}
+			}
+		}
+	}
+
+	// Fork: 获取源 agent 的 summary 文件，等待新 agent 就绪后发送
+	if forkFrom != "" {
+		if err := e.forkFromAgent(cfg, paneID, forkFrom); err != nil {
+			_, _ = fmt.Fprintf(e.Stdout, "⚠️  Fork 失败: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+func tmCreateUsage() string {
+	return `Usage: cicy-agent create [title] [options]
+
+Options:
+  --title, -t <title>       员工名称 (默认: 全栈软件工程师)
+  --type <type>             agent 类型 (默认: claude)
+  --master, -m <pane_id>    绑定到的 master (默认: $X_AGENT_SHORT_ID 或 w-10001, 用 - 跳过绑定)
+  --fork, -f <agent_id>     从指定 agent fork，读取其 summary 并启动
+  --allow-all               允许所有操作 (默认)
+  --no-allow-all            不允许所有操作
+  --no-chinese              不使用中文回复
+
+Examples:
+  cicy-agent create                           # 使用默认值创建
+  cicy-agent create 前端工程师                 # 指定名称
+  cicy-agent create -t "后端工程师" -m w-10002 # 指定名称和 master
+  cicy-agent create --type codex              # 使用 codex 类型
+  cicy-agent create -m -                      # 创建但不绑定
+  cicy-agent create --fork w-10001            # 从 w-10001 fork`
+}
+
+func (e *Env) runTMUpgrade(cfg tmConfig, args []string) error {
+	if len(args) == 0 {
+		return errors.New(tmUpgradeUsage())
+	}
+
+	paneID := args[0]
+	if paneID == "-h" || paneID == "--help" {
+		_, _ = fmt.Fprintln(e.Stdout, tmUpgradeUsage())
+		return nil
+	}
+
+	// 获取 agent 信息
+	data, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodGet, "/api/tmux/panes", nil)
+	if err != nil {
+		return err
+	}
+	var panesResp struct {
+		Panes []map[string]any `json:"panes"`
+	}
+	if err := json.Unmarshal(data, &panesResp); err != nil {
+		return err
+	}
+
+	var agentType string
+	for _, pane := range panesResp.Panes {
+		pid := anyString(pane["pane_id"])
+		if strings.HasPrefix(pid, paneID+":") || pid == paneID {
+			agentType = anyString(pane["agent_type"])
+			break
+		}
+	}
+
+	if agentType == "" {
+		agentType = "claude" // 默认
+	}
+
+	// 根据 agent_type 确定升级命令和清理命令
+	var upgradeCmd, cleanupCmd string
+	switch strings.ToLower(agentType) {
+	case "claude", "claude-code":
+		cleanupCmd = "rm -rf ~/.npm-global/lib/node_modules/@anthropic-ai/claude-code"
+		upgradeCmd = "npm i -g @anthropic-ai/claude-code@latest"
+	case "codex":
+		cleanupCmd = "rm -rf ~/.npm-global/lib/node_modules/@openai/codex"
+		upgradeCmd = "npm i -g @openai/codex@latest"
+	case "opencode":
+		cleanupCmd = "rm -rf ~/.npm-global/lib/node_modules/opencode-ai"
+		upgradeCmd = "npm i -g opencode-ai@latest"
+	case "openclaw":
+		cleanupCmd = "rm -rf ~/.npm-global/lib/node_modules/openclaw"
+		upgradeCmd = "npm i -g openclaw@latest"
+	case "cicy-claude":
+		cleanupCmd = "rm -rf ~/.npm-global/lib/node_modules/cicy-claude"
+		upgradeCmd = "npm i -g cicy-claude@latest"
+	default:
+		return fmt.Errorf("不支持升级 agent_type: %s", agentType)
+	}
+
+	_, _ = fmt.Fprintf(e.Stdout, "升级 %s (%s)...\n", paneID, agentType)
+
+	// Step 1: 发送 /exit 退出当前进程
+	_, _ = fmt.Fprintf(e.Stdout, "  [1/5] 退出当前进程...\n")
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "/exit",
+	})
+	time.Sleep(200 * time.Millisecond)
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "Enter",
+	})
+	time.Sleep(2 * time.Second)
+
+	// Step 2: 等待 shell prompt
+	_, _ = fmt.Fprintf(e.Stdout, "  [2/5] 等待 shell 就绪...\n")
+	shellReady := false
+	for i := 0; i < 10; i++ {
+		capData, capErr := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": paneID})
+		if capErr == nil {
+			output := string(capData)
+			// 检查是否有 shell prompt ($ 或 ❯ 在最后几行)
+			lines := strings.Split(output, "\n")
+			for i := len(lines) - 1; i >= 0 && i >= len(lines)-5; i-- {
+				line := strings.TrimSpace(lines[i])
+				if strings.HasSuffix(line, "$") || strings.HasSuffix(line, "❯") || strings.Contains(line, "$ ") {
+					shellReady = true
+					break
+				}
+			}
+			if shellReady {
+				break
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !shellReady {
+		_, _ = fmt.Fprintf(e.Stdout, "  ⚠️  未检测到 shell prompt，继续尝试...\n")
+	}
+
+	// Step 3: 先清理旧目录，再运行升级命令
+	_, _ = fmt.Fprintf(e.Stdout, "  [3/5] 清理旧目录并升级...\n")
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    cleanupCmd + " && " + upgradeCmd,
+	})
+	time.Sleep(200 * time.Millisecond)
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "Enter",
+	})
+
+	// 等待升级完成 (最多 120 秒)
+	_, _ = fmt.Fprintf(e.Stdout, "  等待升级完成...\n")
+	upgradeComplete := false
+	for i := 0; i < 120; i++ {
+		time.Sleep(1 * time.Second)
+		capData, capErr := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": paneID})
+		if capErr == nil {
+			output := string(capData)
+			lines := strings.Split(output, "\n")
+			for j := len(lines) - 1; j >= 0 && j >= len(lines)-5; j-- {
+				line := strings.TrimSpace(lines[j])
+				if strings.HasSuffix(line, "$") || strings.Contains(line, "$ ") {
+					upgradeComplete = true
+					break
+				}
+			}
+			if upgradeComplete {
+				break
+			}
+		}
+		if i%10 == 9 {
+			_, _ = fmt.Fprintf(e.Stdout, "    ... %ds\n", i+1)
+		}
+	}
+	if !upgradeComplete {
+		_, _ = fmt.Fprintf(e.Stdout, "  ⚠️  升级可能未完成，继续尝试重启...\n")
+	}
+
+	// Step 4: 重启 boot.sh
+	_, _ = fmt.Fprintf(e.Stdout, "  [4/5] 重启 agent...\n")
+	time.Sleep(500 * time.Millisecond)
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "bash ./.cicy/boot.sh",
+	})
+	time.Sleep(200 * time.Millisecond)
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "Enter",
+	})
+
+	// 等待 agent 启动
+	agentReady := false
+	for i := 0; i < 30; i++ {
+		time.Sleep(1 * time.Second)
+		capData, capErr := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": paneID})
+		if capErr == nil {
+			output := string(capData)
+			if strings.Contains(output, "❯") || strings.Contains(output, "> ") || strings.Contains(output, "Enter a prompt") {
+				agentReady = true
+				break
+			}
+		}
+	}
+	if !agentReady {
+		_, _ = fmt.Fprintf(e.Stdout, "  ⚠️  agent 可能未就绪\n")
+	}
+
+	// Step 5: 发送 /resume 并选择会话
+	_, _ = fmt.Fprintf(e.Stdout, "  [5/5] 恢复会话...\n")
+	time.Sleep(500 * time.Millisecond)
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "/resume",
+	})
+	time.Sleep(200 * time.Millisecond)
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "Enter",
+	})
+
+	// 等待会话列表出现，然后选择第一个
+	time.Sleep(2 * time.Second)
+	_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": paneID,
+		"keys":    "1",
+	})
+	time.Sleep(200 * time.Millisecond)
+	// 检查是否需要按 Enter
+	capData, _ := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": paneID})
+	if capData != nil && strings.Contains(string(capData), "1") {
+		_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+			"pane_id": paneID,
+			"keys":    "Enter",
+		})
+	}
+
+	_, _ = fmt.Fprintf(e.Stdout, "✅ 升级完成: %s\n", paneID)
+	return nil
+}
+
+func tmUpgradeUsage() string {
+	return `Usage: cicy-agent upgrade <pane_id>
+
+升级指定 agent 的 CLI 工具并恢复会话。
+
+流程:
+  1. 退出当前进程 (Ctrl+C)
+  2. 运行 npm 升级命令
+  3. 重启 boot.sh
+  4. 发送 /resume 恢复会话
+  5. 自动选择最近的会话
+
+Examples:
+  cicy-agent upgrade w-10001
+  cicy-agent upgrade w-10026`
+}
+
+func (e *Env) forkFromAgent(cfg tmConfig, newPaneID, sourceAgentID string) error {
+	_, _ = fmt.Fprintf(e.Stdout, "\n从 %s fork...\n", sourceAgentID)
+
+	// 获取 summary 文件路径
+	summaryPath := e.findSummaryFile(sourceAgentID)
+	if summaryPath == "" {
+		return fmt.Errorf("找不到 %s 的 summary 文件", sourceAgentID)
+	}
+	_, _ = fmt.Fprintf(e.Stdout, "  summary: %s\n", summaryPath)
+
+	// 等待新 agent 就绪
+	_, _ = fmt.Fprintf(e.Stdout, "  等待 %s 就绪...\n", newPaneID)
+	ready := false
+	for i := 0; i < 30; i++ {
+		time.Sleep(time.Second)
+		data, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": newPaneID})
+		if err != nil {
+			continue
+		}
+		output := string(data)
+		// 检查是否可以输入 prompt (claude 显示 ❯, codex 显示 >)
+		if strings.Contains(output, "❯") || strings.Contains(output, "> ") || strings.Contains(output, "Enter a prompt") {
+			ready = true
+			break
+		}
+	}
+	if !ready {
+		return errors.New("等待超时，agent 未就绪")
+	}
+
+	// 发送 read summary 命令
+	prompt := fmt.Sprintf("file://%s read", summaryPath)
+	_, _ = fmt.Fprintf(e.Stdout, "  发送: %s\n", prompt)
+
+	// 先发送文本，再发送 Enter
+	_, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": newPaneID,
+		"keys":    prompt,
+	})
+	if err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Millisecond)
+	_, err = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+		"pane_id": newPaneID,
+		"keys":    "Enter",
+	})
+	if err != nil {
+		return err
+	}
+
+	// 检查是否发送成功，如果 prompt 还在输入框里说明 Enter 没生效，补发
+	time.Sleep(500 * time.Millisecond)
+	capData, capErr := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/capture_pane", map[string]any{"pane_id": newPaneID})
+	if capErr == nil {
+		output := string(capData)
+		// 如果 capture 里还能看到完整的 prompt 文本在最后一行，说明 Enter 没发出去
+		if strings.Contains(output, "file://") && strings.Contains(output, ".summary.md read") {
+			_, _ = fmt.Fprintf(e.Stdout, "  检测到 Enter 未生效，补发...\n")
+			_, _ = e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/send-keys", map[string]any{
+				"pane_id": newPaneID,
+				"keys":    "Enter",
+			})
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
+
+	_, _ = fmt.Fprintf(e.Stdout, "✅ Fork 完成，%s 已启动\n", newPaneID)
+	return nil
+}
+
+func (e *Env) findSummaryFile(agentID string) string {
+	// 尝试多个可能的路径
+	bases := []string{
+		filepath.Join(userHomeDir(), "cicy-ai", "workers", agentID, ".cicy", "history", "summary"),
+		filepath.Join(userHomeDir(), "workers", agentID, "history", "summary"),
+	}
+
+	for _, base := range bases {
+		// 先尝试 current.summary.md 软链接
+		currentSummary := filepath.Join(base, "current.summary.md")
+		if target, err := os.Readlink(currentSummary); err == nil {
+			if filepath.IsAbs(target) {
+				return target
+			}
+			return filepath.Join(base, target)
+		}
+
+		// 找最新的 .summary.md 文件
+		entries, err := os.ReadDir(base)
+		if err != nil {
+			continue
+		}
+		var latest string
+		var latestTime time.Time
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".summary.md") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().After(latestTime) {
+				latestTime = info.ModTime()
+				latest = filepath.Join(base, entry.Name())
+			}
+		}
+		if latest != "" {
+			return latest
+		}
+	}
+	return ""
 }
 
 func (e *Env) copyAPI(method, path string, payload any) error {
@@ -609,7 +1098,7 @@ func parseTMArgs(args []string) (tmOptions, []string, error) {
 		switch {
 		case arg == "-n" || arg == "--node":
 			if i+1 >= len(args) {
-				return tmOptions{}, nil, errors.New("Usage: tm [--node NAME] <command> [args]")
+				return tmOptions{}, nil, errors.New("Usage: cicy-agent [--node NAME] <command> [args]")
 			}
 			opts.Node = strings.TrimSpace(args[i+1])
 			i++
@@ -641,7 +1130,7 @@ func (e *Env) resolveTMConfig(nodeOverride string) (tmConfig, error) {
 		nodes, _ := tmRoot["nodes"].(map[string]any)
 		nodeCfg, _ := nodes[nodeName].(map[string]any)
 		if len(nodeCfg) == 0 {
-			return tmConfig{}, fmt.Errorf("tm node %q not found in %s", nodeName, tmJSONPath())
+			return tmConfig{}, fmt.Errorf("cicy-agent node %q not found in %s", nodeName, tmJSONPath())
 		}
 		selected = nodeCfg
 	}
@@ -678,7 +1167,7 @@ func (e *Env) resolveTMConfig(nodeOverride string) (tmConfig, error) {
 		if nodeLabel == "" {
 			nodeLabel = "default"
 		}
-		return tmConfig{}, fmt.Errorf("tm node %q is missing api_token in %s", nodeLabel, tmJSONPath())
+		return tmConfig{}, fmt.Errorf("cicy-agent node %q is missing api_token in %s", nodeLabel, tmJSONPath())
 	}
 	return tmConfig{
 		API:   strings.TrimRight(apiBase, "/"),
@@ -749,10 +1238,10 @@ func (e *Env) effectiveTMConfig() map[string]any {
 }
 
 func tmUsage() string {
-	return `Usage: tm [--node NAME] <command> [args]
+	return `Usage: cicy-agent [--node NAME] <command> [args]
 
 Commands:
-  help                                  Show tm help and config rules
+  help                                  Show cicy-agent help and config rules
   ls                                    List panes
   tree                                  Tmux tree
   windows                               Window list
@@ -765,52 +1254,52 @@ Commands:
   clear <pane>                          Clear pane
 
 Multi-node selection:
-  tm ls                                 Use the configured default target
-  tm --node dev ls                      Use nodes.dev
-  TM_NODE=dev tm ls                     Same as --node dev
-  TM_API_BASE=http://127.0.0.1:8021 tm ls
+  cicy-agent ls                         Use the configured default target
+  cicy-agent --node dev ls              Use nodes.dev
+  TM_NODE=dev cicy-agent ls             Same as --node dev
+  TM_API_BASE=http://127.0.0.1:8021 cicy-agent ls
                                          Bypass node lookup and hit this API directly
 
 How to use configured nodes:
-  1. Put node definitions in ~/Private/tm.json
+  1. Put node definitions in ~/cicy-ai/db/cicy-agent.json
   2. Pick the default node with the top-level "default" field
-  3. Use tm directly for the default node
-  4. Use tm --node <name> ... for a specific node
+  3. Use cicy-agent directly for the default node
+  4. Use cicy-agent --node <name> ... for a specific node
 
 Config resolution order:
   1. TM_API_BASE or API_BASE
-  2. TM_NODE / --node, then ~/Private/tm.json nodes[<name>]
-  3. ~/Private/tm.json default -> nodes[<default>]
-  4. ~/Private/tm.json api / api_base / url
+  2. TM_NODE / --node, then ~/cicy-ai/db/cicy-agent.json nodes[<name>]
+  3. ~/cicy-ai/db/cicy-agent.json default -> nodes[<default>]
+  4. ~/cicy-ai/db/cicy-agent.json api / api_base / url
   5. http://127.0.0.1:${TM_API_PORT|API_PORT|8008}
 
 Token order:
   1. TM_TOKEN
-  2. selected tm node api_token
+  2. selected cicy-agent node api_token
 
 Default fallback:
-  - tm never writes config files
-  - if ~/Private/tm.json is missing or incomplete, tm uses an in-memory default:
+  - cicy-agent never writes config files
+  - if ~/cicy-ai/db/cicy-agent.json is missing or incomplete, cicy-agent uses an in-memory default:
       default = "default"
       nodes.default.api = "http://127.0.0.1:8008"
-      nodes.default.api_token = ~/global.json api_token
+      nodes.default.api_token = ~/cicy-ai/global.json api_token
 
-Example ~/Private/tm.json:
+Example ~/cicy-ai/db/cicy-agent.json:
   {
     "default": "default",
     "nodes": {
       "default": {
         "api": "http://127.0.0.1:8008",
-        "api_token": "<copy from ~/global.json api_token>"
+        "api_token": "<copy from ~/cicy-ai/global.json api_token>"
       },
       "dev": {
         "api": "http://127.0.0.1:8021",
-        "api_token": "<copy from ~/global.json api_token>"
+        "api_token": "<copy from ~/cicy-ai/global.json api_token>"
       }
     }
   }
 
-Supported tm.json keys:
+Supported cicy-agent.json keys:
   default                               Default node name
   api | api_base | url                  Default API base when no node is selected
   port                                  Default local port fallback
@@ -823,11 +1312,11 @@ Supported tm.json keys:
 
 Notes:
   - --node wins over default
-  - TM_API_BASE wins over all tm config
+  - TM_API_BASE wins over all cicy-agent config
   - TM_TOKEN wins over node api_token
-  - tm config lives in ~/Private/tm.json
-  - tm never writes ~/global.json or ~/Private/tm.json
-  - if the selected node is missing, tm returns an explicit config error`
+  - cicy-agent reads config from ~/cicy-ai/db/cicy-agent.json
+  - cicy-agent never writes ~/cicy-ai/global.json or ~/cicy-ai/db/cicy-agent.json
+  - if the selected node is missing, cicy-agent returns an explicit config error`
 }
 
 func firstNonEmpty(values ...string) string {
@@ -846,8 +1335,23 @@ func (e *Env) chatClients() (map[string]map[string]map[string]any, error) {
 		return nil, err
 	}
 	out := map[string]map[string]map[string]any{}
-	if err := json.Unmarshal(data, &out); err != nil {
+	if err := json.Unmarshal(data, &out); err == nil {
+		return out, nil
+	}
+	var flat []map[string]any
+	if err := json.Unmarshal(data, &flat); err != nil {
 		return nil, err
+	}
+	for _, item := range flat {
+		agentID := anyString(item["master_agent_id"])
+		clientID := anyString(item["client_id"])
+		if agentID == "" || clientID == "" {
+			continue
+		}
+		if out[agentID] == nil {
+			out[agentID] = map[string]map[string]any{}
+		}
+		out[agentID][clientID] = item
 	}
 	return out, nil
 }
@@ -1199,10 +1703,10 @@ func (e *Env) runAgentWebpage(args []string) error {
 	}
 	switch cmd {
 	case "help", "-h", "--help":
-		_, _ = fmt.Fprintln(e.Stdout, "agent-webpage - CiCy live webpage client tool\n\nCommands:\n  help\n  tools\n  ping [client_id]\n  ipc-ping [client_id]\n  exec-js '<js>' [client_id]\n  send <type> <data_json> [client_id] [expect_type]\n  clients\n\nNotes:\n  - target by client_id, not agent_id\n  - if omitted, current agent must have exactly one connected client\n  - response-oriented commands wait for and print the real webpage response")
+		_, _ = fmt.Fprintln(e.Stdout, "agent-webpage - CiCy live webpage client tool\n\nCommands:\n  help\n  tools\n  ping [client_id]\n  ipc-ping [client_id]\n  exec-js '<js>' [client_id]\n  current-active-agent-id [client_id]\n  current-master-agent-id [client_id]\n  send <type> <data_json> [client_id] [expect_type]\n  clients\n\nNotes:\n  - target by client_id, not agent_id\n  - if omitted, current agent must have exactly one connected client\n  - response-oriented commands wait for and print the real webpage response")
 		return nil
 	case "tools":
-		_, _ = fmt.Fprintln(e.Stdout, "# agent-webpage tools\n\n- ping [client_id] -> direct push to client_id, waits for webpage_pong\n- ipc-ping [client_id] -> direct push to client_id, waits for ipc_pong\n- exec-js '<js>' [client_id] -> direct push to client_id, waits for exec_js_result\n- send <type> <data_json> [client_id] [expect_type] -> direct push to client_id, waits for matching response when requestId / expect_type is available\n- clients -> /api/chat/clients")
+		_, _ = fmt.Fprintln(e.Stdout, "# agent-webpage tools\n\n- ping [client_id] -> direct push to client_id, waits for webpage_pong\n- ipc-ping [client_id] -> direct push to client_id, waits for ipc_pong\n- exec-js '<js>' [client_id] -> direct push to client_id, waits for exec_js_result\n- current-active-agent-id [client_id] -> prints devStore Workspace.activeCliPaneId from the live webpage\n- current-master-agent-id [client_id] -> prints devStore Workspace.masterAgentId from the live webpage\n- send <type> <data_json> [client_id] [expect_type] -> direct push to client_id, waits for matching response when requestId / expect_type is available\n- clients -> /api/chat/clients")
 		return nil
 	case "ping":
 		clientID := ""
@@ -1282,6 +1786,18 @@ func (e *Env) runAgentWebpage(args []string) error {
 		}
 		_, _ = fmt.Fprintln(e.Stdout, data["result"])
 		return nil
+	case "current-active-agent-id", "current_active_agent_id":
+		clientID := ""
+		if len(args) > 0 {
+			clientID = args[0]
+		}
+		return e.runAgentWebpageReadWorkspaceField(clientID, "activeCliPaneId")
+	case "current-master-agent-id", "current_master_agent_id":
+		clientID := ""
+		if len(args) > 0 {
+			clientID = args[0]
+		}
+		return e.runAgentWebpageReadWorkspaceField(clientID, "masterAgentId")
 	case "send":
 		if len(args) < 2 {
 			return errors.New("Usage: agent-webpage send <type> <data_json> [client_id] [expect_type]")
@@ -1347,6 +1863,48 @@ func (e *Env) runAgentWebpage(args []string) error {
 	default:
 		return e.runAgentWebpage([]string{"help"})
 	}
+}
+
+func (e *Env) runAgentWebpageReadWorkspaceField(clientID string, field string) error {
+	agentID, clientID, err := e.resolveWebTarget(clientID)
+	if err != nil {
+		return err
+	}
+	rid := randomID("exec")
+	conn, err := e.wsConnect(agentID)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	code := fmt.Sprintf(`(() => {
+  const snapshot = globalThis.devStore && typeof globalThis.devStore.getSnapshot === "function"
+    ? globalThis.devStore.getSnapshot()
+    : null;
+  const workspace = snapshot && snapshot.Workspace && snapshot.Workspace.state ? snapshot.Workspace.state : null;
+  const value = workspace ? workspace[%q] : null;
+  return value == null ? "" : String(value);
+})()`, field)
+	_, err = e.apiRequest(context.Background(), http.MethodPost, "/api/chat/push", map[string]any{
+		"agent_id":  agentID,
+		"client_id": clientID,
+		"type":      "exec_js",
+		"data":      map[string]any{"code": code, "requestId": rid},
+	})
+	if err != nil {
+		return err
+	}
+	msg, err := e.waitForMessage(conn, 20*time.Second, func(m map[string]any) bool {
+		return anyString(m["type"]) == "exec_js_result" && anyString(asMap(m["data"])["requestId"]) == rid
+	})
+	if err != nil {
+		return err
+	}
+	data := asMap(msg["data"])
+	if errText := anyString(data["error"]); errText != "" {
+		return errors.New(errText)
+	}
+	_, _ = fmt.Fprintln(e.Stdout, anyString(data["result"]))
+	return nil
 }
 
 func (e *Env) runGeminiAsk(args []string) error {
@@ -1573,7 +2131,7 @@ func (e *Env) runCFTunnel(args []string) error {
 	cfRoot, _ := e.Global["cf"].(map[string]any)
 	cfg, _ := cfRoot[cfEnv].(map[string]any)
 	if len(cfg) == 0 {
-		return fmt.Errorf("missing cf.%s config in ~/global.json", cfEnv)
+		return fmt.Errorf("missing cf.%s config in ~/cicy-ai/global.json", cfEnv)
 	}
 	token := strings.TrimSpace(anyString(cfg["api_token"]))
 	accountID := strings.TrimSpace(anyString(cfg["account_id"]))
@@ -1621,7 +2179,7 @@ Commands:
   del <port> [port2 ...]    Delete one or more routes and DNS records
 
 Environment:
-  CF_ENV=prod|dev           Choose the Cloudflare config from ~/global.json`
+  CF_ENV=prod|dev           Choose the Cloudflare config from ~/cicy-ai/global.json`
 }
 
 func parsePorts(args []string) []int {

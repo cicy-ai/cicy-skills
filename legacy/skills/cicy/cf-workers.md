@@ -4,7 +4,7 @@ Cloudflare Workers management via API and wrangler.
 
 ## Credentials
 
-Stored in `~/global.json`:
+Stored in `~/cicy-ai/global.json`:
 - `CLOUDFLARE_API_TOKEN_CICYBOT`
 - `CLOUDFLARE_ACCOUNT_ID_CICYBOT`
 

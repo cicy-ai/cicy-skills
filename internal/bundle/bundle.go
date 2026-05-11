@@ -42,9 +42,10 @@ var (
 		"gpt-chat",
 		"frp-client",
 		"frp-server",
+		"cicy-mihome",
 		"mysql-exec",
 		"tg",
-		"tm",
+		"cicy-agent",
 		"todo",
 	}
 	ProviderLinks = []LinkSpec{
@@ -62,6 +63,7 @@ var (
 		"fast-api-check",
 		"grant-trial-credit",
 		"ipc-ping",
+		"tm",
 		"webpage",
 		"webpage-ping",
 	}

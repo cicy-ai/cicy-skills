@@ -33,6 +33,22 @@ make install-local-cli
 cicy-skills list
 ```
 
+### 测试 8008 AI Gateway Provider
+```bash
+test-gateway-provider --provider wucur --model gpt-5.5
+test-gateway-provider --provider sub2api --model claude-opus-4-7
+test-gateway-provider --all --model gpt-5.5
+test-gateway-provider --all --model claude-opus-4-7
+```
+
+这个脚本会：
+
+- 读取 `~/cicy-ai/global.json` 里的 provider 配置
+- 临时切换 `ai.currentProvider`
+- 通过真实 `http://127.0.0.1:8008/api/ai-gateway/{openai|anthropic}/test-agent/...` 发请求
+- 默认发送 `hi`
+- 测试结束后自动恢复原来的 `currentProvider`
+
 ### 安装 Codex allow list skill
 ```bash
 cicy-skills agent list codex

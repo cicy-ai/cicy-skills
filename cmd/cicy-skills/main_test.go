@@ -132,11 +132,20 @@ func TestHelpTextAgent(t *testing.T) {
 	if !strings.Contains(got, "globalApiToken") {
 		t.Fatalf("agent help missing globalApiToken approved skill: %q", got)
 	}
-	if !strings.Contains(got, "ssh") {
-		t.Fatalf("agent help missing ssh approved skill: %q", got)
+	if !strings.Contains(got, "cicy-ssh") {
+		t.Fatalf("agent help missing cicy-ssh approved skill: %q", got)
 	}
-	if !strings.Contains(got, "tm") {
-		t.Fatalf("agent help missing tm approved skill: %q", got)
+	if !strings.Contains(got, "agent-code-server") {
+		t.Fatalf("agent help missing agent-code-server approved skill: %q", got)
+	}
+	if !strings.Contains(got, "agent-summary") {
+		t.Fatalf("agent help missing agent-summary approved skill: %q", got)
+	}
+	if !strings.Contains(got, "docker-build-github-action") {
+		t.Fatalf("agent help missing docker-build-github-action approved skill: %q", got)
+	}
+	if !strings.Contains(got, "cicy-agent") {
+		t.Fatalf("agent help missing cicy-agent approved skill: %q", got)
 	}
 }
 

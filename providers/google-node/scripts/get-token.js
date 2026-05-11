@@ -4,7 +4,7 @@ const { google } = require('googleapis')
 const http = require('http')
 const { resolve } = require('path')
 
-const GLOBAL = require(resolve(process.env.HOME, 'global.json'))
+const GLOBAL = require(resolve(process.env.HOME, 'cicy-ai', 'global.json'))
 const PORT = 3333
 
 const oauth2 = new google.auth.OAuth2(
@@ -32,7 +32,7 @@ http.createServer(async (req, res) => {
   if (!code) return res.end('no code')
   const { tokens } = await oauth2.getToken(code)
   console.log('\nrefresh_token:', tokens.refresh_token)
-  console.log('\nAdd to ~/global.json as GMAIL_REFRESH_TOKEN')
+  console.log('\nAdd to ~/cicy-ai/global.json as GMAIL_REFRESH_TOKEN')
   console.log('This token will also work for Google Cloud STT/TTS via cloud-platform scope.')
   res.end('Done! Check terminal.')
   process.exit()

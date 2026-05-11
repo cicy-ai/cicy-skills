@@ -41,13 +41,15 @@ func OpenClawSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "ssh", "tm"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent"}
 }
 
 func canonicalCodexSkillName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "agent-code-server", "agentcodeserver", "agent_code_server", "code-server", "codeserver":
 		return "agent-code-server"
+	case "agent-summary", "agentsummary", "agent_summary":
+		return "agent-summary"
 	case "agent-webpage", "agentwebpage", "agent_webpage":
 		return "agent-webpage"
 	case "cf-tunnel":
@@ -64,10 +66,10 @@ func canonicalCodexSkillName(name string) string {
 		return "globalApiToken"
 	case "google":
 		return "google"
-	case "ssh":
-		return "ssh"
-	case "tm":
-		return "tm"
+	case "ssh", "cicy-ssh", "cicyssh", "cicy_ssh":
+		return "cicy-ssh"
+	case "cicy-agent", "cicyagent", "cicy_agent":
+		return "cicy-agent"
 	default:
 		return ""
 	}
@@ -222,6 +224,11 @@ func installCodex(root, targetRoot, commandBinDir string, skillNames []string) (
 		}
 		installed = append(installed, skill)
 	}
+	if containsString(skills, "cicy-agent") {
+		if err := os.RemoveAll(filepath.Join(targetRoot, "tm")); err != nil {
+			return nil, err
+		}
+	}
 	return installed, nil
 }
 
@@ -289,6 +296,8 @@ func generateCodexSkill(root, targetRoot, commandBinDir, skill string) error {
 	switch skill {
 	case "agent-code-server":
 		return generateCodexAgentCodeServer(targetRoot, commandBinDir)
+	case "agent-summary":
+		return generateCodexAgentSummary(targetRoot, commandBinDir)
 	case "agent-webpage":
 		return generateCodexAgentWebpage(targetRoot, commandBinDir)
 	case "cf-tunnel":
@@ -305,9 +314,9 @@ func generateCodexSkill(root, targetRoot, commandBinDir, skill string) error {
 		return generateCodexGlobalAPIToken(targetRoot, commandBinDir)
 	case "google":
 		return generateCodexGoogle(targetRoot, commandBinDir)
-	case "ssh":
+	case "cicy-ssh":
 		return generateCodexSSH(targetRoot, commandBinDir)
-	case "tm":
+	case "cicy-agent":
 		return generateCodexTM(targetRoot, commandBinDir)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
@@ -554,7 +563,7 @@ func generateCodexAgentWebpage(targetRoot, commandBinDir string) error {
 }
 
 func generateCodexTM(targetRoot, commandBinDir string) error {
-	skillDir := filepath.Join(targetRoot, "tm")
+	skillDir := filepath.Join(targetRoot, "cicy-agent")
 	refsDir := filepath.Join(skillDir, "references")
 	if err := os.MkdirAll(refsDir, 0o755); err != nil {
 		return err
@@ -573,7 +582,7 @@ func generateCodexTM(targetRoot, commandBinDir string) error {
 }
 
 func generateCodexSSH(targetRoot, commandBinDir string) error {
-	skillDir := filepath.Join(targetRoot, "ssh")
+	skillDir := filepath.Join(targetRoot, "cicy-ssh")
 	refsDir := filepath.Join(skillDir, "references")
 	if err := os.MkdirAll(refsDir, 0o755); err != nil {
 		return err
@@ -632,6 +641,15 @@ func dirExists(path string) bool {
 	return info.IsDir()
 }
 
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func writeText(path, text string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -649,7 +667,7 @@ description: Use the local google CLI wrapper from %s for Gmail, Sheets, Drive, 
 
 This skill covers the local `+"`google`"+` wrapper installed from `+"`"+`%s`+"`"+`.
 
-Use these commands directly from `+"`PATH`"+`. They read real credentials from `+"`~/global.json`"+`.
+Use these commands directly from `+"`PATH`"+`. They read real credentials from `+"`~/cicy-ai/global.json`"+`.
 
 ## Scope
 
@@ -680,26 +698,26 @@ Read [tools.md](./references/tools.md) for the full tool and command shapes.
 func renderGlobalAPITokenSkill(commandBinDir string) string {
 	return fmt.Sprintf(`---
 name: globalApiToken
-description: Use the local globalApiToken wrapper from %s to show or refresh ~/global.json api_token on this host.
+description: Use the local globalApiToken wrapper from %s to show or refresh ~/cicy-ai/global.json api_token on this host.
 ---
 
 # Global API Token
 
 This skill covers the local `+"`globalApiToken`"+` wrapper installed from `+"`"+`%s`+"`"+`.
 
-Use this command directly from `+"`PATH`"+`. It reads and updates the real `+"`~/global.json`"+` file on this host.
+Use this command directly from `+"`PATH`"+`. It reads and updates the real `+"`~/cicy-ai/global.json`"+` file on this host.
 
 ## Scope
 
 Use this skill when the task involves:
 
-- showing the current `+"`api_token`"+` from `+"`~/global.json`"+`
-- rotating or refreshing `+"`~/global.json api_token`"+`
+- showing the current `+"`api_token`"+` from `+"`~/cicy-ai/global.json`"+`
+- rotating or refreshing `+"`~/cicy-ai/global.json api_token`"+`
 
 ## Rules
 
 1. Prefer the local `+"`globalApiToken`"+` command first.
-2. Operate on the real `+"`~/global.json`"+`; do not fabricate token values.
+2. Operate on the real `+"`~/cicy-ai/global.json`"+`; do not fabricate token values.
 3. Only refresh the token when the user explicitly asks to rotate or refresh it.
 4. Report the resulting token value back to the user when requested.
 
@@ -814,7 +832,7 @@ func renderGoogleHelp(commandBinDir string) string {
 
 ## Rules
 
-- use the real credentials in `+"`~/global.json`"+`
+- use the real credentials in `+"`~/cicy-ai/global.json`"+`
 - do not mock Google responses
 - report exact command output or concrete results back to the user
 
@@ -839,8 +857,8 @@ func renderGlobalAPITokenHelp(commandBinDir string) string {
 
 ## Rules
 
-- read the real token from `+"`~/global.json`"+`
-- refresh updates `+"`~/global.json api_token`"+` in place
+- read the real token from `+"`~/cicy-ai/global.json`"+`
+- refresh updates `+"`~/cicy-ai/global.json api_token`"+` in place
 - do not rotate the token unless the user explicitly asks
 
 ## More
@@ -859,7 +877,7 @@ description: Use the local cf-tunnel wrapper from %s to manage Cloudflare Tunnel
 
 This skill covers the local `+"`cf-tunnel`"+` wrapper installed from `+"`"+`%s`+"`"+`.
 
-Use this command directly from `+"`PATH`"+`. It reads real Cloudflare credentials from `+"`~/global.json`"+`.
+Use this command directly from `+"`PATH`"+`. It reads real Cloudflare credentials from `+"`~/cicy-ai/global.json`"+`.
 
 ## Scope
 
@@ -873,7 +891,7 @@ Use this skill when the task involves:
 ## Rules
 
 1. Prefer the local `+"`cf-tunnel`"+` command first.
-2. Use the real Cloudflare config from `+"`~/global.json`"+`. Do not mock responses.
+2. Use the real Cloudflare config from `+"`~/cicy-ai/global.json`"+`. Do not mock responses.
 3. `+"`cf-tunnel`"+` manages routes and DNS only. Do not kill or manage the `+"`cloudflared`"+` process unless the user explicitly asks.
 4. Report the exact hostname and port mapping results back to the user.
 
@@ -966,20 +984,19 @@ Read [tools.md](./references/tools.md) for the supported tools, response types, 
 
 func renderTMSkill(commandBinDir string) string {
 	return fmt.Sprintf(`---
-name: tm
-description: Operate tmux panes and windows on this host with the local tm wrapper from %s. Prefer tm for quick local pane work and cicy-code for node-aware tmux APIs.
+name: cicy-agent
+description: Operate tmux panes and windows on this host with the local cicy-agent wrapper from %s.
 ---
 
-# tm
+# cicy-agent
 
 This skill is for tmux-style pane and window operations in the CiCy environment.
 
-Primary tools:
+Primary tool:
 
-- `+"`tm`"+` for quick local pane operations
-- `+"`cicy-code`"+` for tmux and pane APIs, especially when node-aware or API-level control is needed
+- `+"`cicy-agent`"+` for local pane and window operations on this host
 
-Do not use `+"`fast-api`"+` for tmux work when `+"`tm`"+` or `+"`cicy-code`"+` covers it.
+Do not use `+"`fast-api`"+` for tmux work when `+"`cicy-agent`"+` covers it.
 
 ## Scope
 
@@ -992,15 +1009,13 @@ Use this skill for:
 - creating or restarting panes
 - clearing panes
 - listing, selecting, renaming, creating, or deleting tmux windows
-- doing the same on a selected `+"`cicy-code`"+` node via `+"`cicy-code -n <instance>`"+`
 
 ## Rules
 
-1. Prefer `+"`tm`"+` for local convenience operations on this host.
-2. Prefer `+"`cicy-code`"+` when the task is node-aware, API-oriented, or needs features beyond the thin `+"`tm`"+` wrapper.
-3. Do not route tmux work through `+"`fast-api`"+` unless there is a specific reason `+"`tm`"+` and `+"`cicy-code`"+` cannot do it.
-4. The primary pane is usually `+"`w-10001`"+`.
-5. If targeting a node, use `+"`cicy-code -n <instance> ...`"+` and let the registry resolve the node.
+1. Prefer `+"`cicy-agent`"+` for local convenience operations on this host.
+2. Do not route tmux work through `+"`fast-api`"+` unless there is a specific reason `+"`cicy-agent`"+` cannot do it.
+3. The primary pane is usually `+"`w-10001`"+`.
+4. Config currently lives at `+"`~/cicy-ai/db/cicy-agent.json`"+`.
 
 ## Help
 
@@ -1014,11 +1029,11 @@ Read [tools.md](./references/tools.md) for the command map.
 
 func renderSSHSkill() string {
 	return `---
-name: ssh
+name: cicy-ssh
 description: Use OpenSSH on this host. Trigger when the task mentions ssh, ~/.ssh/config, ssh config hosts, ssh aliases, remote login, jump hosts, or adding/listing/using SSH nodes from local config.
 ---
 
-# ssh
+# cicy-ssh
 
 This skill is for SSH access and local SSH config management on this host.
 
@@ -1074,7 +1089,7 @@ func renderCFTunnelHelp(commandBinDir string) string {
 
 ## Rules
 
-- use the real Cloudflare config in `+"`~/global.json`"+`
+- use the real Cloudflare config in `+"`~/cicy-ai/global.json`"+`
 - do not mock Cloudflare responses
 - `+"`cf-tunnel`"+` manages route and DNS state only; it does not manage the `+"`cloudflared`"+` process
 - report exact hostname and port mappings back to the user
@@ -1381,6 +1396,8 @@ func renderAgentWebpageHelp(commandBinDir string) string {
 - ping the current agent's only connected webpage client: `+"`agent-webpage ping`"+`
 - ping a specific client: `+"`agent-webpage ping web-abc123`"+`
 - run JS in a specific live webpage client: `+"`agent-webpage exec-js 'window.location.href' web-abc123`"+`
+- print the current active agent id from the live webpage: `+"`agent-webpage current-active-agent-id web-abc123`"+`
+- print the current master agent id from the live webpage: `+"`agent-webpage current-master-agent-id web-abc123`"+`
 - inspect connected clients: `+"`agent-webpage clients`"+`
 
 ## Rules
@@ -1397,67 +1414,66 @@ func renderAgentWebpageHelp(commandBinDir string) string {
 }
 
 func renderTMHelp(commandBinDir string) string {
-	return fmt.Sprintf(`# tm Help
+	return fmt.Sprintf(`# cicy-agent Help
 
 ## Command
 
 - binary root: %s
-- primary command: `+"`tm`"+`
+- primary command: `+"`cicy-agent`"+`
 
 ## Quick Start
 
-- list panes: `+"`tm ls`"+`
-- capture pane output: `+"`tm capture w-10001`"+`
-- send a message: `+"`tm msg w-10001 \"hello\"`"+`
-- send a key: `+"`tm send-keys w-10001 Enter`"+`
-- inspect tmux windows: `+"`tm windows`"+`
+- list panes: `+"`cicy-agent ls`"+`
+- capture pane output: `+"`cicy-agent capture w-10001`"+`
+- send a message: `+"`cicy-agent msg w-10001 \"hello\"`"+`
+- send a key: `+"`cicy-agent send-keys w-10001 Enter`"+`
+- inspect tmux windows: `+"`cicy-agent windows`"+`
 
 ## Multi-Node
 
-- use the configured default target: `+"`tm ls`"+`
-- select a configured node: `+"`tm --node dev ls`"+`
-- select a configured node by env: `+"`TM_NODE=dev tm ls`"+`
-- bypass config and hit a specific API directly: `+"`TM_API_BASE=http://127.0.0.1:8021 tm ls`"+`
+- use the configured default target: `+"`cicy-agent ls`"+`
+- select a configured node: `+"`cicy-agent --node dev ls`"+`
+- select a configured node by env: `+"`TM_NODE=dev cicy-agent ls`"+`
+- bypass config and hit a specific API directly: `+"`TM_API_BASE=http://127.0.0.1:8021 cicy-agent ls`"+`
 
 How to configure and use multi-node:
 
-- create `+"`~/Private/tm.json`"+`
-- set top-level `+"`default`"+` to the node you want `+"`tm ls`"+` to use
+- create `+"`~/cicy-ai/db/cicy-agent.json`"+`
+- set top-level `+"`default`"+` to the node you want `+"`cicy-agent ls`"+` to use
 - define each node under `+"`nodes.<name>`"+`
-- use `+"`tm --node <name> ...`"+` when you want a non-default node
+- use `+"`cicy-agent --node <name> ...`"+` when you want a non-default node
 
-Recommended `+"`~/Private/tm.json`"+` shape:
+Recommended `+"`~/cicy-ai/db/cicy-agent.json`"+` shape:
 
     {
       "default": "default",
       "nodes": {
-        "default": {"api": "http://127.0.0.1:8008", "api_token": "<copy from ~/global.json api_token>"},
-        "dev": {"api": "http://127.0.0.1:8021", "api_token": "<copy from ~/global.json api_token>"}
+        "default": {"api": "http://127.0.0.1:8008", "api_token": "<copy from ~/cicy-ai/global.json api_token>"},
+        "dev": {"api": "http://127.0.0.1:8021", "api_token": "<copy from ~/cicy-ai/global.json api_token>"}
       }
     }
 
 Resolution order:
 
 - `+"`TM_API_BASE`"+` or `+"`API_BASE`"+`
-- `+"`TM_NODE`"+` or `+"`--node`"+`, then `+"`~/Private/tm.json nodes[<name>]`"+`
-- `+"`~/Private/tm.json default`"+` -> `+"`nodes[<default>]`"+`
-- `+"`~/Private/tm.json api|api_base|url`"+`
+- `+"`TM_NODE`"+` or `+"`--node`"+`, then `+"`~/cicy-ai/db/cicy-agent.json nodes[<name>]`"+`
+- `+"`~/cicy-ai/db/cicy-agent.json default`"+` -> `+"`nodes[<default>]`"+`
+- `+"`~/cicy-ai/db/cicy-agent.json api|api_base|url`"+`
 - local fallback `+"`http://127.0.0.1:${TM_API_PORT|API_PORT|8008}`"+`
 
 Token rules:
 
 - `+"`TM_TOKEN`"+` overrides everything
-- otherwise `+"`tm.nodes.<name>.api_token`"+` is used
-- if `+"`~/Private/tm.json`"+` is missing, `+"`tm`"+` uses an in-memory default:
+- otherwise `+"`nodes.<name>.api_token`"+` is used
+- if `+"`~/cicy-ai/db/cicy-agent.json`"+` is missing, `+"`cicy-agent`"+` uses an in-memory default:
   - `+"`default = default`"+`
   - `+"`nodes.default.api = http://127.0.0.1:8008`"+`
-  - `+"`nodes.default.api_token = ~/global.json api_token`"+`
+  - `+"`nodes.default.api_token = ~/cicy-ai/global.json api_token`"+`
 
 ## Rules
 
-- prefer `+"`tm`"+` for quick local pane work
-- prefer `+"`cicy-code`"+` for node-aware tmux work such as `+"`cicy-code -n node-a panes`"+`
-- avoid `+"`fast-api`"+` for tmux work when `+"`tm`"+` or `+"`cicy-code`"+` covers it
+- prefer `+"`cicy-agent`"+` for quick local pane work
+- avoid `+"`fast-api`"+` for tmux work when `+"`cicy-agent`"+` covers it
 - the common primary pane is `+"`w-10001`"+`
 
 ## More
@@ -1467,7 +1483,7 @@ Token rules:
 }
 
 func renderSSHHelp() string {
-	return `# ssh Help
+	return `# cicy-ssh Help
 
 ## Primary Files
 
@@ -1557,7 +1573,7 @@ func renderCFTunnelCommands() string {
 ## Notes
 
 - hostnames follow the pattern ` + "`g-<port>.<domain>`" + `
-- the command reads Cloudflare config from ` + "`~/global.json`" + `
+- the command reads Cloudflare config from ` + "`~/cicy-ai/global.json`" + `
 - it manages tunnel routes and DNS records, not the ` + "`cloudflared`" + ` process
 `
 }
@@ -1593,9 +1609,9 @@ func renderGlobalAPITokenCommands() string {
 
 ## Notes
 
-- both commands operate on ` + "`~/global.json`" + `
+- both commands operate on ` + "`~/cicy-ai/global.json`" + `
 - ` + "`show`" + ` prints the current ` + "`api_token`" + `
-- ` + "`refresh`" + ` generates a new token and writes it back to ` + "`~/global.json`" + `
+- ` + "`refresh`" + ` generates a new token and writes it back to ` + "`~/cicy-ai/global.json`" + `
 `
 }
 
@@ -1670,33 +1686,30 @@ func renderFRPClientCommands() string {
 }
 
 func renderTMCommands(commandBinDir string) string {
-	return fmt.Sprintf(`# tm Command Reference
+	return fmt.Sprintf(`# cicy-agent Command Reference
 
-This skill uses two command families:
+This skill uses the local `+"`cicy-agent`"+` command from `+"`%s`"+`.
 
-- `+"`tm`"+` from `+"`%s`"+`
-- `+"`cicy-code`"+` from `+"`/home/w3c_offical/projects/cicy-code/skills/cicy-code`"+`
+## Main
 
-## Prefer tm
+Use `+"`cicy-agent`"+` for local pane work:
 
-Use `+"`tm`"+` for quick local pane work:
-
-- `+"`tm ls`"+`
-- `+"`tm capture w-10001`"+`
-- `+"`tm msg w-10001 \"hello\"`"+`
-- `+"`tm send-keys w-10001 Enter`"+`
-- `+"`tm create my-pane`"+`
-- `+"`tm restart`"+`
-- `+"`tm clear w-10001`"+`
+- `+"`cicy-agent ls`"+`
+- `+"`cicy-agent capture w-10001`"+`
+- `+"`cicy-agent msg w-10001 \"hello\"`"+`
+- `+"`cicy-agent send-keys w-10001 Enter`"+`
+- `+"`cicy-agent create my-pane`"+`
+- `+"`cicy-agent restart`"+`
+- `+"`cicy-agent clear w-10001`"+`
 
 Multi-node examples:
 
-- `+"`tm ls`"+` -> use configured default target
-- `+"`tm --node dev ls`"+` -> use `+"`tm.nodes.dev`"+`
-- `+"`TM_NODE=dev tm capture w-10001`"+` -> target `+"`dev`"+`
-- `+"`TM_API_BASE=http://127.0.0.1:8021 tm capture w-10001`"+` -> bypass node selection
+- `+"`cicy-agent ls`"+` -> use configured default target
+- `+"`cicy-agent --node dev ls`"+` -> use the `+"`dev`"+` node config
+- `+"`TM_NODE=dev cicy-agent capture w-10001`"+` -> target `+"`dev`"+`
+- `+"`TM_API_BASE=http://127.0.0.1:8021 cicy-agent capture w-10001`"+` -> bypass node selection
 
-Supported `+"`~/Private/tm.json`"+` keys:
+Supported `+"`~/cicy-ai/db/cicy-agent.json`"+` keys:
 
 - `+"`default`"+`
 - `+"`api | api_base | url`"+`
@@ -1706,7 +1719,7 @@ Supported `+"`~/Private/tm.json`"+` keys:
 - `+"`nodes.<name>.token`"+` for legacy compatibility
 - `+"`nodes.<name>.port`"+`
 
-Observed `+"`tm`"+` commands:
+Observed `+"`cicy-agent`"+` commands:
 
 - `+"`ls`"+`
 - `+"`tree`"+`
@@ -1719,51 +1732,16 @@ Observed `+"`tm`"+` commands:
 - `+"`restart`"+`
 - `+"`clear <pane>`"+`
 
-## Prefer cicy-code for node-aware tmux work
-
-Use `+"`cicy-code`"+` when the operation should go through the node registry or the cicy-code API surface:
-
-- `+"`cicy-code panes`"+`
-- `+"`cicy-code status w-10001`"+`
-- `+"`cicy-code capture w-10001 200`"+`
-- `+"`cicy-code send w-10001 \"hello\"`"+`
-- `+"`cicy-code send-keys w-10001 Enter`"+`
-- `+"`cicy-code windows`"+`
-- `+"`cicy-code -n node-a panes`"+`
-
-Observed tmux-related `+"`cicy-code`"+` commands:
-
-- `+"`panes`"+`
-- `+"`ls`"+`
-- `+"`pane <pane_id>`"+`
-- `+"`create-pane <json>`"+`
-- `+"`update-pane <pane_id> <json>`"+`
-- `+"`delete-pane <pane_id>`"+`
-- `+"`restart-pane <pane_id>`"+`
-- `+"`restart-all`"+`
-- `+"`status [pane]`"+`
-- `+"`send <pane_id> <text>`"+`
-- `+"`send-keys <pane_id> <keys>`"+`
-- `+"`send-wait <pane_id> <text> [timeout]`"+`
-- `+"`capture <pane_id> [lines]`"+`
-- `+"`clear <pane_id>`"+`
-- `+"`tree`"+`
-- `+"`windows [session]`"+`
-- `+"`new-window <session> [name]`"+`
-- `+"`rename-window <session> <index> <name>`"+`
-- `+"`delete-window <session> <index>`"+`
-- `+"`select-window <session> <index>`"+`
-
 ## Notes
 
-- avoid `+"`fast-api`"+` for tmux work; use `+"`tm`"+` or `+"`cicy-code`"+`
-- for remote node work, prefer `+"`cicy-code -n <instance> ...`"+`
+- avoid `+"`fast-api`"+` for tmux work; use `+"`cicy-agent`"+`
 - the common primary pane is `+"`w-10001`"+`
+- config currently uses `+"`TM_*`"+` env vars and `+"`~/cicy-ai/db/cicy-agent.json`"+`
 `, commandBinDir)
 }
 
 func renderSSHCommands() string {
-	return `# ssh Command Reference
+	return `# cicy-ssh Command Reference
 
 ## Config Discovery
 
@@ -1796,6 +1774,131 @@ func renderAgentCodeServerTools() string {
 `
 }
 
+func generateCodexAgentSummary(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "agent-summary")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderAgentSummarySkill(commandBinDir)); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderAgentSummaryHelp(commandBinDir)); err != nil {
+		return err
+	}
+	tools := renderAgentSummaryTools()
+	if err := writeText(filepath.Join(refsDir, "tools.md"), tools); err != nil {
+		return err
+	}
+	return writeText(filepath.Join(refsDir, "commands.md"), tools)
+}
+
+func renderAgentSummarySkill(commandBinDir string) string {
+	return fmt.Sprintf(`---
+name: agent-summary
+description: Use the local agent-summary wrapper from %s to generate conversation summaries and handoff documents for agents on this host.
+---
+
+# Agent Summary
+
+This skill covers the local `+"`agent-summary`"+` wrapper installed from `+"`"+`%s`+"`"+`.
+
+Use this command directly from `+"`PATH`"+`. It reads agent request snapshots from `+"`~/cicy-ai/workers/<agent-id>/.cicy/history/current.json`"+` and generates summaries.
+
+## Scope
+
+Use this skill when the task involves:
+
+- generating a summary of an agent's conversation
+- creating a handoff document for another agent to continue work
+- analyzing token usage and conversation stats
+- extracting slim conversation JSON for further processing
+
+## Rules
+
+1. Prefer the local `+"`agent-summary`"+` command first.
+2. Target agents by their worker ID (e.g., `+"`w-10019`"+`) or by path to current.json.
+3. The `+"`--ai`"+` mode generates a detailed handoff document using configured AI providers.
+4. Report the generated summary or stats back to the user.
+
+## Help
+
+Read [help.md](./references/help.md) first for quick usage and examples.
+
+## Tools
+
+Read [tools.md](./references/tools.md) for the supported commands.
+`, commandBinDir, commandBinDir)
+}
+
+func renderAgentSummaryHelp(commandBinDir string) string {
+	return fmt.Sprintf(`# Agent Summary Help
+
+## Command
+
+- binary root: %s
+- primary command: `+"`agent-summary`"+`
+
+## Quick Start
+
+- generate text summary: `+"`agent-summary w-10019`"+`
+- show token stats: `+"`agent-summary w-10019 --stats`"+`
+- output slim conversation JSON: `+"`agent-summary w-10019 --slim`"+`
+- output structured text for AI: `+"`agent-summary w-10019 --text`"+`
+- generate AI summary (default provider): `+"`agent-summary w-10019 --ai`"+`
+- use specific provider: `+"`agent-summary w-10019 --ai --provider=deepseek`"+`
+- use specific model: `+"`agent-summary w-10019 --ai --model=deepseek-chat`"+`
+- custom prompt: `+"`agent-summary w-10019 --ai --prompt=\"自定义提示\"`"+`
+
+## Snapshot Location
+
+- snapshots are at `+"`~/cicy-ai/workers/<agent-id>/.cicy/history/current.json`"+`
+- supports both Anthropic and OpenAI (Responses API) formats
+
+## AI Summary Output
+
+When using `+"`--ai`"+`, the tool saves three files to `+"`~/cicy-ai/workers/<agent-id>/.cicy/history/summary/`"+`:
+
+- `+"`<conversation_id>.stats.md`"+` - token stats and metadata
+- `+"`<conversation_id>.raw.md`"+` - raw structured conversation
+- `+"`<conversation_id>.summary.md`"+` - AI-generated handoff document
+
+## Rules
+
+- use the real snapshot data, not mocks
+- AI providers are configured in `+"`~/cicy-ai/global.json`"+`
+- the default AI summary generates a Chinese handoff document
+
+## More
+
+- tool map: [tools.md](./tools.md)
+`, commandBinDir)
+}
+
+func renderAgentSummaryTools() string {
+	return `# Agent Summary Commands
+
+## Main
+
+- ` + "`agent-summary <agent-id>`" + ` -> generate text summary (default)
+- ` + "`agent-summary <path-to-current.json>`" + ` -> summary from specific file
+- ` + "`agent-summary <agent-id> --stats`" + ` -> show token stats only
+- ` + "`agent-summary <agent-id> --slim`" + ` -> output slim conversation JSON
+- ` + "`agent-summary <agent-id> --text`" + ` -> output structured text for AI
+- ` + "`agent-summary <agent-id> --ai`" + ` -> generate AI summary (default provider)
+- ` + "`agent-summary <agent-id> --ai --provider=<name>`" + ` -> use specific provider
+- ` + "`agent-summary <agent-id> --ai --model=<model>`" + ` -> use specific model
+- ` + "`agent-summary <agent-id> --ai --prompt='<prompt>'`" + ` -> custom prompt
+
+## Notes
+
+- agent-id is the worker ID like ` + "`w-10019`" + `
+- snapshots are at ` + "`~/cicy-ai/workers/<agent-id>/.cicy/history/current.json`" + `
+- supports both Anthropic and OpenAI API formats
+- AI providers configured in ` + "`~/cicy-ai/global.json`" + `
+`
+}
+
 func renderAgentWebpageTools() string {
 	return `# Agent Webpage Tools
 
@@ -1806,6 +1909,8 @@ func renderAgentWebpageTools() string {
 - ` + "`agent-webpage ping [client_id]`" + ` -> sends ` + "`webpage_ping`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`webpage_pong`" + `
 - ` + "`agent-webpage ipc-ping [client_id]`" + ` -> sends ` + "`ipc_ping`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`ipc_pong`" + `
 - ` + "`agent-webpage exec-js '<js>' [client_id]`" + ` -> sends ` + "`exec_js`" + ` directly to ` + "`client_id`" + ` and waits for ` + "`exec_js_result`" + `
+- ` + "`agent-webpage current-active-agent-id [client_id]`" + ` -> prints ` + "`devStore.Workspace.activeCliPaneId`" + ` from the live webpage
+- ` + "`agent-webpage current-master-agent-id [client_id]`" + ` -> prints ` + "`devStore.Workspace.masterAgentId`" + ` from the live webpage
 - ` + "`agent-webpage send <type> <data_json> [client_id] [expect_type]`" + ` -> sends a custom event directly to ` + "`client_id`" + ` and waits for a matching websocket response when possible
 - ` + "`agent-webpage clients`" + ` -> lists connected chat/webpage clients
 

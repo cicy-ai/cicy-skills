@@ -291,46 +291,46 @@ func TestCodexInstallAgentWebpage(t *testing.T) {
 	}
 }
 
-func TestCodexInstallTM(t *testing.T) {
+func TestCodexInstallCicyAgent(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
 
-	installed, err := Install("", "codex", targetRoot, commandBinDir, []string{"tm"})
+	installed, err := Install("", "codex", targetRoot, commandBinDir, []string{"cicy-agent"})
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
-	if len(installed) != 1 || installed[0] != "tm" {
+	if len(installed) != 1 || installed[0] != "cicy-agent" {
 		t.Fatalf("Install() installed = %#v", installed)
 	}
 
-	skillPath := filepath.Join(targetRoot, "tm", "SKILL.md")
+	skillPath := filepath.Join(targetRoot, "cicy-agent", "SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "`tm`") {
-		t.Fatalf("SKILL.md missing tm command reference: %s", text)
+	if !strings.Contains(text, "`cicy-agent`") {
+		t.Fatalf("SKILL.md missing cicy-agent command reference: %s", text)
 	}
 	if !strings.Contains(text, commandBinDir) {
 		t.Fatalf("SKILL.md missing command bin dir %q: %s", commandBinDir, text)
 	}
 
-	helpPath := filepath.Join(targetRoot, "tm", "references", "help.md")
+	helpPath := filepath.Join(targetRoot, "cicy-agent", "references", "help.md")
 	helpData, err := os.ReadFile(helpPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", helpPath, err)
 	}
-	if !strings.Contains(string(helpData), "tm ls") {
-		t.Fatalf("help.md missing tm ls example: %s", string(helpData))
+	if !strings.Contains(string(helpData), "cicy-agent ls") {
+		t.Fatalf("help.md missing cicy-agent ls example: %s", string(helpData))
 	}
 
-	toolsPath := filepath.Join(targetRoot, "tm", "references", "tools.md")
+	toolsPath := filepath.Join(targetRoot, "cicy-agent", "references", "tools.md")
 	toolsData, err := os.ReadFile(toolsPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", toolsPath, err)
 	}
-	if !strings.Contains(string(toolsData), "cicy-code -n node-a panes") {
+	if !strings.Contains(string(toolsData), "~/cicy-ai/db/cicy-agent.json") {
 		t.Fatalf("tools.md missing node-aware example: %s", string(toolsData))
 	}
 }
@@ -339,15 +339,15 @@ func TestCodexInstallSSH(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
 
-	installed, err := Install("", "codex", targetRoot, commandBinDir, []string{"ssh"})
+	installed, err := Install("", "codex", targetRoot, commandBinDir, []string{"cicy-ssh"})
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
-	if len(installed) != 1 || installed[0] != "ssh" {
+	if len(installed) != 1 || installed[0] != "cicy-ssh" {
 		t.Fatalf("Install() installed = %#v", installed)
 	}
 
-	skillPath := filepath.Join(targetRoot, "ssh", "SKILL.md")
+	skillPath := filepath.Join(targetRoot, "cicy-ssh", "SKILL.md")
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", skillPath, err)
@@ -360,7 +360,7 @@ func TestCodexInstallSSH(t *testing.T) {
 		t.Fatalf("SKILL.md missing ssh command reference: %s", text)
 	}
 
-	helpPath := filepath.Join(targetRoot, "ssh", "references", "help.md")
+	helpPath := filepath.Join(targetRoot, "cicy-ssh", "references", "help.md")
 	helpData, err := os.ReadFile(helpPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", helpPath, err)
@@ -369,7 +369,7 @@ func TestCodexInstallSSH(t *testing.T) {
 		t.Fatalf("help.md missing host block example: %s", string(helpData))
 	}
 
-	toolsPath := filepath.Join(targetRoot, "ssh", "references", "tools.md")
+	toolsPath := filepath.Join(targetRoot, "cicy-ssh", "references", "tools.md")
 	toolsData, err := os.ReadFile(toolsPath)
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", toolsPath, err)
@@ -399,8 +399,8 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 	foundDockerBuildGitHubAction := false
 	foundGlobalAPIToken := false
 	foundAgentWebpage := false
-	foundSSH := false
-	foundTM := false
+	foundCicySSH := false
+	foundCicyAgent := false
 	foundExternal := false
 	for _, item := range listed {
 		if item.Name == "agent-webpage" && item.Status == "missing" {
@@ -421,11 +421,11 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 		if item.Name == "google" && item.Status == "missing" {
 			foundGoogle = true
 		}
-		if item.Name == "tm" && item.Status == "missing" {
-			foundTM = true
+		if item.Name == "cicy-agent" && item.Status == "missing" {
+			foundCicyAgent = true
 		}
-		if item.Name == "ssh" && item.Status == "missing" {
-			foundSSH = true
+		if item.Name == "cicy-ssh" && item.Status == "missing" {
+			foundCicySSH = true
 		}
 		if item.Name == "manual-skill" && item.Status == "external" {
 			foundExternal = true
@@ -449,11 +449,11 @@ func TestCodexListShowsExternalDirs(t *testing.T) {
 	if !foundGlobalAPIToken {
 		t.Fatalf("List() missing globalApiToken status: %#v", listed)
 	}
-	if !foundTM {
-		t.Fatalf("List() missing tm status: %#v", listed)
+	if !foundCicyAgent {
+		t.Fatalf("List() missing cicy-agent status: %#v", listed)
 	}
-	if !foundSSH {
-		t.Fatalf("List() missing ssh status: %#v", listed)
+	if !foundCicySSH {
+		t.Fatalf("List() missing cicy-ssh status: %#v", listed)
 	}
 	if !foundExternal {
 		t.Fatalf("List() missing external status: %#v", listed)
@@ -494,6 +494,29 @@ func TestCodexSyncPreservesExternalDirs(t *testing.T) {
 	}
 }
 
+func TestCodexSyncRemovesLegacyTMSkill(t *testing.T) {
+	targetRoot := t.TempDir()
+	commandBinDir := filepath.Join(targetRoot, "bin")
+	legacyDir := filepath.Join(targetRoot, "tm")
+	legacyFile := filepath.Join(legacyDir, "SKILL.md")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(legacyFile, []byte("legacy tm skill"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, err := Sync("", "codex", targetRoot, commandBinDir); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("legacy tm skill directory still exists: err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetRoot, "cicy-agent", "SKILL.md")); err != nil {
+		t.Fatalf("cicy-agent skill missing after sync: %v", err)
+	}
+}
+
 func TestCodexHelpReadsGeneratedHelp(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
@@ -516,24 +539,24 @@ func TestCodexHelpReadsGeneratedHelp(t *testing.T) {
 	}
 }
 
-func TestCodexHelpReadsGeneratedTMHelp(t *testing.T) {
+func TestCodexHelpReadsGeneratedCicyAgentHelp(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
-	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"tm"}); err != nil {
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"cicy-agent"}); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 
-	help, err := Help("codex", targetRoot, "tm")
+	help, err := Help("codex", targetRoot, "cicy-agent")
 	if err != nil {
 		t.Fatalf("Help() error = %v", err)
 	}
-	if help.Name != "tm" {
+	if help.Name != "cicy-agent" {
 		t.Fatalf("Help() name = %q", help.Name)
 	}
-	if !strings.Contains(help.Path, "tm/references/help.md") {
+	if !strings.Contains(help.Path, "cicy-agent/references/help.md") {
 		t.Fatalf("Help() path = %q", help.Path)
 	}
-	if !strings.Contains(help.Text, "# tm Help") {
+	if !strings.Contains(help.Text, "# cicy-agent Help") {
 		t.Fatalf("Help() text = %q", help.Text)
 	}
 }
@@ -563,43 +586,43 @@ func TestCodexHelpReadsGeneratedCPingHelp(t *testing.T) {
 func TestCodexHelpReadsGeneratedSSHHelp(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
-	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"ssh"}); err != nil {
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"cicy-ssh"}); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 
-	help, err := Help("codex", targetRoot, "ssh")
+	help, err := Help("codex", targetRoot, "cicy-ssh")
 	if err != nil {
 		t.Fatalf("Help() error = %v", err)
 	}
-	if help.Name != "ssh" {
+	if help.Name != "cicy-ssh" {
 		t.Fatalf("Help() name = %q", help.Name)
 	}
-	if !strings.Contains(help.Path, "ssh/references/help.md") {
+	if !strings.Contains(help.Path, "cicy-ssh/references/help.md") {
 		t.Fatalf("Help() path = %q", help.Path)
 	}
-	if !strings.Contains(help.Text, "# ssh Help") {
+	if !strings.Contains(help.Text, "# cicy-ssh Help") {
 		t.Fatalf("Help() text = %q", help.Text)
 	}
 }
 
-func TestCodexToolsReadsGeneratedTMTools(t *testing.T) {
+func TestCodexToolsReadsGeneratedCicyAgentTools(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
-	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"tm"}); err != nil {
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"cicy-agent"}); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 
-	tools, err := Tools("codex", targetRoot, "tm")
+	tools, err := Tools("codex", targetRoot, "cicy-agent")
 	if err != nil {
 		t.Fatalf("Tools() error = %v", err)
 	}
-	if tools.Name != "tm" {
+	if tools.Name != "cicy-agent" {
 		t.Fatalf("Tools() name = %q", tools.Name)
 	}
-	if !strings.Contains(tools.Path, "tm/references/tools.md") {
+	if !strings.Contains(tools.Path, "cicy-agent/references/tools.md") {
 		t.Fatalf("Tools() path = %q", tools.Path)
 	}
-	if !strings.Contains(tools.Text, "tm Command Reference") {
+	if !strings.Contains(tools.Text, "cicy-agent Command Reference") {
 		t.Fatalf("Tools() text = %q", tools.Text)
 	}
 }
@@ -629,21 +652,21 @@ func TestCodexToolsReadsGeneratedCPingTools(t *testing.T) {
 func TestCodexToolsReadsGeneratedSSHTools(t *testing.T) {
 	targetRoot := t.TempDir()
 	commandBinDir := filepath.Join(targetRoot, "bin")
-	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"ssh"}); err != nil {
+	if _, err := Install("", "codex", targetRoot, commandBinDir, []string{"cicy-ssh"}); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 
-	tools, err := Tools("codex", targetRoot, "ssh")
+	tools, err := Tools("codex", targetRoot, "cicy-ssh")
 	if err != nil {
 		t.Fatalf("Tools() error = %v", err)
 	}
-	if tools.Name != "ssh" {
+	if tools.Name != "cicy-ssh" {
 		t.Fatalf("Tools() name = %q", tools.Name)
 	}
-	if !strings.Contains(tools.Path, "ssh/references/tools.md") {
+	if !strings.Contains(tools.Path, "cicy-ssh/references/tools.md") {
 		t.Fatalf("Tools() path = %q", tools.Path)
 	}
-	if !strings.Contains(tools.Text, "ssh Command Reference") {
+	if !strings.Contains(tools.Text, "cicy-ssh Command Reference") {
 		t.Fatalf("Tools() text = %q", tools.Text)
 	}
 }
@@ -665,8 +688,10 @@ func TestCodexToolsReadsGeneratedTools(t *testing.T) {
 	if !strings.Contains(tools.Path, "agent-webpage/references/tools.md") {
 		t.Fatalf("Tools() path = %q", tools.Path)
 	}
-	if !strings.Contains(tools.Text, "webpage_pong") {
-		t.Fatalf("Tools() text = %q", tools.Text)
+	for _, want := range []string{"webpage_pong", "current-active-agent-id", "current-master-agent-id"} {
+		if !strings.Contains(tools.Text, want) {
+			t.Fatalf("Tools() text missing %q: %q", want, tools.Text)
+		}
 	}
 }
 

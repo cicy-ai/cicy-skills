@@ -17,7 +17,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 mkdir -p "$HOME/.local/bin" "$HOME/Private"
 
-cat > "$HOME/global.json" <<'JSON'
+cat > "$HOME/cicy-ai/global.json" <<'JSON'
 {
   "GMAIL_CLIENT_ID": "dummy-client-id",
   "GMAIL_CLIENT_SECRET": "dummy-client-secret",

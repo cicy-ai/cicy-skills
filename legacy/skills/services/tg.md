@@ -15,7 +15,7 @@ tg audio <url> [--token=] [--chatId=]
 ## Examples
 
 ```bash
-# Use defaults from ~/global.json
+# Use defaults from ~/cicy-ai/global.json
 tg send "Hello from CLI"
 tg send "测试消息 🚀"
 tg photo "https://example.com/image.jpg" "Caption here"
@@ -29,7 +29,7 @@ tg send "test" --token=BOT_TOKEN --chatId=CHAT_ID
 
 ## Configuration
 
-Add to `~/global.json`:
+Add to `~/cicy-ai/global.json`:
 ```json
 {
   "TG_BOT_TOKEN": "your_bot_token",

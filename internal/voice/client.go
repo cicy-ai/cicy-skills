@@ -521,7 +521,7 @@ func loadCredentials() (Credentials, error) {
 		"GMAIL_REFRESH_TOKEN",
 	)
 	if clientID == "" || clientSecret == "" || refreshToken == "" {
-		return Credentials{}, fmt.Errorf("missing google cloud credentials in env or ~/global.json")
+		return Credentials{}, fmt.Errorf("missing google cloud credentials in env or ~/cicy-ai/global.json")
 	}
 	quotaProject, _ := firstValue(raw, "GOOGLE_CLOUD_PROJECT_ID")
 	return Credentials{
@@ -536,7 +536,7 @@ func loadCredentials() (Credentials, error) {
 }
 
 func loadGlobalJSON() (map[string]any, error) {
-	path := filepath.Join(userHomeDir(), "global.json")
+	path := filepath.Join(userHomeDir(), "cicy-ai", "global.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

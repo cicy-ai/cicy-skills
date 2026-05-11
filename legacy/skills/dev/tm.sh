@@ -5,7 +5,7 @@ set -euo pipefail
 
 API_PORT="${API_PORT:-8008}"
 API="http://127.0.0.1:$API_PORT"
-TOKEN=$(jq -r '.api_token' ~/global.json 2>/dev/null || echo "")
+TOKEN=$(jq -r '.api_token' ~/cicy-ai/global.json 2>/dev/null || echo "")
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
 post() { curl -sf "${AUTH[@]}" -H "Content-Type: application/json" -X POST "$API$1" -d "$2"; }

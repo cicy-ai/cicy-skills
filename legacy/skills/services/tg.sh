@@ -5,7 +5,7 @@
 #   tg photo <url> [caption]
 set -euo pipefail
 API="http://127.0.0.1:${API_PORT:-8008}"
-TOKEN=$(jq -r '.api_token' ~/global.json 2>/dev/null)
+TOKEN=$(jq -r '.api_token' ~/cicy-ai/global.json 2>/dev/null)
 
 case "${1:-}" in
   send)  shift; curl -sf -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

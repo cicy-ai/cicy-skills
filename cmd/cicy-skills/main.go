@@ -940,15 +940,18 @@ Default targets:
   openclaw   -> ~/.openclaw/skills
 
 Currently approved:
+  agent-code-server
+  agent-summary
   agent-webpage
   cf-tunnel
   cping
+  docker-build-github-action
   frp-client
   frp-server
   globalApiToken
   google
-  ssh
-  tm
+  cicy-ssh
+  cicy-agent
 
 Examples:
   cicy-skills agent help codex agent-webpage
@@ -957,28 +960,31 @@ Examples:
   cicy-skills agent help codex frp-client
   cicy-skills agent help codex frp-server
   cicy-skills agent help codex google
-  cicy-skills agent help codex ssh
-  cicy-skills agent help codex tm
+  cicy-skills agent help codex cicy-ssh
+  cicy-skills agent help codex cicy-agent
   cicy-skills agent help claude globalApiToken
   cicy-skills agent help openclaw cf-tunnel
   cicy-skills agent generate codex
   cicy-skills agent generate claude
   cicy-skills agent generate openclaw
+  cicy-skills agent install codex agent-code-server
+  cicy-skills agent install codex agent-summary
   cicy-skills agent install codex cf-tunnel
   cicy-skills agent install codex cping
+  cicy-skills agent install codex docker-build-github-action
   cicy-skills agent install codex frp-client
   cicy-skills agent install codex frp-server
-  cicy-skills agent install codex tm
+  cicy-skills agent install codex cicy-agent
   cicy-skills agent install claude globalApiToken
   cicy-skills agent install claude cping
   cicy-skills agent install claude frp-client
-  cicy-skills agent install claude ssh
-  cicy-skills agent install claude tm
+  cicy-skills agent install claude cicy-ssh
+  cicy-skills agent install claude cicy-agent
   cicy-skills agent install openclaw google
   cicy-skills agent install openclaw cping
   cicy-skills agent install openclaw frp-server
-  cicy-skills agent install openclaw ssh
-  cicy-skills agent install openclaw tm
+  cicy-skills agent install openclaw cicy-ssh
+  cicy-skills agent install openclaw cicy-agent
   cicy-skills agent remove claude globalApiToken
   cicy-skills agent remove openclaw google
   cicy-skills agent sync codex

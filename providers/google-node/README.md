@@ -13,7 +13,7 @@ Google API CLI tools with OAuth2: Gmail, Sheets, Drive, Calendar.
 1. Create OAuth2 credentials in [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
 2. Enable APIs: Gmail, Sheets, Drive, Calendar, People
 3. Run `node scripts/get-token.js` to authorize
-4. Add to `~/global.json`:
+4. Add to `~/cicy-ai/global.json`:
    ```json
    {
      "GMAIL_CLIENT_ID": "...",

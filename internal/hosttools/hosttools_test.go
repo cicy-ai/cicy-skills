@@ -47,21 +47,25 @@ func TestRunTMHelpDoesNotRequireConfig(t *testing.T) {
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, "Usage: tm [--node NAME] <command> [args]") {
+	if !strings.Contains(out, "Usage: cicy-agent [--node NAME] <command> [args]") {
 		t.Fatalf("unexpected stdout: %q", out)
 	}
 	if !strings.Contains(out, "TM_API_BASE or API_BASE") {
 		t.Fatalf("missing config priority: %q", out)
 	}
-	if !strings.Contains(out, "~/Private/tm.json") {
-		t.Fatalf("missing tm.json path: %q", out)
+	if !strings.Contains(out, "~/cicy-ai/db/cicy-agent.json") {
+		t.Fatalf("missing cicy-agent.json path: %q", out)
 	}
 }
 
 func TestRunGlobalAPITokenShow(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "global.json"), []byte("{\"api_token\":\"cicy_test_show\"}\n"), 0o644); err != nil {
+	globalPath := filepath.Join(home, "cicy-ai", "global.json")
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(globalPath, []byte("{\"api_token\":\"cicy_test_show\"}\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -81,7 +85,10 @@ func TestRunGlobalAPITokenShow(t *testing.T) {
 func TestRunGlobalAPITokenRefresh(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	path := filepath.Join(home, "global.json")
+	path := filepath.Join(home, "cicy-ai", "global.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	if err := os.WriteFile(path, []byte("{\"api_token\":\"cicy_old\",\"other\":1}\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -316,8 +323,10 @@ func TestRunAgentWebpageHelpDoesNotAdvertiseLegacyAliases(t *testing.T) {
 			t.Fatalf("help output should not mention %q: %q", banned, out)
 		}
 	}
-	if !strings.Contains(out, "ipc-ping [client_id]") {
-		t.Fatalf("help output missing ipc-ping subcommand: %q", out)
+	for _, want := range []string{"ipc-ping [client_id]", "current-active-agent-id [client_id]", "current-master-agent-id [client_id]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help output missing %q: %q", want, out)
+		}
 	}
 }
 

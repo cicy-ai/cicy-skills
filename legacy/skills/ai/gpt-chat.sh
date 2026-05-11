@@ -8,7 +8,7 @@
 set -euo pipefail
 
 API="http://127.0.0.1:${API_PORT:-8008}"
-TOKEN=$(jq -r '.api_token' ~/global.json 2>/dev/null)
+TOKEN=$(jq -r '.api_token' ~/cicy-ai/global.json 2>/dev/null)
 HIST=~/Private/data/gpt-chat-history.json
 SYS=~/Private/data/gpt-chat-system.txt
 mkdir -p ~/Private/data

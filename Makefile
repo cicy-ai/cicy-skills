@@ -32,7 +32,7 @@ test-go: ## Run the Go test suite
 test-google-provider: ## Run the comprehensive google-node provider test suite
 	cd providers/google-node && npm test
 
-test-google-provider-live: ## Run live google-node tests against the real token in ~/global.json
+test-google-provider-live: ## Run live google-node tests against the real token in ~/cicy-ai/global.json
 	cd providers/google-node && npm run test:live
 
 ensure-base-user-env: ## Build the base image only if it does not already exist locally

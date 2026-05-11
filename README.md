@@ -18,7 +18,7 @@
 
 Agent skill generation is allowlist-based.
 
-- currently approved: `agent-webpage`, `cf-tunnel`, `cping`, `frp-client`, `frp-server`, `globalApiToken`, `google`, `ssh`, `tm`
+- currently approved: `agent-code-server`, `agent-summary`, `agent-webpage`, `cf-tunnel`, `cping`, `docker-build-github-action`, `cicy-agent`, `cicy-ssh`, `frp-client`, `frp-server`, `globalApiToken`, `google`
 - current supported target agents: `codex`, `claude`, `openclaw`
 
 Everything else is archived in-repo under [`legacy/skills`](./legacy/skills) but is not part of the approved generation list until you explicitly confirm it.
@@ -87,24 +87,24 @@ cicy-skills agent tools codex agent-webpage
 cicy-skills agent help codex cf-tunnel
 cicy-skills agent help codex frp-client
 cicy-skills agent help codex frp-server
-cicy-skills agent help codex tm
+cicy-skills agent help codex cicy-agent
 cicy-skills agent help claude globalApiToken
 cicy-skills agent help claude frp-client
-cicy-skills agent help claude tm
+cicy-skills agent help claude cicy-agent
 cicy-skills agent help openclaw google
 cicy-skills agent help openclaw frp-server
-cicy-skills agent help openclaw tm
+cicy-skills agent help openclaw cicy-agent
 cicy-skills agent install codex agent-webpage
 cicy-skills agent install codex cf-tunnel
 cicy-skills agent install codex frp-client
 cicy-skills agent install codex frp-server
-cicy-skills agent install codex tm
+cicy-skills agent install codex cicy-agent
 cicy-skills agent install claude globalApiToken
 cicy-skills agent install claude frp-client
-cicy-skills agent install claude tm
+cicy-skills agent install claude cicy-agent
 cicy-skills agent install openclaw google
 cicy-skills agent install openclaw frp-server
-cicy-skills agent install openclaw tm
+cicy-skills agent install openclaw cicy-agent
 cicy-skills agent update codex agent-webpage
 cicy-skills agent update codex cf-tunnel
 cicy-skills agent update claude globalApiToken
@@ -131,24 +131,24 @@ cicy-skills agent tools codex agent-webpage
 cicy-skills agent help codex cf-tunnel
 cicy-skills agent help codex frp-client
 cicy-skills agent help codex frp-server
-cicy-skills agent help codex tm
+cicy-skills agent help codex cicy-agent
 cicy-skills agent help claude globalApiToken
 cicy-skills agent help claude frp-client
-cicy-skills agent help claude tm
+cicy-skills agent help claude cicy-agent
 cicy-skills agent help openclaw google
 cicy-skills agent help openclaw frp-server
-cicy-skills agent help openclaw tm
+cicy-skills agent help openclaw cicy-agent
 cicy-skills agent install codex agent-webpage
 cicy-skills agent install codex cf-tunnel
 cicy-skills agent install codex frp-client
 cicy-skills agent install codex frp-server
-cicy-skills agent install codex tm
+cicy-skills agent install codex cicy-agent
 cicy-skills agent install claude globalApiToken
 cicy-skills agent install claude frp-client
-cicy-skills agent install claude tm
+cicy-skills agent install claude cicy-agent
 cicy-skills agent install openclaw google
 cicy-skills agent install openclaw frp-server
-cicy-skills agent install openclaw tm
+cicy-skills agent install openclaw cicy-agent
 cicy-skills agent update codex agent-webpage
 cicy-skills agent update codex cf-tunnel
 cicy-skills agent update claude globalApiToken
@@ -176,9 +176,9 @@ That currently generates the same approved skill set into each profile's default
 - [google/SKILL.md](/home/w3c_offical/.codex/skills/google/SKILL.md)
 - [help.md](/home/w3c_offical/.codex/skills/google/references/help.md)
 - [commands.md](/home/w3c_offical/.codex/skills/google/references/commands.md)
-- [tm/SKILL.md](/home/w3c_offical/.codex/skills/tm/SKILL.md)
-- [help.md](/home/w3c_offical/.codex/skills/tm/references/help.md)
-- [commands.md](/home/w3c_offical/.codex/skills/tm/references/commands.md)
+- [cicy-agent/SKILL.md](/home/w3c_offical/.codex/skills/cicy-agent/SKILL.md)
+- [help.md](/home/w3c_offical/.codex/skills/cicy-agent/references/help.md)
+- [commands.md](/home/w3c_offical/.codex/skills/cicy-agent/references/commands.md)
 
 And by default target:
 
@@ -196,7 +196,7 @@ The embedded Google provider lives in [`providers/google-node`](./providers/goog
 - `google drive`
 - `google calendar`
 
-These wrappers read credentials from `~/global.json`.
+These wrappers read credentials from `~/cicy-ai/global.json`.
 
 ## Cf Tunnel
 
@@ -207,7 +207,7 @@ The local `cf-tunnel` wrapper is exposed through the migrated hosttools bundle a
 - `cf-tunnel del <port> [port2 ...]`
 - `CF_ENV=dev cf-tunnel ...`
 
-This wrapper reads real Cloudflare config from `~/global.json`.
+This wrapper reads real Cloudflare config from `~/cicy-ai/global.json`.
 
 ## Global API Token
 
@@ -216,7 +216,25 @@ The local `globalApiToken` wrapper is exposed through the migrated hosttools bun
 - `globalApiToken show`
 - `globalApiToken refresh`
 
-This wrapper reads and updates `~/global.json` field `api_token`.
+This wrapper reads and updates `~/cicy-ai/global.json` field `api_token`.
+
+## Test Gateway Provider
+
+The local `test-gateway-provider` script verifies the real cicy-code `8008` AI gateway against providers defined in `~/cicy-ai/global.json`.
+
+Examples:
+
+- `test-gateway-provider --provider wucur --model gpt-5.5`
+- `test-gateway-provider --provider sub2api --model claude-opus-4-7`
+- `test-gateway-provider --all --model gpt-5.5`
+- `test-gateway-provider --all --model claude-opus-4-7`
+
+Behavior:
+
+- temporarily switches `ai.currentProvider` to the target provider for the test
+- sends a real request through `http://127.0.0.1:8008/api/ai-gateway/...`
+- defaults to message `hi`
+- automatically restores the original `currentProvider` afterward
 
 ## Archived Skills
 

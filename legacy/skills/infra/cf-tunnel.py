@@ -14,9 +14,9 @@ Cloudflare Tunnel 管理脚本
 import os, sys, json, socket
 import urllib.request, urllib.error
 
-# 从 ~/global.json 读取配置
+# 从 ~/cicy-ai/global.json 读取配置
 def load_config():
-    global_path = os.path.expanduser("~/global.json")
+    global_path = os.path.expanduser("~/cicy-ai/global.json")
     with open(global_path) as f:
         g = json.load(f)
     env = os.getenv("CF_ENV", "prod")
