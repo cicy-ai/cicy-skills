@@ -6,22 +6,28 @@ Short installer entrypoints for connecting a client machine to the CiCy FRP serv
 
 ### macOS / Linux
 
-Interactive terminal:
+First install requires both server address and token. Examples:
+
+```bash
+FRP_SERVER='1.2.3.4' FRP_TOKEN='your-token' curl -fsSL https://install.cicy-ai.com/frp | bash
+```
+
+Or pass them explicitly:
+
+```bash
+curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --server 1.2.3.4 --token your-token --remote-port 9503
+```
+
+Interactive terminal (prompts for missing server / token):
 
 ```bash
 curl -fsSL https://install.cicy-ai.com/frp | bash
 ```
 
-Non-interactive terminal:
+Rerun after first install (no args needed — reuses existing config):
 
 ```bash
-FRP_TOKEN='your-token' curl -fsSL https://install.cicy-ai.com/frp | bash
-```
-
-Or pass the token explicitly:
-
-```bash
-curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --token 'your-token' --remote-port 9503
+curl -fsSL https://install.cicy-ai.com/frp | bash
 ```
 
 Default behavior:
@@ -42,6 +48,7 @@ Useful options:
 - `--remote-port <PORT>`
 - `--local-port <PORT>`
 - `--name <NAME>`
+- `--server <HOST>`
 - `--token <TOKEN>`
 
 ### Windows
@@ -58,8 +65,9 @@ The script prompts for the FRP token and self-elevates to install the Windows se
 
 ## Defaults
 
-- FRP server: `47.114.96.114:9500`
-- remote port start: `9502`
+- FRP server: required (`--server` or `FRP_SERVER`); no built-in default
+- FRP server port: `9500`
+- remote port: `9502`
 - local port: `22`
 - binary path: `~/.local/bin/frpc`
 - config path: `~/.config/frp/frpc.toml`
@@ -84,5 +92,5 @@ Typical workflow after editing the config:
 After install, access the client machine through the server with:
 
 ```bash
-ssh -p 9502 <your-user>@47.114.96.114
+ssh -p <remote-port> <your-user>@<frp-server>
 ```

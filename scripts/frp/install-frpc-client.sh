@@ -7,8 +7,8 @@ Usage:
   curl -fsSL https://install.cicy-ai.com/frp | bash
 
 Options:
-  --token <TOKEN>            FRP auth token. If omitted, use FRP_TOKEN or prompt interactively.
-  --server <HOST>            FRP server address, default: 47.114.96.114
+  --token <TOKEN>            FRP auth token. Required on first install (or set FRP_TOKEN).
+  --server <HOST>            FRP server address. Required on first install (or set FRP_SERVER).
   --server-port <PORT>       FRP server port, default: 9500
   --remote-port <PORT>       Remote TCP port on server, default: 9502
   --local-port <PORT>        Local port to expose, default: 22
@@ -23,12 +23,14 @@ Options:
 
 Environment:
   FRP_TOKEN                  FRP auth token for non-interactive installs.
+  FRP_SERVER                 FRP server address for non-interactive installs.
 
 Examples:
+  FRP_SERVER=1.2.3.4 FRP_TOKEN=xxxx curl -fsSL https://install.cicy-ai.com/frp | bash
+  curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --server 1.2.3.4 --token xxxx
+  curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --server 1.2.3.4 --token xxxx --remote-port 9503
+  # rerun with no args reuses existing ~/.config/frp/frpc.toml and hot-reloads
   curl -fsSL https://install.cicy-ai.com/frp | bash
-  FRP_TOKEN=xxxx curl -fsSL https://install.cicy-ai.com/frp | bash
-  curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --token xxxx --remote-port 9503
-  curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --local-port 3000 --remote-port 9504 --name mac-web-3000
 USAGE
 }
 
@@ -41,7 +43,7 @@ fail() {
   exit 1
 }
 
-SERVER_ADDR="47.114.96.114"
+SERVER_ADDR="${FRP_SERVER:-}"
 SERVER_PORT="9500"
 REMOTE_PORT="9502"
 LOCAL_PORT="22"
@@ -200,11 +202,21 @@ resolve_token_if_needed() {
   if [ "$CONFIG_REUSED" = "1" ]; then
     return 0
   fi
+  if [ -z "$SERVER_ADDR" ]; then
+    if [ ! -t 0 ]; then
+      fail "FRP server required on first install; pass --server <HOST> or set FRP_SERVER"
+    fi
+    printf 'Enter FRP server address: ' >&2
+    read -r SERVER_ADDR
+    if [ -z "$SERVER_ADDR" ]; then
+      fail "FRP server cannot be empty"
+    fi
+  fi
   if [ -n "$TOKEN" ]; then
     return 0
   fi
   if [ ! -t 0 ]; then
-    fail "FRP token required in non-interactive mode; pass --token <TOKEN> or set FRP_TOKEN"
+    fail "FRP token required on first install; pass --token <TOKEN> or set FRP_TOKEN"
   fi
   printf 'Enter FRP token: ' >&2
   read -r -s TOKEN
