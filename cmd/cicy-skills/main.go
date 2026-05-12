@@ -231,7 +231,7 @@ func installAll(root string) error {
 	if err := bundle.Install(root, repoBinDir, bundle.DefaultGlobalBinDir()); err != nil {
 		return err
 	}
-	for _, profile := range []string{"codex", "claude"} {
+	for _, profile := range []string{"codex", "claude", "openclaw", "opencode"} {
 		if _, err := agentgen.Sync(root, profile, "", repoBinDir); err != nil {
 			return fmt.Errorf("sync %s skills: %w", profile, err)
 		}

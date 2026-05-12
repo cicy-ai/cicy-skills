@@ -41,7 +41,7 @@ func OpenClawSkillsDir() string {
 }
 
 func ApprovedCodexSkills() []string {
-	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent"}
+	return []string{"agent-code-server", "agent-summary", "agent-webpage", "cf-tunnel", "cping", "docker-build-github-action", "frp-client", "frp-server", "globalApiToken", "google", "cicy-ssh", "cicy-agent", "us-spot-proxy"}
 }
 
 func canonicalCodexSkillName(name string) string {
@@ -70,6 +70,8 @@ func canonicalCodexSkillName(name string) string {
 		return "cicy-ssh"
 	case "cicy-agent", "cicyagent", "cicy_agent":
 		return "cicy-agent"
+	case "us-spot-proxy", "usspotproxy", "us_spot_proxy", "usspp":
+		return "us-spot-proxy"
 	default:
 		return ""
 	}
@@ -318,6 +320,8 @@ func generateCodexSkill(root, targetRoot, commandBinDir, skill string) error {
 		return generateCodexSSH(targetRoot, commandBinDir)
 	case "cicy-agent":
 		return generateCodexTM(targetRoot, commandBinDir)
+	case "us-spot-proxy":
+		return generateCodexUSSpotProxy(targetRoot, commandBinDir)
 	default:
 		return fmt.Errorf("skill %q is not implemented", skill)
 	}
@@ -1927,5 +1931,100 @@ func renderAgentWebpageTools() string {
 - the preferred target is ` + "`client_id`" + ` such as ` + "`web-abc123`" + `
 - if ` + "`client_id`" + ` is omitted, the command only auto-targets when the current worker agent has exactly one connected client
 - the command resolves the owning ` + "`agent_id`" + ` and then talks to the live chat websocket using ` + "`agent_id + client_id`" + `
+`
+}
+
+func generateCodexUSSpotProxy(targetRoot, commandBinDir string) error {
+	skillDir := filepath.Join(targetRoot, "us-spot-proxy")
+	refsDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(skillDir, "SKILL.md"), renderUSSpotProxySkill()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "help.md"), renderUSSpotProxyHelp()); err != nil {
+		return err
+	}
+	if err := writeText(filepath.Join(refsDir, "commands.md"), renderUSSpotProxyCommands()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderUSSpotProxySkill() string {
+	return `# us-spot-proxy
+
+Provision a US Aliyun spot ECS instance with mihomo + vpn_us passthrough + **persistent data disk**.
+
+The script lives at ` + "`~/projects/cicy-code/skills/us-spot-proxy`" + `.
+
+## Design
+
+- A persistent cloud disk (default 40GB, ~15元/月) is created once
+- A cheap spot instance is created on demand (~26元/月, billed by hour)
+- mihomo binary + config live on the persistent disk
+- Instance reclaimed or destroyed: the disk survives
+- Re-run the script to create a new instance and reattach the same disk
+
+## Usage
+
+  us-spot-proxy                  # create spot + attach persistent disk
+  us-spot-proxy --destroy        # delete instance, keep disk
+  us-spot-proxy --destroy-all    # delete instance AND disk
+
+## Rules
+
+1. Run from anywhere — it auto-detects existing disk and instance state.
+2. After provisioning, ` + "`cicy-mihomo reload`" + ` to register the new node.
+3. To fully clean up: ` + "`us-spot-proxy --destroy-all`" + `
+
+## Help
+
+Read [help.md](./references/help.md) for the quick reference.
+`
+}
+
+func renderUSSpotProxyHelp() string {
+	return `# us-spot-proxy Help
+
+## Workflow
+
+  1. First run: creates 40GB cloud_efficiency disk + spot instance + configures everything
+  2. Subsequent runs: detects existing disk, creates new instance, attaches disk, done
+  3. --destroy: kills the instance, disk stays available
+  4. --destroy-all: kills instance AND deletes the persistent disk
+
+## Data persistence
+
+Everything is stored on the persistent disk mounted at /data/mihomo/:
+- mihomo binary and config
+- autossh SSH tunnel config
+- All logs
+
+After a spot reclaim, just run ` + "`us-spot-proxy`" + ` and the disk is reattached.
+`
+}
+
+func renderUSSpotProxyCommands() string {
+	return `# us-spot-proxy Commands
+
+## Main
+
+- ` + "`us-spot-proxy`" + ` -> provision + attach + configure + test
+- ` + "`us-spot-proxy --destroy`" + ` -> delete instance (keeps disk)
+- ` + "`us-spot-proxy --destroy-all`" + ` -> delete instance AND disk
+
+## After provisioning
+
+- ` + "`cicy-mihomo reload`" + ` -> pick up the new node in local mihomo
+- ` + "`cicy-mihomo test`" + ` -> test all proxy nodes
+- ` + "`ssh us-spot-proxy 'cat /data/mihomo/mihomo.log | tail -20'`" + ` -> check remote logs
+
+## Config sources
+
+- script: ` + "`~/projects/cicy-code/skills/us-spot-proxy`" + `
+- local mihomo: ` + "`~/cicy-ai/db/mihomo.yaml`" + `
+- remote data: ` + "`/data/mihomo/`" + ` on the spot instance
 `
 }

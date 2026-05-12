@@ -42,7 +42,7 @@ var (
 		"gpt-chat",
 		"frp-client",
 		"frp-server",
-		"cicy-mihome",
+		"cicy-mihomo",
 		"mysql-exec",
 		"tg",
 		"cicy-agent",

@@ -105,8 +105,8 @@ func Run(invoked string, args []string, stdout, stderr io.Writer) int {
 		err = env.runFRPServer(args)
 	case "frp-client":
 		err = env.runFRPClient(args)
-	case "cicy-mihome":
-		err = env.runCicyMihome(args)
+	case "cicy-mihomo":
+		err = env.runCicyMihomo(args)
 	default:
 		fmt.Fprintf(stderr, "unsupported host tool: %s\n", cmd)
 		printAvailable(stderr)
@@ -214,7 +214,7 @@ type tmConfig struct {
 }
 
 func printAvailable(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, cicy-agent, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client, cicy-mihome")
+	_, _ = fmt.Fprintln(w, "available commands: gpt, gpt-chat, eng, tg, cicy-agent, agent-webpage, agent-code-server, gemini-ask, gemini-vision, mysql-exec, todo, cf-tunnel, cping, globalApiToken, frp-server, frp-client, cicy-mihomo")
 }
 
 func (e *Env) apiRequest(ctx context.Context, method, path string, payload any) ([]byte, error) {
@@ -657,10 +657,10 @@ func (e *Env) runTMCreate(cfg tmConfig, args []string) error {
 	_, _ = fmt.Fprintln(e.Stdout)
 
 	data, err := e.apiRequestTo(context.Background(), cfg.API, cfg.Token, http.MethodPost, "/api/tmux/create", map[string]any{
-		"title":            title,
-		"agent_type":       agentType,
+		"title":             title,
+		"agent_type":        agentType,
 		"allow_all_actions": allowAllActions,
-		"reply_in_chinese": replyInChinese,
+		"reply_in_chinese":  replyInChinese,
 	})
 	if err != nil {
 		return err
