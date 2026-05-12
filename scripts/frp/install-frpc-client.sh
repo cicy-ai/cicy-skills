@@ -288,10 +288,14 @@ prepare_config() {
   if [ -f "$CFG_FILE" ]; then
     CONFIG_REUSED=1
     load_effective_config_summary
-    echo "  existing config: $CFG_FILE"
+    echo "  config : $CFG_FILE"
     echo "  reusing existing config; edit this file directly to change token/ports/name"
+    echo "  reload : $RELOAD_COMMAND"
+    if [ -n "$RESTART_COMMAND" ]; then
+      echo "  restart: $RESTART_COMMAND"
+    fi
     if [ "$CONFIG_ARGS_PROVIDED" = "1" ]; then
-      echo "  note: install-time config flags were ignored because the config already exists"
+      echo "  note   : install-time config flags were ignored because the config already exists"
     fi
     return 0
   fi
