@@ -1,0 +1,239 @@
+#!/usr/bin/env node
+// cicy-ssh — inspect and manage ~/.ssh/config Host entries.
+// Bootstrap-only: list / show / add / resolve / exec.
+// For real connections call native `ssh` directly.
+
+import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, appendFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
+
+const SSH_CONFIG = process.env.CICY_SSH_CONFIG || join(homedir(), '.ssh', 'config');
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+const cmd = argv[0];
+const rest = argv.slice(1).filter((a) => a !== '--json');
+
+try {
+  switch (cmd) {
+    case 'list':    cmdList(rest);    break;
+    case 'show':    cmdShow(rest);    break;
+    case 'add':     cmdAdd(rest);     break;
+    case 'resolve': cmdResolve(rest); break;
+    case 'exec':    cmdExec(rest);    break;
+    default: bail(`unknown command: ${cmd}. Try cicy-ssh --help.`, 2);
+  }
+} catch (e) {
+  bail(e.message, e.exitCode || 1);
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) {
+    process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  } else {
+    process.stderr.write(`cicy-ssh: ${msg}\n`);
+  }
+  process.exit(code);
+}
+
+function ok(data) {
+  if (json) console.log(JSON.stringify({ ok: true, data }));
+}
+
+function printHelp() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write(`Usage:
+  cicy-ssh list                       List all Host entries
+  cicy-ssh show <alias>               Show one Host block
+  cicy-ssh add <alias> <hostname>     Append a minimal Host block
+  cicy-ssh resolve <alias>            ssh -G <alias>
+  cicy-ssh exec <alias> '<cmd>'       ssh <alias> '<cmd>'
+`);
+  }
+}
+
+// Parse ~/.ssh/config into ordered list of host blocks.
+// Comments and blank lines are preserved as raw text on each block.
+function parseConfig(text) {
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  let current = null;
+  for (const raw of lines) {
+    const m = /^\s*Host\s+(.+?)\s*$/i.exec(raw);
+    if (m) {
+      if (current) blocks.push(current);
+      current = { aliases: m[1].split(/\s+/).filter(Boolean), fields: {}, raw: [raw] };
+      continue;
+    }
+    if (current) {
+      current.raw.push(raw);
+      const km = /^\s*([A-Za-z]\w*)\s+(.+?)\s*$/.exec(raw);
+      if (km) {
+        // first occurrence wins (per ssh_config(5))
+        const k = km[1].toLowerCase();
+        if (!(k in current.fields)) current.fields[k] = km[2];
+      }
+    }
+  }
+  if (current) blocks.push(current);
+  return blocks;
+}
+
+function loadConfig() {
+  if (!existsSync(SSH_CONFIG)) return [];
+  return parseConfig(readFileSync(SSH_CONFIG, 'utf8'));
+}
+
+// ── list ────────────────────────────────────────────────────────────────
+
+function cmdList(args) {
+  const short = args.includes('--short');
+  const blocks = loadConfig();
+
+  // expand aliases (Host alias1 alias2 → two entries)
+  const rows = [];
+  for (const b of blocks) {
+    for (const alias of b.aliases) {
+      if (alias === '*' || alias.includes('*')) continue; // skip wildcards in summary list
+      rows.push({
+        alias,
+        hostname: b.fields.hostname || '',
+        user:     b.fields.user || '',
+        port:     b.fields.port || '',
+        identity: b.fields.identityfile || '',
+        proxyjump:b.fields.proxyjump || '',
+      });
+    }
+  }
+
+  if (json) return ok({ config: SSH_CONFIG, hosts: rows });
+  if (short) {
+    for (const r of rows) console.log(r.alias);
+    return;
+  }
+  if (rows.length === 0) {
+    console.log(`(no Host entries in ${SSH_CONFIG})`);
+    return;
+  }
+  // simple aligned table
+  const w = { alias: 4, hostname: 8, user: 4, port: 4 };
+  for (const r of rows) {
+    w.alias = Math.max(w.alias, r.alias.length);
+    w.hostname = Math.max(w.hostname, r.hostname.length);
+    w.user = Math.max(w.user, r.user.length);
+    w.port = Math.max(w.port, r.port.length);
+  }
+  const pad = (s, n) => (s + ' '.repeat(n)).slice(0, n);
+  console.log(`${pad('ALIAS', w.alias)}  ${pad('HOSTNAME', w.hostname)}  ${pad('USER', w.user)}  ${pad('PORT', w.port)}  EXTRA`);
+  console.log('-'.repeat(w.alias + w.hostname + w.user + w.port + 20));
+  for (const r of rows) {
+    const extra = [];
+    if (r.identity) extra.push(`IdentityFile=${r.identity}`);
+    if (r.proxyjump) extra.push(`ProxyJump=${r.proxyjump}`);
+    console.log(`${pad(r.alias, w.alias)}  ${pad(r.hostname, w.hostname)}  ${pad(r.user, w.user)}  ${pad(r.port, w.port)}  ${extra.join(' ')}`);
+  }
+}
+
+// ── show ────────────────────────────────────────────────────────────────
+
+function cmdShow(args) {
+  const alias = args[0];
+  if (!alias) throw Object.assign(new Error('Usage: cicy-ssh show <alias>'), { exitCode: 2 });
+  const blocks = loadConfig();
+  const block = blocks.find((b) => b.aliases.includes(alias));
+  if (!block) throw Object.assign(new Error(`Host '${alias}' not found in ${SSH_CONFIG}`), { exitCode: 4 });
+  if (json) return ok({ alias, fields: block.fields, raw: block.raw.join('\n') });
+  console.log(block.raw.join('\n'));
+}
+
+// ── add ─────────────────────────────────────────────────────────────────
+
+function cmdAdd(args) {
+  // cicy-ssh add <alias> <hostname> [--user u] [--port n] [--identity ~/.ssh/id_x] [--jump host]
+  if (args.length < 2) {
+    throw Object.assign(new Error('Usage: cicy-ssh add <alias> <hostname> [--user U] [--port N] [--identity FILE] [--jump HOST]'), { exitCode: 2 });
+  }
+  const alias = args[0];
+  const hostname = args[1];
+  const opts = parseFlags(args.slice(2));
+
+  const blocks = loadConfig();
+  if (blocks.some((b) => b.aliases.includes(alias))) {
+    throw Object.assign(new Error(`Host '${alias}' already exists in ${SSH_CONFIG}. Edit manually or pick another alias.`), { exitCode: 4 });
+  }
+
+  // ensure ~/.ssh exists with mode 0700
+  const dir = dirname(SSH_CONFIG);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // ensure config exists
+  if (!existsSync(SSH_CONFIG)) writeFileSync(SSH_CONFIG, '', { mode: 0o600 });
+
+  const lines = [`\nHost ${alias}`, `  HostName ${hostname}`];
+  if (opts.user)     lines.push(`  User ${opts.user}`);
+  if (opts.port)     lines.push(`  Port ${opts.port}`);
+  if (opts.identity) lines.push(`  IdentityFile ${opts.identity}`);
+  if (opts.jump)     lines.push(`  ProxyJump ${opts.jump}`);
+  appendFileSync(SSH_CONFIG, lines.join('\n') + '\n');
+
+  if (json) ok({ alias, added: lines.slice(1).map((l) => l.trim()) });
+  else console.log(`✓ added Host ${alias} → ${hostname} in ${SSH_CONFIG}`);
+}
+
+function parseFlags(arr) {
+  const out = {};
+  for (let i = 0; i < arr.length; i++) {
+    const a = arr[i];
+    if (a === '--user' || a === '-u')        out.user = arr[++i];
+    else if (a === '--port' || a === '-p')   out.port = arr[++i];
+    else if (a === '--identity' || a === '-i') out.identity = arr[++i];
+    else if (a === '--jump' || a === '-J')   out.jump = arr[++i];
+    else throw Object.assign(new Error(`unknown flag: ${a}`), { exitCode: 2 });
+  }
+  return out;
+}
+
+// ── resolve ─────────────────────────────────────────────────────────────
+
+function cmdResolve(args) {
+  const alias = args[0];
+  if (!alias) throw Object.assign(new Error('Usage: cicy-ssh resolve <alias>'), { exitCode: 2 });
+  let out;
+  try {
+    out = execFileSync('ssh', ['-G', alias], { encoding: 'utf8' });
+  } catch (e) {
+    throw Object.assign(new Error(`ssh -G ${alias} failed: ${e.message}`), { exitCode: 4 });
+  }
+  if (json) {
+    const obj = {};
+    for (const line of out.split('\n')) {
+      const m = /^(\w+)\s+(.+)$/.exec(line);
+      if (m) obj[m[1]] = m[2];
+    }
+    return ok({ alias, resolved: obj });
+  }
+  process.stdout.write(out);
+}
+
+// ── exec ────────────────────────────────────────────────────────────────
+
+function cmdExec(args) {
+  // cicy-ssh exec <alias> '<cmd>'   → spawns real ssh, inherits stdio
+  if (args.length < 2) {
+    throw Object.assign(new Error('Usage: cicy-ssh exec <alias> \'<command>\''), { exitCode: 2 });
+  }
+  const alias = args[0];
+  const remoteCmd = args.slice(1).join(' ');
+  const child = spawn('ssh', [alias, remoteCmd], { stdio: 'inherit' });
+  child.on('exit', (code) => process.exit(code ?? 1));
+  child.on('error', (e) => bail(`spawn ssh failed: ${e.message}`, 4));
+}

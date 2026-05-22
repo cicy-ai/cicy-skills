@@ -1,0 +1,317 @@
+#!/usr/bin/env node
+// agent-code-server — bridge to the page-bound :code-ext extension on this host.
+// Talks to cicy-code via POST /api/chat/push with wait_ack:true (sync RPC).
+// Subcommands: ping / list / open / active / tabs.
+
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+const cmd = argv[0];
+const rest = argv.slice(1).filter((a) => a !== '--json');
+
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+const API_BASE = `http://127.0.0.1:${API_PORT}`;
+
+(async () => {
+  try {
+    switch (cmd) {
+      case 'tools':            printTools();            break;
+      case 'ping':             await cmdPing(rest);     break;
+      case 'list':
+      case 'clients':          await cmdList(rest);     break;
+      case 'open':             await cmdOpen(rest);     break;
+      case 'active':
+      case 'active-file':
+      case 'current':          await cmdActive(rest);   break;
+      case 'tabs':             await cmdTabs(rest);     break;
+      default: bail(`unknown command: ${cmd}. Try agent-code-server --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`agent-code-server: ${msg}\n`);
+  process.exit(code);
+}
+
+function ok(data) {
+  if (json) console.log(JSON.stringify({ ok: true, data }));
+}
+
+function printHelp() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write(`Usage:
+  agent-code-server ping [page_client_id]
+  agent-code-server list
+  agent-code-server open <path> [page_client_id]
+  agent-code-server active [page_client_id]
+  agent-code-server tabs [page_client_id]
+`);
+  }
+}
+
+function printTools() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write('# agent-code-server tools\n\n- ping / list / open / active / tabs\n');
+  }
+}
+
+function loadToken() {
+  const env = process.env.CICY_API_TOKEN;
+  if (env) return env;
+  if (!existsSync(GLOBAL_JSON)) {
+    throw Object.assign(new Error(`api_token not found: set CICY_API_TOKEN or create ${GLOBAL_JSON} with {"api_token": "..."}`), { exitCode: 3 });
+  }
+  let cfg;
+  try {
+    cfg = JSON.parse(readFileSync(GLOBAL_JSON, 'utf8'));
+  } catch (e) {
+    throw Object.assign(new Error(`failed to parse ${GLOBAL_JSON}: ${e.message}`), { exitCode: 3 });
+  }
+  if (!cfg.api_token || typeof cfg.api_token !== 'string') {
+    throw Object.assign(new Error(`api_token not found in ${GLOBAL_JSON}`), { exitCode: 3 });
+  }
+  return cfg.api_token;
+}
+
+function currentAgentID() {
+  if (process.env.CICY_PANE_ID) return process.env.CICY_PANE_ID;
+  const cwd = process.cwd();
+  const m = /(w-\d+)/.exec(cwd);
+  return m ? m[1] : 'w-10001';
+}
+
+async function api(method, path, payload) {
+  const token = loadToken();
+  const headers = { 'Authorization': `Bearer ${token}` };
+  const init = { method, headers };
+  if (payload !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(payload);
+  }
+  let res;
+  try {
+    res = await fetch(API_BASE + path, init);
+  } catch (e) {
+    throw Object.assign(new Error(`cannot reach cicy-code at ${API_BASE} — is it running? (${e.message})`), { exitCode: 3 });
+  }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) {
+    throw Object.assign(new Error(`auth failed (${res.status}): check api_token in ${GLOBAL_JSON}`), { exitCode: 3 });
+  }
+  if (res.status >= 400) {
+    let body;
+    try { body = JSON.parse(text); } catch { body = { error: text }; }
+    const err = body?.error || body?.message || text || `HTTP ${res.status}`;
+    const e = new Error(`api error (${res.status}): ${err}`);
+    e.exitCode = 4;
+    e.body = body;
+    e.status = res.status;
+    throw e;
+  }
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+// list of connected clients per agent
+async function chatClients() {
+  // GET /api/chat/clients → { clients: { <agent_id>: { <client_id>: {...} } } } or similar shape
+  const data = await api('GET', '/api/chat/clients');
+  // unwrap typical envelopes
+  return data?.clients || data?.data?.clients || data?.data || data || {};
+}
+
+async function resolveTarget(pageClientID) {
+  const clients = await chatClients();
+  if (pageClientID) {
+    for (const [agentID, m] of Object.entries(clients)) {
+      if (m && Object.prototype.hasOwnProperty.call(m, pageClientID)) {
+        return { agentID, pageClientID, codeClientID: pageClientID + ':code-ext' };
+      }
+    }
+    throw Object.assign(new Error(`page_client_id ${pageClientID} not found`), { exitCode: 4 });
+  }
+  const agentID = currentAgentID();
+  const cmap = clients[agentID] || {};
+  const pages = Object.keys(cmap).filter((id) => !id.endsWith(':code-ext'));
+  if (pages.length === 0) {
+    throw Object.assign(new Error(`current agent ${agentID} has no connected page client`), { exitCode: 3 });
+  }
+  if (pages.length > 1) {
+    throw Object.assign(new Error(`current agent ${agentID} has multiple page clients; pass page_client_id explicitly`), { exitCode: 2 });
+  }
+  return { agentID, pageClientID: pages[0], codeClientID: pages[0] + ':code-ext' };
+}
+
+// Sync RPC: POST /api/chat/push with wait_ack:true. Server injects requestId
+// into data, sends to client, blocks until matching response, returns it.
+async function push(payload) {
+  return api('POST', '/api/chat/push', payload);
+}
+
+function notConnectedHint() {
+  return 'code-server extension not connected (no `:code-ext` WS) — open the code-server panel in cicy-code UI and try again';
+}
+
+// ── ping ────────────────────────────────────────────────────────────────
+
+async function cmdPing(args) {
+  const target = await resolveTarget(args[0]);
+  let resp;
+  try {
+    resp = await push({
+      client_id: target.codeClientID,
+      type: 'host.ping',
+      data: { code_client_id: target.codeClientID },
+      wait_ack: true,
+      timeout_ms: 15000,
+    });
+  } catch (e) {
+    if (e.message?.includes('client not found')) throw Object.assign(new Error(notConnectedHint()), { exitCode: 4 });
+    throw e;
+  }
+  const version = resp?.data?.version || 'unknown';
+  if (json) ok({ connected: true, version, page_client_id: target.pageClientID, code_client_id: target.codeClientID });
+  else console.log(`✅ code.pong! code-server online (v${version})`);
+}
+
+// ── list ────────────────────────────────────────────────────────────────
+
+async function cmdList(_args) {
+  const clients = await chatClients();
+  const agentID = currentAgentID();
+  const cmap = clients[agentID] || {};
+  const out = [];
+  for (const id of Object.keys(cmap)) {
+    if (id.endsWith(':code-ext')) continue;
+    out.push({
+      agent_id: agentID,
+      page_client_id: id,
+      code_server_client_id: id + ':code-ext',
+      code_server_connected: Object.prototype.hasOwnProperty.call(cmap, id + ':code-ext'),
+    });
+  }
+  out.sort((a, b) => a.page_client_id.localeCompare(b.page_client_id));
+  if (json) return ok(out);
+  if (out.length === 0) {
+    console.log(`(no page clients for agent ${agentID})`);
+    return;
+  }
+  for (const r of out) {
+    console.log(`${r.page_client_id}  code-ext=${r.code_server_connected ? 'yes' : 'no'}`);
+  }
+}
+
+// ── open ────────────────────────────────────────────────────────────────
+
+async function cmdOpen(args) {
+  if (args.length < 1) throw Object.assign(new Error('Usage: agent-code-server open <path> [page_client_id]'), { exitCode: 2 });
+  const target = await resolveTarget(args[1]);
+  const path = normalizeOpenPath(args[0]);
+
+  // UX hint: bring the Files panel forward. Fire-and-forget.
+  push({
+    agent_id: target.agentID,
+    client_id: target.pageClientID,
+    type: 'code.show_files',
+    data: { path },
+  }).catch(() => {});
+
+  // sync RPC with retry up to 30s
+  const deadline = Date.now() + 30000;
+  let lastErr;
+  let attempt = 0;
+  while (Date.now() < deadline) {
+    attempt++;
+    try {
+      const resp = await push({
+        client_id: target.codeClientID,
+        type: 'host.open_file',
+        data: { path, code_client_id: target.codeClientID },
+        wait_ack: true,
+        timeout_ms: 15000,
+      });
+      if (json) return ok({ opened: true, path, attempts: attempt, page_client_id: target.pageClientID });
+      console.log(`✅ opened: ${path}`);
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (e.message?.includes('client not found')) {
+        // wait for the iframe to wake up
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw Object.assign(new Error(`open failed after ${attempt} attempts: ${lastErr?.message || 'unknown error'}`), { exitCode: 4 });
+}
+
+function normalizeOpenPath(p) {
+  // Accept file:// URIs and plain paths. Pass through as-is — the extension
+  // handles :line[:column] and range suffixes.
+  if (p.startsWith('file://')) return p;
+  return p;
+}
+
+// ── active ──────────────────────────────────────────────────────────────
+
+async function cmdActive(args) {
+  const target = await resolveTarget(args[0]);
+  let resp;
+  try {
+    resp = await push({
+      client_id: target.codeClientID,
+      type: 'host.active_file',
+      data: { code_client_id: target.codeClientID },
+      wait_ack: true,
+      timeout_ms: 10000,
+    });
+  } catch (e) {
+    if (e.message?.includes('client not found')) throw Object.assign(new Error(notConnectedHint()), { exitCode: 4 });
+    throw e;
+  }
+  const data = resp?.data || {};
+  if (json) return ok(data);
+  console.log(JSON.stringify(data, null, 2));
+}
+
+// ── tabs ────────────────────────────────────────────────────────────────
+
+async function cmdTabs(args) {
+  const target = await resolveTarget(args[0]);
+  let resp;
+  try {
+    resp = await push({
+      client_id: target.codeClientID,
+      type: 'host.list_tabs',
+      data: { code_client_id: target.codeClientID },
+      wait_ack: true,
+      timeout_ms: 10000,
+    });
+  } catch (e) {
+    if (e.message?.includes('client not found')) throw Object.assign(new Error(notConnectedHint()), { exitCode: 4 });
+    throw e;
+  }
+  const data = resp?.data || {};
+  if (json) return ok(data);
+  console.log(JSON.stringify(data, null, 2));
+}

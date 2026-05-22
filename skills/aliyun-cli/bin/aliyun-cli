@@ -1,0 +1,222 @@
+#!/usr/bin/env node
+// aliyun-cli — bootstrap wrapper for the official aliyun CLI.
+// Three subcommands: install / config / status. Nothing else.
+// Zero npm dependencies. Pure ESM. Node 18+.
+
+import { readFileSync, writeFileSync, existsSync, statSync, chmodSync, mkdirSync, unlinkSync } from 'node:fs';
+import { homedir, platform, arch } from 'node:os';
+import { join, dirname } from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
+
+const ALIYUN_CONFIG = process.env.CICY_ALIYUN_CONFIG || join(homedir(), '.aliyun', 'config.json');
+const LOCAL_BIN = join(homedir(), '.local', 'bin');
+const ALIYUN_BIN = join(LOCAL_BIN, 'aliyun');
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const cmd = argv[0];
+
+try {
+  switch (cmd) {
+    case 'install': await cmdInstall(); break;
+    case 'config':  await cmdConfig();  break;
+    case 'status':  await cmdStatus();  break;
+    default: bail(`unknown command: ${cmd}. Try aliyun-cli --help.`, 2);
+  }
+} catch (e) {
+  bail(e.message, e.exitCode || 1);
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  process.stderr.write(`aliyun-cli: ${msg}\n`);
+  process.exit(code);
+}
+
+function printHelp() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write(`Usage:
+  aliyun-cli install        Install official aliyun binary into ~/.local/bin
+  aliyun-cli config         Open ~/.aliyun/config.json in $EDITOR
+  aliyun-cli status [--json]  Show install + config state
+`);
+  }
+}
+
+// ── install ─────────────────────────────────────────────────────────────
+
+async function cmdInstall() {
+  const force = argv.includes('--force');
+  if (existsSync(ALIYUN_BIN) && !force) {
+    let v = '?';
+    try { v = execFileSync(ALIYUN_BIN, ['version'], { encoding: 'utf8' }).trim(); } catch {}
+    console.log(`✓ aliyun already installed: ${ALIYUN_BIN} (${v})`);
+    console.log(`  use --force to reinstall`);
+    return;
+  }
+
+  const url = resolveDownloadURL();
+  console.log(`→ downloading ${url} ...`);
+  mkdirSync(LOCAL_BIN, { recursive: true });
+
+  // download to /tmp, extract, copy into ~/.local/bin
+  const tmpDir = `/tmp/aliyun-cli-${process.pid}`;
+  mkdirSync(tmpDir, { recursive: true });
+  const archivePath = join(tmpDir, url.endsWith('.zip') ? 'aliyun.zip' : 'aliyun.tgz');
+
+  try {
+    execFileSync('curl', ['-fsSL', '-o', archivePath, url], { stdio: 'inherit' });
+  } catch (e) {
+    throw Object.assign(new Error(`curl failed: ${e.message}`), { exitCode: 4 });
+  }
+
+  if (archivePath.endsWith('.zip')) {
+    execFileSync('unzip', ['-o', archivePath, '-d', tmpDir], { stdio: 'inherit' });
+  } else {
+    execFileSync('tar', ['-xzf', archivePath, '-C', tmpDir], { stdio: 'inherit' });
+  }
+
+  // The archive contains a single file `aliyun` (or aliyun.exe on Windows).
+  const extracted = platform() === 'win32'
+    ? join(tmpDir, 'aliyun.exe')
+    : join(tmpDir, 'aliyun');
+
+  if (!existsSync(extracted)) {
+    throw Object.assign(new Error(`extracted file not found at ${extracted}`), { exitCode: 1 });
+  }
+
+  // move into ~/.local/bin and chmod +x
+  const target = platform() === 'win32' ? ALIYUN_BIN + '.exe' : ALIYUN_BIN;
+  const buf = readFileSync(extracted);
+  writeFileSync(target, buf, { mode: 0o755 });
+
+  // cleanup
+  try { unlinkSync(archivePath); } catch {}
+  try { unlinkSync(extracted); } catch {}
+
+  let v = '?';
+  try { v = execFileSync(target, ['version'], { encoding: 'utf8' }).trim(); } catch {}
+  console.log(`✓ installed aliyun → ${target} (${v})`);
+  console.log(`  add ${LOCAL_BIN} to PATH if not already.`);
+}
+
+function resolveDownloadURL() {
+  // Official release pattern (as of late 2024):
+  //   https://github.com/aliyun/aliyun-cli/releases/latest/download/aliyun-cli-<os>-<ver>-amd64.tgz
+  // But "latest" links are unstable. Use a fixed recent version to keep
+  // installs reproducible; users can override via CICY_ALIYUN_DOWNLOAD_URL.
+  if (process.env.CICY_ALIYUN_DOWNLOAD_URL) return process.env.CICY_ALIYUN_DOWNLOAD_URL;
+
+  const v = '3.0.290'; // pinned; bump when needed
+  const a = arch();
+  const isArm = a === 'arm64' || a === 'arm';
+  const os = platform();
+  if (os === 'darwin') {
+    return `https://github.com/aliyun/aliyun-cli/releases/download/v${v}/aliyun-cli-macosx-${v}-${isArm ? 'arm64' : 'amd64'}.tgz`;
+  }
+  if (os === 'linux') {
+    return `https://github.com/aliyun/aliyun-cli/releases/download/v${v}/aliyun-cli-linux-${v}-${isArm ? 'arm64' : 'amd64'}.tgz`;
+  }
+  if (os === 'win32') {
+    return `https://github.com/aliyun/aliyun-cli/releases/download/v${v}/aliyun-cli-windows-${v}-amd64.zip`;
+  }
+  throw Object.assign(new Error(`unsupported platform: ${os}/${a}`), { exitCode: 1 });
+}
+
+// ── config ──────────────────────────────────────────────────────────────
+
+async function cmdConfig() {
+  if (!existsSync(ALIYUN_CONFIG)) {
+    mkdirSync(dirname(ALIYUN_CONFIG), { recursive: true, mode: 0o700 });
+    const tmpl = {
+      current: 'default',
+      profiles: [
+        {
+          name: 'default',
+          mode: 'AK',
+          access_key_id:     '<paste-your-aliyun-access-key-id-here>',
+          access_key_secret: '<paste-your-aliyun-access-key-secret-here>',
+          region_id:         'cn-hangzhou',
+          output_format:     'json',
+        },
+      ],
+      meta_path: '',
+    };
+    writeFileSync(ALIYUN_CONFIG, JSON.stringify(tmpl, null, 2) + '\n', { mode: 0o600 });
+    try { chmodSync(ALIYUN_CONFIG, 0o600); } catch {}
+    console.log(`created placeholder: ${ALIYUN_CONFIG}`);
+  }
+  const editor = process.env.EDITOR || process.env.VISUAL || 'nano';
+  console.log(`opening ${ALIYUN_CONFIG} in ${editor} ...`);
+  await runChild(editor, [ALIYUN_CONFIG]);
+}
+
+// ── status ──────────────────────────────────────────────────────────────
+
+async function cmdStatus() {
+  const out = {
+    binary_path: ALIYUN_BIN,
+    binary_installed: existsSync(ALIYUN_BIN),
+    binary_version: '',
+    config_path: ALIYUN_CONFIG,
+    config_exists: existsSync(ALIYUN_CONFIG),
+    config_permissions: null,
+    current_profile: null,
+    access_key_id_masked: '',
+  };
+
+  if (out.binary_installed) {
+    try {
+      out.binary_version = execFileSync(ALIYUN_BIN, ['version'], { encoding: 'utf8' }).trim();
+    } catch {}
+  }
+  if (out.config_exists) {
+    try {
+      const m = statSync(ALIYUN_CONFIG).mode & 0o777;
+      out.config_permissions = '0' + m.toString(8);
+    } catch {}
+    try {
+      const cfg = JSON.parse(readFileSync(ALIYUN_CONFIG, 'utf8'));
+      out.current_profile = cfg.current || null;
+      const profile = (cfg.profiles || []).find((p) => p.name === cfg.current);
+      const id = profile?.access_key_id || profile?.access_key || '';
+      const isPlaceholder = typeof id === 'string' && id.startsWith('<paste');
+      if (id && !isPlaceholder) {
+        out.access_key_id_masked = id.slice(0, 4) + '***' + id.slice(-4);
+      }
+    } catch (e) {
+      out.error = e.message;
+    }
+  }
+
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({ ok: true, data: out }));
+  } else {
+    console.log(`binary:        ${out.binary_path}`);
+    console.log(`installed:     ${out.binary_installed}${out.binary_version ? ' [' + out.binary_version + ']' : ''}`);
+    console.log(`config:        ${out.config_path}`);
+    console.log(`exists:        ${out.config_exists}`);
+    console.log(`permissions:   ${out.config_permissions || '(n/a)'}`);
+    console.log(`current:       ${out.current_profile || '(none)'}`);
+    console.log(`access_key_id: ${out.access_key_id_masked || '(missing/placeholder)'}`);
+    if (out.error) console.log(`error:         ${out.error}`);
+  }
+}
+
+// ── runChild ────────────────────────────────────────────────────────────
+
+function runChild(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: 'inherit', ...opts });
+    child.on('error', (e) => reject(new Error(`spawn ${cmd}: ${e.message}`)));
+    child.on('exit', (code) => code === 0 ? resolve() : reject(Object.assign(new Error(`${cmd} exited ${code}`), { exitCode: code })));
+  });
+}

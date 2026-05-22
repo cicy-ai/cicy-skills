@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "agent-webpage",
+  "version": "1.0.0",
+  "title": "Agent Webpage",
+  "description": "Talk to the live webpage client for an agent on this host. Run JS, ping, send custom events and await the real reply over the chat WebSocket.",
+  "category": "dev",
+  "tags": ["webpage", "agent-bridge", "rpc", "websocket"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-webpage",
+  "license": "MIT",
+  "runtime": { "node": ">=22" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/agent-webpage",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": ["api_token"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

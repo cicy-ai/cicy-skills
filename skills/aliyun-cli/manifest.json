@@ -1,0 +1,24 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "aliyun-cli",
+  "version": "1.0.0",
+  "title": "Aliyun CLI Bootstrap",
+  "description": "Install and configure the official Aliyun CLI on this host. Bootstrap-only wrapper: install / config / status. For real API calls use the native aliyun CLI.",
+  "category": "cloud",
+  "tags": ["aliyun", "alibaba-cloud", "cli", "bootstrap"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/aliyun-cli",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": ["curl", "tar"],
+  "npm_dependencies": false,
+  "entry": "bin/aliyun-cli",
+  "permissions": ["network", "filesystem:home", "process:spawn"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}
