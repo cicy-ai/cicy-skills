@@ -5,24 +5,44 @@
   "title": "Agent Webpage",
   "description": "Talk to the live webpage client for an agent on this host. Run JS, ping, send custom events and await the real reply over the chat WebSocket.",
   "category": "dev",
-  "tags": ["webpage", "agent-bridge", "rpc", "websocket"],
+  "tags": [
+    "webpage",
+    "agent-bridge",
+    "rpc",
+    "websocket"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-webpage",
   "license": "MIT",
-  "runtime": { "node": ">=22" },
+  "runtime": {
+    "node": ">=22"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/agent-webpage",
-  "permissions": ["network", "filesystem:home"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/global.json",
-    "secret_fields": ["api_token"]
+    "secret_fields": [
+      "api_token"
+    ]
   },
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Agent Webpage",
+      "description": "通过聊天 WebSocket 与 agent 当前页面客户端通信，执行 JS、ping、发送自定义事件并等待实际响应。"
+    }
   }
 }

@@ -5,24 +5,44 @@
   "title": "GPT Chat (with history)",
   "description": "Multi-turn chat against cicy-code's /api/ai/chat with persistent history at ~/Private/data/gpt-chat-history.json. Optional system prompt. Subcommands - --clear, --system, --show-system.",
   "category": "productivity",
-  "tags": ["gpt", "chat", "ai", "history"],
+  "tags": [
+    "gpt",
+    "chat",
+    "ai",
+    "history"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/gpt-chat",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
+  "runtime": {
+    "node": ">=18"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/gpt-chat",
-  "permissions": ["network", "filesystem:home"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/global.json",
-    "secret_fields": ["api_token"]
+    "secret_fields": [
+      "api_token"
+    ]
   },
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "GPT 多轮对话",
+      "description": "具有持久历史记录的多轮对话（~/Private/data/gpt-chat-history.json）。支持可选系统提示词，子命令：--clear / --system / --show-system。"
+    }
   }
 }

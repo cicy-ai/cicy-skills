@@ -5,24 +5,44 @@
   "title": "Cicy Agent (tmux)",
   "description": "Operate tmux panes and windows on this host. Wraps cicy-code's /api/tmux/* endpoints (list, capture, send-keys, msg, create, restart, clear).",
   "category": "dev",
-  "tags": ["tmux", "agent", "panes", "cicy"],
+  "tags": [
+    "tmux",
+    "agent",
+    "panes",
+    "cicy"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-agent",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
+  "runtime": {
+    "node": ">=18"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/cicy-agent",
-  "permissions": ["network", "filesystem:home"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/global.json",
-    "secret_fields": ["api_token"]
+    "secret_fields": [
+      "api_token"
+    ]
   },
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Cicy Agent (tmux)",
+      "description": "通过 cicy-code /api/tmux/* 端点操作 tmux 面板和窗口（列表、capture、send-keys、msg、create、restart、clear），支持多节点。"
+    }
   }
 }

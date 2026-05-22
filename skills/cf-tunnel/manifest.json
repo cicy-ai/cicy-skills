@@ -5,25 +5,47 @@
   "title": "Cloudflare Tunnel",
   "description": "Manage Cloudflare Tunnel routes and DNS records on this host. Subcommands: config / status / list / add / del.",
   "category": "cloud",
-  "tags": ["cloudflare", "tunnel", "dns"],
+  "tags": [
+    "cloudflare",
+    "tunnel",
+    "dns"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cf-tunnel",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
+  "runtime": {
+    "node": ">=18"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/cf-tunnel",
   "config": {
     "path": "~/cicy-ai/db/cf.json",
     "permissions": "0600",
-    "secret_fields": ["api_token", "account_id", "tunnel_id", "zone_id"]
+    "secret_fields": [
+      "api_token",
+      "account_id",
+      "tunnel_id",
+      "zone_id"
+    ]
   },
-  "permissions": ["network", "filesystem:db"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:db"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Cloudflare Tunnel",
+      "description": "管理本机的 Cloudflare Tunnel 路由和 DNS 记录。子命令：config / status / list / add / del。"
+    }
   }
 }

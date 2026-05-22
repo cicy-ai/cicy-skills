@@ -5,20 +5,40 @@
   "title": "CiCy SSH",
   "description": "Inspect and manage ~/.ssh/config Host entries on this host. Trigger when the task mentions ssh aliases, jump hosts, or adding/listing/using SSH nodes. For real connections use ssh directly.",
   "category": "network",
-  "tags": ["ssh", "openssh", "config", "remote"],
+  "tags": [
+    "ssh",
+    "openssh",
+    "config",
+    "remote"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-ssh",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
-  "system_requirements": ["ssh"],
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "ssh"
+  ],
   "npm_dependencies": false,
   "entry": "bin/cicy-ssh",
-  "permissions": ["filesystem:home", "process:spawn"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Cicy SSH",
+      "description": "查看和管理 ~/.ssh/config 的 Host 条目。支持 list/show/add（仅追加）/resolve/exec。真正的连接请直接使用 ssh 命令。"
+    }
   }
 }

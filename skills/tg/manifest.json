@@ -5,24 +5,44 @@
   "title": "Telegram Bot",
   "description": "Send a Telegram message or photo via cicy-code's /api/tg/{send,photo} endpoints. Subcommands - send / photo.",
   "category": "productivity",
-  "tags": ["telegram", "messaging", "bot", "notify"],
+  "tags": [
+    "telegram",
+    "messaging",
+    "bot",
+    "notify"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
+  "runtime": {
+    "node": ">=18"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/tg",
-  "permissions": ["network", "filesystem:home"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/global.json",
-    "secret_fields": ["api_token"]
+    "secret_fields": [
+      "api_token"
+    ]
   },
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Telegram Bot",
+      "description": "通过 cicy-code 的 /api/tg/{send,photo} 发送 Telegram 消息或图片。Bot 配置在服务端，不在本 skill 中。"
+    }
   }
 }

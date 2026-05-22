@@ -5,24 +5,45 @@
   "title": "Agent Chrome",
   "description": "Control system Chrome on a connected cicy-desktop host with per-profile proxy support. CDP + ~/Private/chrome.json multi-profile via desktop_event RPC.",
   "category": "dev",
-  "tags": ["chrome", "cdp", "cicy-desktop", "agent-bridge", "websocket"],
+  "tags": [
+    "chrome",
+    "cdp",
+    "cicy-desktop",
+    "agent-bridge",
+    "websocket"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-chrome",
   "license": "MIT",
-  "runtime": { "node": ">=22" },
+  "runtime": {
+    "node": ">=22"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/agent-chrome",
-  "permissions": ["network", "filesystem:home"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/global.json",
-    "secret_fields": ["api_token"]
+    "secret_fields": [
+      "api_token"
+    ]
   },
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Agent Chrome",
+      "description": "通过 cicy-desktop 控制本机 Chrome，支持多 Profile 独立代理。使用 CDP + ~/Private/chrome.json。"
+    }
   }
 }

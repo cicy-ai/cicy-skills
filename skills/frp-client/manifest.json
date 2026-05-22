@@ -5,16 +5,29 @@
   "title": "FRP Client",
   "description": "Manage a local frpc process on this host with background start, status, proxy connections, hot reload, and stop/start controls. Remote machines via ssh.",
   "category": "network",
-  "tags": ["frp", "frpc", "tunneling", "process-manager"],
+  "tags": [
+    "frp",
+    "frpc",
+    "tunneling",
+    "process-manager"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/frp-client",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
+  "runtime": {
+    "node": ">=18"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/frp-client",
-  "permissions": ["network", "filesystem:home", "process:spawn"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/db/frpc.toml",
     "secret_fields": []
@@ -24,5 +37,11 @@
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "FRP 客户端",
+      "description": "管理本机 frpc 进程，支持后台启动、状态查询、代理连接、热重载和 start/stop，可通过 ssh 管理远程机器。"
+    }
   }
 }

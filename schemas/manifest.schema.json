@@ -30,6 +30,18 @@
     },
     "title": { "type": "string", "minLength": 1, "maxLength": 100 },
     "description": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "i18n": {
+      "type": "object",
+      "description": "Localized title/description keyed by BCP-47 language tag. If a lang is absent the base English title/description is used.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "title":       { "type": "string", "minLength": 1, "maxLength": 100 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "additionalProperties": false
+      }
+    },
     "category": {
       "type": "string",
       "enum": [

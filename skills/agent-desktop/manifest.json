@@ -5,24 +5,45 @@
   "title": "Agent Desktop",
   "description": "Control a connected cicy-desktop (Electron) client on this host. Screenshot, clipboard, exec shell, list windows, raw electronRPC via desktop_event over WebSocket.",
   "category": "dev",
-  "tags": ["cicy-desktop", "electron", "rpc", "websocket", "agent-bridge"],
+  "tags": [
+    "cicy-desktop",
+    "electron",
+    "rpc",
+    "websocket",
+    "agent-bridge"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-desktop",
   "license": "MIT",
-  "runtime": { "node": ">=22" },
+  "runtime": {
+    "node": ">=22"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/agent-desktop",
-  "permissions": ["network", "filesystem:home"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/global.json",
-    "secret_fields": ["api_token"]
+    "secret_fields": [
+      "api_token"
+    ]
   },
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Agent Desktop",
+      "description": "通过 WebSocket 调用已连接的 cicy-desktop (Electron) 客户端，支持截图、剪贴板、shell 执行、窗口列表、raw electronRPC 等。"
+    }
   }
 }

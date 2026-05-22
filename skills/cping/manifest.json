@@ -5,20 +5,37 @@
   "title": "China-side Reachability",
   "description": "Check network latency and reachability to a domain or IP from this host, with emphasis on China-side reachability.",
   "category": "network",
-  "tags": ["network", "ping", "latency", "china"],
+  "tags": [
+    "network",
+    "ping",
+    "latency",
+    "china"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cping",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
+  "runtime": {
+    "node": ">=18"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/cping",
-  "permissions": ["network"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "help.md",
     "tools_md": "tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "cping 网络探测",
+      "description": "快速检测域名或 IP 的网络延迟和可达性，支持 DNS / HTTP / TCP 多种方式。"
+    }
   }
 }

@@ -5,16 +5,32 @@
   "title": "Cicy Mihomo Proxy",
   "description": "Manage the local Cicy Mihomo proxy with start/stop/reload/status/logs, node speed-testing, and per-Chrome-profile listeners (multi-port + IN-NAME rules).",
   "category": "network",
-  "tags": ["mihomo", "clash", "proxy", "process-manager"],
+  "tags": [
+    "mihomo",
+    "clash",
+    "proxy",
+    "process-manager"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-mihomo",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
-  "system_requirements": ["curl", "tar"],
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "curl",
+    "tar"
+  ],
   "npm_dependencies": false,
   "entry": "bin/cicy-mihomo",
-  "permissions": ["network", "filesystem:home", "process:spawn"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "config": {
     "path": "~/cicy-ai/db/mihomo.yaml",
     "secret_fields": []
@@ -24,5 +40,11 @@
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Cicy Mihomo 代理",
+      "description": "管理本地 Cicy Mihomo (mihomo / clash-meta fork) 代理，包含 start/stop/reload/status/logs、节点测速和每 Chrome Profile 独立监听端口（多端口 + IN-NAME 规则）。"
+    }
   }
 }

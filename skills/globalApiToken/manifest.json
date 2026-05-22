@@ -5,25 +5,44 @@
   "title": "Global API Token",
   "description": "Show or refresh the api_token in ~/cicy-ai/global.json on this host.",
   "category": "system",
-  "tags": ["token", "auth", "config"],
+  "tags": [
+    "token",
+    "auth",
+    "config"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/globalApiToken",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
+  "runtime": {
+    "node": ">=18"
+  },
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/globalApiToken",
   "config": {
     "path": "~/cicy-ai/global.json",
     "permissions": "0600",
-    "secret_fields": ["api_token"]
+    "secret_fields": [
+      "api_token"
+    ]
   },
-  "permissions": ["filesystem:home", "filesystem:db"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "filesystem:home",
+    "filesystem:db"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
     "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "全局 API Token",
+      "description": "查看或刷新 ~/cicy-ai/global.json 中的 api_token，Token 不会明文暴露给 Agent。"
+    }
   }
 }
