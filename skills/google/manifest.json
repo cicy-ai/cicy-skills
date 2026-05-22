@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "google",
+  "version": "1.0.0",
+  "title": "Google Workspace",
+  "description": "Local google CLI wrapper for Gmail, Sheets, Drive and Calendar. OAuth login via oauth-flow.cicy-ai.com (relay never sees client_secret or tokens).",
+  "category": "productivity",
+  "tags": ["google", "gmail", "sheets", "drive", "calendar", "oauth"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/google",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/google",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/db/google.json",
+    "secret_fields": ["refresh_token", "client_secret"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "eng",
+  "version": "1.0.0",
+  "title": "English Correction",
+  "description": "One-shot English correction wrapper. POSTs the input text to cicy-code's /api/ai/correct endpoint and prints the corrected version.",
+  "category": "productivity",
+  "tags": ["english", "correction", "ai", "writing"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/eng",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/eng",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": ["api_token"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

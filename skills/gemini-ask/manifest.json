@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "gemini-ask",
+  "version": "1.0.0",
+  "title": "Gemini Ask",
+  "description": "Ask Google Gemini in a connected cicy-desktop window via desktop_event WebSocket RPC. Returns the assistant text.",
+  "category": "productivity",
+  "tags": ["gemini", "ai", "cicy-desktop", "websocket"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/gemini-ask",
+  "license": "MIT",
+  "runtime": { "node": ">=22" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/gemini-ask",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": ["api_token"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

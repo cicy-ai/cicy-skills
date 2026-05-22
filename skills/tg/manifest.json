@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "tg",
+  "version": "1.0.0",
+  "title": "Telegram Bot",
+  "description": "Send a Telegram message or photo via cicy-code's /api/tg/{send,photo} endpoints. Subcommands - send / photo.",
+  "category": "productivity",
+  "tags": ["telegram", "messaging", "bot", "notify"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/tg",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": ["api_token"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

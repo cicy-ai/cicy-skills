@@ -1,0 +1,649 @@
+#!/usr/bin/env node
+// google — Gmail / Sheets / Drive / Calendar wrapper.
+// OAuth login via oauth-flow.cicy-ai.com (relay never sees secrets/tokens).
+// Token exchange + refresh happens locally with client_secret.
+//
+// Files:
+//   ~/cicy-ai/db/google_oauth_client.json  { client_id, client_secret }
+//   ~/cicy-ai/db/google.json               { refresh_token, access_token, expires_at, authorized_email, authorized_at }
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, chmodSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname, basename } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+const HOME = homedir();
+const CLIENT_PATH = process.env.GOOGLE_OAUTH_CLIENT || join(HOME, 'cicy-ai', 'db', 'google_oauth_client.json');
+const STATE_PATH  = process.env.GOOGLE_STATE        || join(HOME, 'cicy-ai', 'db', 'google.json');
+const OAUTH_FLOW_BASE = process.env.OAUTH_FLOW_BASE || 'https://oauth-flow.cicy-ai.com';
+const OAUTH_REDIRECT  = OAUTH_FLOW_BASE + '/callback';
+const TOKEN_ENDPOINT  = 'https://oauth2.googleapis.com/token';
+
+const SCOPES = [
+  'https://mail.google.com/',
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/calendar',
+  'openid',
+  'email',
+];
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  if (argv[0] === 'help' && argv[1]) printServiceHelp(argv[1]);
+  else printUsage();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+
+(async () => {
+  try {
+    const service = argv[0];
+    const cmd = argv[1] || '';
+    const rest = argv.slice(2).filter((a) => a !== '--json');
+
+    switch (service) {
+      case 'setup':                  await cmdSetup();  return;
+      case 'login':                  await cmdLogin('login');  return;
+      case 'status':                 await cmdLogin('status'); return;
+      case 'gmail':                  await runGmail(cmd, rest); return;
+      case 'sheets':                 await runSheets(cmd, rest); return;
+      case 'drive':                  await runDrive(cmd, rest); return;
+      case 'calendar':               await runCalendar(cmd, rest); return;
+      default: printUsage(); return;
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`google: ${msg}\n`);
+  process.exit(code);
+}
+function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
+
+function ensureDir(p) { if (!existsSync(p)) mkdirSync(p, { recursive: true }); }
+
+function printUsage() {
+  process.stdout.write(`google — Workspace CLI
+
+Available commands:
+  setup      First-time OAuth client setup instructions
+  login      Authorize this host with your Google account
+  status     Show current authorization status
+  gmail      Email management
+  sheets     Spreadsheet operations
+  drive      File storage
+  calendar   Calendar events
+
+Usage: google <command> [args]
+       google help <gmail|sheets|drive|calendar>
+First time? Run: google setup
+`);
+}
+
+function printServiceHelp(svc) {
+  switch (svc) {
+    case 'gmail':
+      process.stdout.write(`google gmail — Gmail
+  list [-q "<query>"] [--max N]   list message IDs (default: max 10, query: in:inbox)
+  read <id>                       read one message (subject/from/snippet/body)
+  send -t <to> -s <subject> -b <body>   send a plain text message
+  watch -q "<query>" [--minutes N]  poll for new messages matching query
+`);
+      break;
+    case 'sheets':
+      process.stdout.write(`google sheets
+  read <spreadsheetId> "Sheet1!A1:C10"
+  write <spreadsheetId> "Sheet1!A1" '[["v"]]'
+  append <spreadsheetId> "Sheet1!A:Z" '[["v"]]'
+  create "<title>"
+`);
+      break;
+    case 'drive':
+      process.stdout.write(`google drive
+  list [--max N] [-q "<query>"]
+  upload <local_path> [--name N] [--mime M]
+  download <fileId> <local_path>
+  quota
+`);
+      break;
+    case 'calendar':
+      process.stdout.write(`google calendar
+  list                     list calendars
+  events [calId] [--max N] events for the calendar (default primary, today→7d)
+  create [calId] -s "<summary>" -t <ISO_start> -e <ISO_end> [-d "<descr>"]
+`);
+      break;
+    default:
+      printUsage();
+  }
+}
+
+function loadClient() {
+  if (!existsSync(CLIENT_PATH)) {
+    throw Object.assign(new Error(`OAuth client not configured. Run: google setup`), { exitCode: 3 });
+  }
+  let raw;
+  try { raw = JSON.parse(readFileSync(CLIENT_PATH, 'utf8')); }
+  catch (e) { throw Object.assign(new Error(`failed to parse ${CLIENT_PATH}: ${e.message}`), { exitCode: 3 }); }
+  // Accept either flat {client_id, client_secret} OR Google's downloaded
+  // {"web":{...}} / {"installed":{...}} structure.
+  const nested = raw.web || raw.installed || raw.user || null;
+  const c = nested ? { client_id: nested.client_id, client_secret: nested.client_secret } : raw;
+  if (!c.client_id || !c.client_secret) {
+    throw Object.assign(new Error(`${CLIENT_PATH} missing client_id or client_secret`), { exitCode: 3 });
+  }
+  return c;
+}
+
+function loadState() {
+  if (!existsSync(STATE_PATH)) return {};
+  try { return JSON.parse(readFileSync(STATE_PATH, 'utf8')); } catch { return {}; }
+}
+
+function saveState(state) {
+  ensureDir(dirname(STATE_PATH));
+  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
+  try { chmodSync(STATE_PATH, 0o600); } catch {}
+}
+
+async function getAccessToken() {
+  const state = loadState();
+  if (!state.refresh_token) {
+    throw Object.assign(new Error(`Not authorized. Run: google login`), { exitCode: 3 });
+  }
+  // refresh if access_token missing or within 60s of expiry
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = state.expires_at || 0;
+  if (state.access_token && expiresAt - 60 > now) {
+    return state.access_token;
+  }
+  const client = loadClient();
+  const body = new URLSearchParams({
+    client_id: client.client_id,
+    client_secret: client.client_secret,
+    refresh_token: state.refresh_token,
+    grant_type: 'refresh_token',
+  });
+  let res;
+  try { res = await fetch(TOKEN_ENDPOINT, { method: 'POST', body }); }
+  catch (e) { throw Object.assign(new Error(`token endpoint unreachable: ${e.message}`), { exitCode: 4 }); }
+  const txt = await res.text();
+  if (!res.ok) throw Object.assign(new Error(`token refresh failed (${res.status}): ${txt}`), { exitCode: 4 });
+  const parsed = JSON.parse(txt);
+  state.access_token = parsed.access_token;
+  state.expires_at = now + (parsed.expires_in || 3600);
+  saveState(state);
+  return state.access_token;
+}
+
+async function googleFetch(method, url, opts = {}) {
+  const token = await getAccessToken();
+  const headers = { 'Authorization': `Bearer ${token}`, ...opts.headers };
+  const init = { method, headers };
+  if (opts.body !== undefined) {
+    if (typeof opts.body === 'string' || opts.body instanceof Uint8Array) init.body = opts.body;
+    else { headers['Content-Type'] = headers['Content-Type'] || 'application/json'; init.body = JSON.stringify(opts.body); }
+  }
+  let res;
+  try { res = await fetch(url, init); }
+  catch (e) { throw Object.assign(new Error(`Google API unreachable: ${e.message}`), { exitCode: 4 }); }
+  const txt = await res.text();
+  if (res.status === 401) throw Object.assign(new Error('access token rejected — try `google login` again'), { exitCode: 3 });
+  if (!res.ok) throw Object.assign(new Error(`Google API ${url.split('?')[0]} (${res.status}): ${txt.slice(0, 400)}`), { exitCode: 4 });
+  if (!txt) return {};
+  try { return JSON.parse(txt); } catch { return txt; }
+}
+
+function parseFlags(args, schema) {
+  // schema: { '--to': 'to', '-t': 'to', ... '--positional': '_positional' }
+  const out = { _: [] };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (schema[a]) { out[schema[a]] = args[++i]; continue; }
+    out._.push(a);
+  }
+  return out;
+}
+
+// ── setup / login / status ──────────────────────────────────────────────
+
+async function cmdSetup() {
+  process.stdout.write(`Google Workspace — first-time setup
+====================================
+
+Each user needs their own Google Cloud OAuth credentials.
+The oauth-flow.cicy-ai.com relay is shared, but credentials stay local.
+
+Step 1 — Create a Google Cloud project (skip if you have one already):
+  https://console.cloud.google.com/projectcreate
+
+Step 2 — Enable the APIs you need:
+  https://console.cloud.google.com/apis/library
+  Enable: Gmail API, Google Drive API, Google Sheets API, Google Calendar API
+
+Step 3 — Configure the OAuth consent screen:
+  https://console.cloud.google.com/apis/credentials/consent
+  User Type: External  |  App name: anything  |  Save and continue
+  Under 'Test users' → Add your Gmail address
+
+Step 4 — Create OAuth 2.0 credentials:
+  https://console.cloud.google.com/apis/credentials
+  Click 'Create credentials' → 'OAuth client ID'
+  Application type: Web application  (NOT Desktop or TV)
+  Authorized redirect URIs → ADD URI:
+    ${OAUTH_REDIRECT}
+  Click Create
+
+Step 5 — Save the credentials JSON file to:
+    ${CLIENT_PATH}
+  chmod 600 ~/cicy-ai/db/google_oauth_client.json
+
+  IMPORTANT: Do NOT paste client_id or client_secret into chat.
+
+Step 6 — Authorize:
+  google login
+
+Done. Credentials stay local. The relay never sees your client_secret.
+`);
+}
+
+async function cmdLogin(mode) {
+  // State 1: client config missing
+  if (!existsSync(CLIENT_PATH)) {
+    process.stdout.write('[google login] OAuth client not configured. Run `google setup` for instructions.\n');
+    return;
+  }
+  const client = loadClient();
+
+  // State 2: already authorized
+  const state = loadState();
+  if (state.refresh_token) {
+    process.stdout.write(`[google login] Already authorized as ${state.authorized_email || '(unknown)'} (since ${state.authorized_at || '?'})\n`);
+    process.stdout.write('To switch accounts, delete ~/cicy-ai/db/google.json and run `google login` again.\n');
+    return;
+  }
+  if (mode === 'status') {
+    process.stdout.write('[google login] OAuth client is configured but no refresh_token yet. Run `google login` to authorize.\n');
+    return;
+  }
+
+  // State 3: drive the flow
+  const sessionID = randomBytes(16).toString('hex');
+  const startURL = OAUTH_FLOW_BASE + '/start?' + new URLSearchParams({
+    session: sessionID,
+    client_id: client.client_id,
+    scopes: SCOPES.join(' '),
+  });
+
+  process.stdout.write('[google login] Tell the user to open this URL in their browser:\n\n');
+  process.stdout.write(`  ${startURL}\n\n`);
+  process.stdout.write("After they grant access the page will say 'Success'.\n");
+  process.stdout.write('Waiting…  (Ctrl-C to cancel; ~10 min timeout)\n');
+
+  const code = await pollOAuthFlow(sessionID, 10 * 60 * 1000);
+
+  // exchange code → refresh_token + access_token
+  const body = new URLSearchParams({
+    client_id: client.client_id,
+    client_secret: client.client_secret,
+    code,
+    grant_type: 'authorization_code',
+    redirect_uri: OAUTH_REDIRECT,
+  });
+  const res = await fetch(TOKEN_ENDPOINT, { method: 'POST', body });
+  const txt = await res.text();
+  if (!res.ok) bail(`token exchange failed (${res.status}): ${txt}`, 4);
+  const parsed = JSON.parse(txt);
+  if (!parsed.refresh_token) bail('Google did not return a refresh_token. Delete ~/cicy-ai/db/google.json and re-run.', 4);
+
+  // fetch authorized email via userinfo
+  let email = '';
+  try {
+    const ui = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { 'Authorization': `Bearer ${parsed.access_token}` },
+    });
+    if (ui.ok) email = (await ui.json())?.email || '';
+  } catch {}
+
+  const now = Math.floor(Date.now() / 1000);
+  saveState({
+    refresh_token: parsed.refresh_token,
+    access_token: parsed.access_token,
+    expires_at: now + (parsed.expires_in || 3600),
+    authorized_email: email,
+    authorized_at: new Date().toISOString(),
+  });
+  process.stdout.write(`✓ authorized as ${email || '(unknown)'}\n`);
+}
+
+async function pollOAuthFlow(sessionID, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let res;
+    try { res = await fetch(`${OAUTH_FLOW_BASE}/poll?session=${encodeURIComponent(sessionID)}`); }
+    catch { await sleep(2000); continue; }
+    if (res.ok) {
+      const body = await res.json();
+      if (body?.code) return body.code;
+      if (body?.error) throw Object.assign(new Error(`oauth-flow error: ${body.error}`), { exitCode: 4 });
+    }
+    await sleep(2000);
+  }
+  throw Object.assign(new Error('oauth-flow poll timeout'), { exitCode: 4 });
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+// ── gmail ───────────────────────────────────────────────────────────────
+
+async function runGmail(cmd, args) {
+  switch (cmd) {
+    case 'list':     await gmailList(args); return;
+    case 'read':     await gmailRead(args); return;
+    case 'read-all': await gmailReadAll(args); return;
+    case 'send':     await gmailSend(args); return;
+    case 'watch':    await gmailWatch(args); return;
+    default: printServiceHelp('gmail'); return;
+  }
+}
+
+async function gmailList(args) {
+  const f = parseFlags(args, { '-q': 'q', '--query': 'q', '--max': 'max' });
+  const query = f.q || 'in:inbox';
+  const max = parseInt(f.max || '10', 10);
+  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${max}&q=${encodeURIComponent(query)}`;
+  const data = await googleFetch('GET', url);
+  if (json) return ok(data);
+  const messages = data.messages || [];
+  if (messages.length === 0) { console.log('(no messages)'); return; }
+  for (const m of messages) console.log(m.id);
+}
+
+async function gmailRead(args) {
+  const id = args[0];
+  if (!id) bail('Usage: google gmail read <messageId>', 2);
+  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`;
+  const data = await googleFetch('GET', url);
+  const headers = (data.payload?.headers || []).reduce((acc, h) => ((acc[h.name.toLowerCase()] = h.value), acc), {});
+  const out = {
+    id: data.id,
+    threadId: data.threadId,
+    subject: headers.subject || '',
+    from: headers.from || '',
+    to: headers.to || '',
+    date: headers.date || '',
+    snippet: data.snippet || '',
+    body: extractGmailBody(data.payload),
+  };
+  if (json) return ok(out);
+  console.log(`Subject: ${out.subject}`);
+  console.log(`From:    ${out.from}`);
+  console.log(`To:      ${out.to}`);
+  console.log(`Date:    ${out.date}`);
+  console.log('---');
+  console.log(out.body || out.snippet);
+}
+
+async function gmailReadAll(args) {
+  // list → for each message read it; small max default to keep response sane
+  const f = parseFlags(args, { '-q': 'q', '--query': 'q', '--max': 'max' });
+  process.argv = []; // silence flag re-parse
+  const query = f.q || 'in:inbox';
+  const max = parseInt(f.max || '5', 10);
+  const list = await googleFetch('GET', `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${max}&q=${encodeURIComponent(query)}`);
+  const result = [];
+  for (const m of list.messages || []) {
+    const data = await googleFetch('GET', `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`);
+    const headers = (data.payload?.headers || []).reduce((acc, h) => ((acc[h.name.toLowerCase()] = h.value), acc), {});
+    result.push({
+      id: data.id,
+      subject: headers.subject || '',
+      from: headers.from || '',
+      date: headers.date || '',
+      snippet: data.snippet || '',
+      body: extractGmailBody(data.payload),
+    });
+  }
+  if (json) return ok(result);
+  for (const r of result) {
+    console.log(`──────── ${r.subject} ────────`);
+    console.log(`From: ${r.from} (${r.date})`);
+    console.log(r.body || r.snippet);
+    console.log('');
+  }
+}
+
+function extractGmailBody(payload) {
+  if (!payload) return '';
+  // recursive search for text/plain part
+  function walk(p) {
+    if (!p) return null;
+    if (p.mimeType === 'text/plain' && p.body?.data) return decodeB64Url(p.body.data);
+    for (const part of p.parts || []) {
+      const r = walk(part);
+      if (r) return r;
+    }
+    return null;
+  }
+  return walk(payload) || '';
+}
+
+function decodeB64Url(s) {
+  return Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+}
+
+async function gmailSend(args) {
+  const f = parseFlags(args, { '-t': 'to', '--to': 'to', '-s': 'subject', '--subject': 'subject', '-b': 'body', '--body': 'body', '-f': 'from', '--from': 'from' });
+  if (!f.to || !f.subject || !f.body) bail('Usage: google gmail send -t <to> -s <subject> -b <body> [-f <from>]', 2);
+  const lines = [];
+  if (f.from) lines.push(`From: ${f.from}`);
+  lines.push(`To: ${f.to}`);
+  lines.push(`Subject: ${f.subject}`);
+  lines.push('Content-Type: text/plain; charset="UTF-8"');
+  lines.push('MIME-Version: 1.0');
+  lines.push('');
+  lines.push(f.body);
+  const raw = Buffer.from(lines.join('\r\n')).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const data = await googleFetch('POST', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    body: { raw },
+  });
+  if (json) return ok(data);
+  console.log(`✓ sent: ${data.id}`);
+}
+
+async function gmailWatch(args) {
+  const f = parseFlags(args, { '-q': 'q', '--query': 'q', '--minutes': 'minutes' });
+  const query = f.q || 'is:unread';
+  const minutes = parseInt(f.minutes || '5', 10);
+  process.stdout.write(`watching for: ${query} (${minutes} min)\n`);
+  const seen = new Set();
+  const deadline = Date.now() + minutes * 60_000;
+  while (Date.now() < deadline) {
+    const list = await googleFetch('GET', `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&q=${encodeURIComponent(query)}`);
+    for (const m of list.messages || []) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      const data = await googleFetch('GET', `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`);
+      const headers = (data.payload?.headers || []).reduce((acc, h) => ((acc[h.name.toLowerCase()] = h.value), acc), {});
+      console.log(`[${new Date().toISOString()}] ${headers.subject || '(no subject)'} — ${headers.from || ''}`);
+    }
+    await sleep(15_000);
+  }
+}
+
+// ── sheets ──────────────────────────────────────────────────────────────
+
+async function runSheets(cmd, args) {
+  switch (cmd) {
+    case 'list':   await sheetsList(args); return;
+    case 'read':   await sheetsRead(args); return;
+    case 'write':  await sheetsWrite(args, false); return;
+    case 'append': await sheetsWrite(args, true); return;
+    case 'create': await sheetsCreate(args); return;
+    default: printServiceHelp('sheets'); return;
+  }
+}
+
+async function sheetsList(_args) {
+  // Drive API: list spreadsheets
+  const data = await googleFetch('GET', `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false")}&pageSize=50`);
+  const files = data.files || [];
+  if (json) return ok(files);
+  for (const f of files) console.log(`${f.id}\t${f.name}`);
+}
+
+async function sheetsRead(args) {
+  const [sid, range] = args;
+  if (!sid || !range) bail('Usage: google sheets read <spreadsheetId> "<range>"', 2);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(range)}`;
+  const data = await googleFetch('GET', url);
+  if (json) return ok(data);
+  for (const row of (data.values || [])) console.log(row.join('\t'));
+}
+
+async function sheetsWrite(args, append) {
+  const [sid, range, valuesJSON] = args;
+  if (!sid || !range || !valuesJSON) bail(`Usage: google sheets ${append ? 'append' : 'write'} <spreadsheetId> "<range>" '[["v"]]'`, 2);
+  let values;
+  try { values = JSON.parse(valuesJSON); } catch (e) { bail(`invalid values JSON: ${e.message}`, 2); }
+  if (!Array.isArray(values) || !values.every(Array.isArray)) bail('values must be a 2D array', 2);
+  const op = append ? 'append' : 'update';
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sid}/values/${encodeURIComponent(range)}:${op}?valueInputOption=USER_ENTERED${append ? '&insertDataOption=INSERT_ROWS' : ''}`;
+  const data = await googleFetch(append ? 'POST' : 'PUT', url, { body: { values } });
+  if (json) return ok(data);
+  console.log(`✓ ${op} ${sid} ${range}`);
+}
+
+async function sheetsCreate(args) {
+  const title = args.join(' ');
+  if (!title) bail('Usage: google sheets create "<title>"', 2);
+  const data = await googleFetch('POST', 'https://sheets.googleapis.com/v4/spreadsheets', { body: { properties: { title } } });
+  if (json) return ok(data);
+  console.log(`✓ created: ${data.spreadsheetId}`);
+  console.log(`  url: ${data.spreadsheetUrl}`);
+}
+
+// ── drive ───────────────────────────────────────────────────────────────
+
+async function runDrive(cmd, args) {
+  switch (cmd) {
+    case 'list':     await driveList(args); return;
+    case 'upload':   await driveUpload(args); return;
+    case 'download': await driveDownload(args); return;
+    case 'quota':    await driveQuota(); return;
+    default: printServiceHelp('drive'); return;
+  }
+}
+
+async function driveList(args) {
+  const f = parseFlags(args, { '-q': 'q', '--query': 'q', '--max': 'max' });
+  const query = f.q || "trashed=false";
+  const max = parseInt(f.max || '50', 10);
+  const data = await googleFetch('GET', `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&pageSize=${max}&fields=files(id,name,mimeType,size,modifiedTime)`);
+  if (json) return ok(data);
+  for (const f of data.files || []) console.log(`${f.id}\t${f.mimeType}\t${f.size || ''}\t${f.name}`);
+}
+
+async function driveUpload(args) {
+  const f = parseFlags(args, { '--name': 'name', '--mime': 'mime' });
+  const path = f._[0];
+  if (!path) bail('Usage: google drive upload <local_path> [--name N] [--mime M]', 2);
+  if (!existsSync(path)) bail(`file not found: ${path}`, 3);
+  const buf = readFileSync(path);
+  const meta = { name: f.name || basename(path) };
+  // multipart upload
+  const boundary = 'cicy-' + randomBytes(8).toString('hex');
+  const head = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: ${f.mime || 'application/octet-stream'}\r\n\r\n`;
+  const tail = `\r\n--${boundary}--`;
+  const body = Buffer.concat([Buffer.from(head), buf, Buffer.from(tail)]);
+  const data = await googleFetch('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  if (json) return ok(data);
+  console.log(`✓ uploaded: ${data.id} (${data.name})`);
+}
+
+async function driveDownload(args) {
+  const [fileID, dest] = args;
+  if (!fileID || !dest) bail('Usage: google drive download <fileId> <local_path>', 2);
+  const token = await getAccessToken();
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileID}?alt=media`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (!res.ok) bail(`download failed (${res.status}): ${await res.text()}`, 4);
+  const buf = Buffer.from(await res.arrayBuffer());
+  ensureDir(dirname(dest));
+  writeFileSync(dest, buf);
+  if (json) return ok({ saved: dest, bytes: buf.length });
+  console.log(`✓ saved ${buf.length} bytes → ${dest}`);
+}
+
+async function driveQuota() {
+  const data = await googleFetch('GET', 'https://www.googleapis.com/drive/v3/about?fields=storageQuota,user');
+  if (json) return ok(data);
+  const q = data.storageQuota || {};
+  const fmt = (n) => n ? `${(parseInt(n, 10) / 1024 / 1024 / 1024).toFixed(2)} GB` : '-';
+  console.log(`user:    ${data.user?.emailAddress || '?'}`);
+  console.log(`limit:   ${fmt(q.limit)}`);
+  console.log(`used:    ${fmt(q.usage)}`);
+  console.log(`drive:   ${fmt(q.usageInDrive)}`);
+  console.log(`trash:   ${fmt(q.usageInDriveTrash)}`);
+}
+
+// ── calendar ────────────────────────────────────────────────────────────
+
+async function runCalendar(cmd, args) {
+  switch (cmd) {
+    case 'list':   await calendarList(); return;
+    case 'events': await calendarEvents(args); return;
+    case 'create': await calendarCreate(args); return;
+    default: printServiceHelp('calendar'); return;
+  }
+}
+
+async function calendarList() {
+  const data = await googleFetch('GET', 'https://www.googleapis.com/calendar/v3/users/me/calendarList');
+  if (json) return ok(data);
+  for (const c of data.items || []) console.log(`${c.id}\t${c.summary}${c.primary ? ' (primary)' : ''}`);
+}
+
+async function calendarEvents(args) {
+  const f = parseFlags(args, { '--max': 'max', '--from': 'from', '--to': 'to' });
+  const calId = f._[0] || 'primary';
+  const max = parseInt(f.max || '20', 10);
+  const now = new Date().toISOString();
+  const weekLater = new Date(Date.now() + 7 * 86400_000).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?maxResults=${max}&singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(f.from || now)}&timeMax=${encodeURIComponent(f.to || weekLater)}`;
+  const data = await googleFetch('GET', url);
+  if (json) return ok(data);
+  for (const ev of data.items || []) {
+    const start = ev.start?.dateTime || ev.start?.date || '?';
+    console.log(`${start}\t${ev.summary || '(no title)'}`);
+  }
+}
+
+async function calendarCreate(args) {
+  const f = parseFlags(args, { '-s': 'summary', '--summary': 'summary', '-t': 'start', '--start': 'start', '-e': 'end', '--end': 'end', '-d': 'description', '--description': 'description' });
+  const calId = f._[0] || 'primary';
+  if (!f.summary || !f.start || !f.end) bail('Usage: google calendar create [calId] -s "<summary>" -t <ISO_start> -e <ISO_end> [-d "<descr>"]', 2);
+  const body = {
+    summary: f.summary,
+    description: f.description || '',
+    start: { dateTime: f.start },
+    end:   { dateTime: f.end },
+  };
+  const data = await googleFetch('POST', `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`, { body });
+  if (json) return ok(data);
+  console.log(`✓ created: ${data.id}`);
+  console.log(`  ${data.htmlLink || ''}`);
+}

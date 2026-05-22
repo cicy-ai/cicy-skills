@@ -1,0 +1,24 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "mysql-exec",
+  "version": "1.0.0",
+  "title": "MySQL Exec",
+  "description": "Run a one-shot SQL statement against the local cicy-mysql container via docker exec. Reads root password from ~/projects/cicy-code/.env.",
+  "category": "dev",
+  "tags": ["mysql", "database", "docker", "sql"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/mysql-exec",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": ["docker"],
+  "npm_dependencies": false,
+  "entry": "bin/mysql-exec",
+  "permissions": ["filesystem:home", "process:spawn"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

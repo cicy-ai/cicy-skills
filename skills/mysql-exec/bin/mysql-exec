@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+// mysql-exec — run a one-shot SQL against the local cicy-mysql container via
+// `docker exec`. Reads MYSQL_ROOT_PASSWORD from ~/projects/cicy-code/.env.
+
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+const rest = argv.filter((a) => a !== '--json');
+
+const ENV_PATH = process.env.CICY_CODE_ENV || join(homedir(), 'projects', 'cicy-code', '.env');
+const CONTAINER = process.env.CICY_MYSQL_CONTAINER || 'cicy-mysql';
+const DEFAULT_DB = process.env.CICY_MYSQL_DB || 'cicy_code';
+
+try {
+  if (rest.length < 1) bail('Usage: mysql-exec "SQL" [database]', 2);
+  const sql = rest[0];
+  const db = rest[1] || DEFAULT_DB;
+
+  const password = readEnvValue(ENV_PATH, 'MYSQL_ROOT_PASSWORD');
+  if (!password) bail(`MYSQL_ROOT_PASSWORD not found in ${ENV_PATH}`, 3);
+
+  // Use array-based exec (no shell interpolation of the password)
+  const args = [
+    'exec', '-i', CONTAINER,
+    'mysql', `-u`, 'root', `-p${password}`, db, '-e', sql,
+  ];
+  const result = spawnSync('docker', args, { encoding: 'utf8' });
+  if (result.error) bail(`spawn docker failed: ${result.error.message}`, 3);
+
+  const stdout = (result.stdout || '');
+  const stderr = (result.stderr || '');
+
+  // mysql 8 prints "[Warning] Using a password on the command line interface can be insecure."
+  // to stderr. Filter that line out, but keep real errors.
+  const filteredStderr = stderr.split('\n')
+    .filter((line) => !/Using a password on the command line/.test(line))
+    .join('\n')
+    .trim();
+
+  if (result.status !== 0) {
+    bail(filteredStderr || stdout || `mysql exited ${result.status}`, 4);
+  }
+
+  if (json) {
+    console.log(JSON.stringify({ ok: true, data: { stdout, db, container: CONTAINER, sql } }));
+  } else {
+    process.stdout.write(stdout);
+    if (filteredStderr) process.stderr.write(filteredStderr + '\n');
+  }
+} catch (e) {
+  bail(e.message, e.exitCode || 1);
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`mysql-exec: ${msg}\n`);
+  process.exit(code);
+}
+
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('Usage: mysql-exec "SQL" [database]\n'); }
+}
+
+function readEnvValue(path, key) {
+  if (!existsSync(path)) return '';
+  const text = readFileSync(path, 'utf8');
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 0) continue;
+    if (line.slice(0, eq).trim() !== key) continue;
+    let v = line.slice(eq + 1).trim();
+    // strip surrounding single or double quotes
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    return v;
+  }
+  return '';
+}
