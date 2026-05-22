@@ -1,0 +1,79 @@
+#!/usr/bin/env node
+// skill-template — replace with your skill's logic.
+// Zero npm dependencies. Pure ESM. Node 18+.
+
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const NAME = 'skill-template';
+const DB_DIR = process.env.CICY_DB_OVERRIDE || join(homedir(), 'cicy-ai/db');
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+function die(message, code = 1) {
+  process.stderr.write(`${NAME}: ${message}\n`);
+  process.exit(code);
+}
+
+function emit(obj, json) {
+  if (json) {
+    process.stdout.write(JSON.stringify(obj) + '\n');
+  } else {
+    if (obj.ok) process.stdout.write((obj.message || JSON.stringify(obj.data)) + '\n');
+    else process.stderr.write(`error: ${obj.error.message}\n`);
+  }
+}
+
+function loadDB(name) {
+  try {
+    return JSON.parse(readFileSync(join(DB_DIR, `${name}.json`), 'utf8'));
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    die(`failed to read ${name}.json: ${e.message}`, 3);
+  }
+}
+
+// ── command parsing ────────────────────────────────────────────────────────
+
+const argv = process.argv.slice(2);
+const json = argv.includes('--json');
+const args = argv.filter((a) => a !== '--json');
+const cmd = args[0];
+
+// ── commands ───────────────────────────────────────────────────────────────
+
+async function cmdHelp() {
+  const help = readFileSync(new URL('../help.md', import.meta.url), 'utf8');
+  process.stdout.write(help);
+}
+
+async function cmdDoSomething() {
+  // replace with real logic
+  emit({ ok: true, data: { message: 'hello from skill-template' } }, json);
+}
+
+// ── dispatch ───────────────────────────────────────────────────────────────
+
+const commands = {
+  '--help': cmdHelp,
+  '-h': cmdHelp,
+  help: cmdHelp,
+  'do-something': cmdDoSomething,
+};
+
+const fn = commands[cmd];
+if (!fn) {
+  emit(
+    { ok: false, error: { code: 'INVALID_COMMAND', message: `unknown command: ${cmd ?? '(none)'}. Try --help.` } },
+    json,
+  );
+  process.exit(2);
+}
+
+try {
+  await fn();
+} catch (e) {
+  emit({ ok: false, error: { code: 'INTERNAL', message: e.message } }, json);
+  process.exit(1);
+}

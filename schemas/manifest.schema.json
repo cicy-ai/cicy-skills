@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "title": "Cicy Skill Manifest",
+  "description": "Schema for skills/<name>/manifest.json — see docs/skills-v2-manifest.md in cicy-code repo for details.",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "title",
+    "description",
+    "category",
+    "author",
+    "license",
+    "runtime",
+    "entry"
+  ],
+  "properties": {
+    "$schema": { "type": "string", "format": "uri" },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "maxLength": 64,
+      "description": "skill identifier; must equal directory name"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[A-Za-z0-9.-]+)?(\\+[A-Za-z0-9.-]+)?$",
+      "description": "Strict SemVer 2.0.0"
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "category": {
+      "type": "string",
+      "enum": [
+        "network",
+        "cloud",
+        "ai",
+        "dev",
+        "system",
+        "productivity",
+        "agent",
+        "infra",
+        "other"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "author": { "type": "string", "minLength": 1 },
+    "homepage": { "type": "string", "format": "uri" },
+    "license": { "type": "string", "minLength": 1 },
+    "runtime": {
+      "type": "object",
+      "required": ["node"],
+      "properties": {
+        "node": { "type": "string", "description": "semver range, e.g. '>=18'" }
+      },
+      "additionalProperties": false
+    },
+    "system_requirements": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
+      "default": []
+    },
+    "npm_dependencies": { "type": "boolean", "default": false },
+    "entry": {
+      "type": "string",
+      "pattern": "^bin/",
+      "description": "path relative to skill root, must start with bin/"
+    },
+    "bin_aliases": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+      "default": []
+    },
+    "config": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^~/cicy-ai/db/",
+          "description": "config file path; must be under ~/cicy-ai/db/"
+        },
+        "permissions": {
+          "type": "string",
+          "pattern": "^0[0-7]{3}$",
+          "default": "0600"
+        },
+        "secret_fields": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "schema": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "network",
+          "network:cicy-code",
+          "filesystem:home",
+          "filesystem:db",
+          "filesystem:tmp",
+          "process:spawn",
+          "process:tmux",
+          "system:exec"
+        ]
+      },
+      "default": []
+    },
+    "compatible_agents": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["*"]
+    },
+    "files": {
+      "type": "object",
+      "properties": {
+        "skill_md": { "type": "string" },
+        "help_md": { "type": "string" },
+        "tools_md": { "type": "string" },
+        "readme": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "publish": {
+      "type": "object",
+      "description": "auto-injected by publish pipeline; do not write by hand",
+      "properties": {
+        "published_at": { "type": "string", "format": "date-time" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size": { "type": "integer", "minimum": 0 },
+        "download_url": { "type": "string", "format": "uri" },
+        "source": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["github", "url", "git"] },
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "commit": { "type": "string", "pattern": "^[a-f0-9]{7,64}$" }
+          },
+          "additionalProperties": false
+        },
+        "signature": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

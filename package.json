@@ -1,0 +1,20 @@
+{
+  "name": "cicy-skills",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cicy Skills monorepo — Node.js source-only skills",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "validate": "node tools/validate-skill.js",
+    "validate:all": "node tools/validate-all.js",
+    "pack": "node tools/pack-skill.js",
+    "publish:skill": "node tools/publish.js"
+  },
+  "workspaces": [
+    "skills/*"
+  ]
+}

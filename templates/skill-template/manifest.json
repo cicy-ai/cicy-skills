@@ -1,0 +1,23 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "skill-template",
+  "version": "0.1.0",
+  "title": "Skill Template",
+  "description": "Template scaffold for authoring a new cicy skill. Replace fields before publishing.",
+  "category": "other",
+  "tags": [],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/skill-template",
+  "permissions": [],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "help.md",
+    "tools_md": "tools.md",
+    "readme": "README.md"
+  }
+}
