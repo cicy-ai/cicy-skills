@@ -1,0 +1,29 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "globalApiToken",
+  "version": "1.0.0",
+  "title": "Global API Token",
+  "description": "Show or refresh the api_token in ~/cicy-ai/global.json on this host.",
+  "category": "system",
+  "tags": ["token", "auth", "config"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/globalApiToken",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/globalApiToken",
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "permissions": "0600",
+    "secret_fields": ["api_token"]
+  },
+  "permissions": ["filesystem:home", "filesystem:db"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

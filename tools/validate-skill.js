@@ -208,11 +208,11 @@ if (totalSize > MAX_SOURCE_BYTES) {
   );
 }
 
-// 10. config.path must be under ~/cicy-ai/db/
-if (manifest.config?.path && !manifest.config.path.startsWith('~/cicy-ai/db/')) {
+// 10. config.path must be under ~/cicy-ai/
+if (manifest.config?.path && !manifest.config.path.startsWith('~/cicy-ai/')) {
   err(
     'BAD_CONFIG_PATH',
-    `config.path "${manifest.config.path}" must start with "~/cicy-ai/db/"`,
+    `config.path "${manifest.config.path}" must start with "~/cicy-ai/"`,
   );
 }
 

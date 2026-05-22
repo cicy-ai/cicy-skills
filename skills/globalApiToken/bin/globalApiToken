@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+// globalApiToken — show / refresh ~/cicy-ai/global.json api_token.
+// Zero npm dependencies. Pure ESM. Node 18+.
+
+import { readFileSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+const PATH = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+
+const argv = process.argv.slice(2);
+const json = argv.includes('--json');
+
+// help flags must short-circuit before we try to read any files
+if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write('globalApiToken <show|refresh> [--json]\n');
+  }
+  process.exit(0);
+}
+
+const cmd = argv.find((a) => !a.startsWith('--')) || 'show';
+
+function emit(obj, ok = true) {
+  if (json) {
+    process.stdout.write(JSON.stringify({ ok, data: obj }) + '\n');
+  } else {
+    process.stdout.write((typeof obj === 'string' ? obj : JSON.stringify(obj)) + '\n');
+  }
+}
+
+function bail(code, message, exit = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message } }) + '\n');
+  else process.stderr.write(`globalApiToken: ${message}\n`);
+  process.exit(exit);
+}
+
+function readGlobal() {
+  if (!existsSync(PATH)) return null;
+  try {
+    return JSON.parse(readFileSync(PATH, 'utf8'));
+  } catch (e) {
+    bail('CORRUPT', `cannot parse ${PATH}: ${e.message}`, 1);
+  }
+}
+
+function writeGlobal(obj) {
+  writeFileSync(PATH, JSON.stringify(obj, null, 2) + '\n', { mode: 0o600 });
+  try { chmodSync(PATH, 0o600); } catch {}
+}
+
+function newToken() {
+  return randomBytes(32).toString('base64url');
+}
+
+switch (cmd) {
+  case 'show': {
+    const g = readGlobal();
+    if (!g) bail('NOT_FOUND', `${PATH} does not exist`, 3);
+    if (!g.api_token) bail('MISSING_FIELD', `api_token missing in ${PATH}`, 3);
+    emit(g.api_token);
+    break;
+  }
+  case 'refresh': {
+    const g = readGlobal() || {};
+    g.api_token = newToken();
+    writeGlobal(g);
+    emit({ api_token: g.api_token, path: PATH, refreshed_at: new Date().toISOString() });
+    break;
+  }
+  case '--help':
+  case '-h':
+  case 'help': {
+    // already handled above; this branch is unreachable but kept for clarity
+    break;
+  }
+  default:
+    bail('INVALID_COMMAND', `unknown command: ${cmd}. Try --help.`, 2);
+}

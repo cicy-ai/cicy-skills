@@ -19,7 +19,7 @@
     "$schema": { "type": "string", "format": "uri" },
     "name": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_-]*$",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
       "maxLength": 64,
       "description": "skill identifier; must equal directory name"
     },
@@ -82,8 +82,8 @@
       "properties": {
         "path": {
           "type": "string",
-          "pattern": "^~/cicy-ai/db/",
-          "description": "config file path; must be under ~/cicy-ai/db/"
+          "pattern": "^~/cicy-ai/",
+          "description": "config file path; must be under ~/cicy-ai/ (typically ~/cicy-ai/db/<name>.json)"
         },
         "permissions": {
           "type": "string",
