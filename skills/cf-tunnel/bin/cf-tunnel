@@ -1,0 +1,406 @@
+#!/usr/bin/env node
+// cf-tunnel — manage Cloudflare Tunnel routes and DNS records.
+// Subcommands: config / status / list / add / del.
+// Zero npm dependencies. Pure ESM. Node 18+.
+
+import { readFileSync, writeFileSync, existsSync, statSync, chmodSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { spawn } from 'node:child_process';
+
+const CONFIG_PATH = process.env.CICY_CF_CONFIG || join(homedir(), 'cicy-ai', 'db', 'cf.json');
+const CF_API = 'https://api.cloudflare.com/client/v4';
+const ENV = process.env.CF_ENV || 'prod';
+const REQUIRED_FIELDS = ['api_token', 'account_id', 'tunnel_id', 'domain', 'zone_id'];
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const cmd = argv[0];
+
+try {
+  switch (cmd) {
+    case 'config': await cmdConfig(); break;
+    case 'status': await cmdStatus(); break;
+    case 'list':   await cmdList(); break;
+    case 'add':    await cmdAdd(argv.slice(1)); break;
+    case 'del':    await cmdDel(argv.slice(1)); break;
+    default: bail(`unknown command: ${cmd}. Try cf-tunnel --help.`, 2);
+  }
+} catch (e) {
+  bail(e.message, e.exitCode || 1);
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  process.stderr.write(`cf-tunnel: ${msg}\n`);
+  process.exit(code);
+}
+
+function printHelp() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write(`Usage:
+  cf-tunnel config
+  cf-tunnel status [--json]
+  cf-tunnel list [--json]
+  cf-tunnel add <port> [<port> ...]
+  cf-tunnel del <port> [<port> ...]
+  CF_ENV=dev cf-tunnel ...
+`);
+  }
+}
+
+function readEnvCfg() {
+  if (!existsSync(CONFIG_PATH)) {
+    throw Object.assign(new Error(`config missing: ${CONFIG_PATH} — run 'cf-tunnel config'`), { exitCode: 3 });
+  }
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+  } catch (e) {
+    throw Object.assign(new Error(`parse ${CONFIG_PATH}: ${e.message}`), { exitCode: 1 });
+  }
+  // Accept either nested {prod:{...}} OR flat {api_token,...} (cf-skill style)
+  let block;
+  if (raw[ENV] && typeof raw[ENV] === 'object') {
+    block = raw[ENV];
+  } else if (ENV === 'prod' && raw.api_token) {
+    // flat form (cf skill) — synthesize a prod block from top-level fields
+    block = raw;
+  } else {
+    throw Object.assign(new Error(`config has no '${ENV}' block`), { exitCode: 3 });
+  }
+  for (const f of REQUIRED_FIELDS) {
+    const v = block[f];
+    if (!v || (typeof v === 'string' && v.startsWith('<paste'))) {
+      throw Object.assign(
+        new Error(`${ENV}.${f} missing or placeholder in ${CONFIG_PATH}`),
+        { exitCode: 3 },
+      );
+    }
+  }
+  return block;
+}
+
+function ensurePlaceholderConfig() {
+  if (existsSync(CONFIG_PATH)) {
+    // merge: keep existing, ensure prod block has all fields
+    let raw;
+    try {
+      raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+    } catch {
+      raw = {};
+    }
+    if (!raw.prod || typeof raw.prod !== 'object') {
+      // promote flat form to nested if needed
+      if (raw.api_token) {
+        raw = { prod: { ...raw } };
+      } else {
+        raw.prod = {};
+      }
+    }
+    for (const f of REQUIRED_FIELDS) {
+      if (raw.prod[f] === undefined) raw.prod[f] = `<paste-your-${f.replace(/_/g, '-')}-here>`;
+    }
+    writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
+    try { chmodSync(CONFIG_PATH, 0o600); } catch {}
+    return false; // not fresh
+  }
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true, mode: 0o700 });
+  const tmpl = {
+    prod: Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, `<paste-your-${f.replace(/_/g, '-')}-here>`])),
+  };
+  writeFileSync(CONFIG_PATH, JSON.stringify(tmpl, null, 2) + '\n', { mode: 0o600 });
+  try { chmodSync(CONFIG_PATH, 0o600); } catch {}
+  return true; // fresh
+}
+
+function maskToken(t) {
+  if (!t) return '';
+  if (t.length <= 8) return '***';
+  return t.slice(0, 4) + '***' + t.slice(-4);
+}
+
+async function cfFetch(path, init = {}, cfg) {
+  const url = CF_API + path;
+  const headers = {
+    'Authorization': `Bearer ${cfg.api_token}`,
+    'Content-Type': 'application/json',
+    ...(init.headers || {}),
+  };
+  const res = await fetch(url, { ...init, headers });
+  const text = await res.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
+  if (!res.ok || payload.success === false) {
+    const errMsg = payload.errors?.map((e) => e.message).join('; ') || res.statusText || 'unknown';
+    throw Object.assign(new Error(`CF API ${init.method || 'GET'} ${path}: ${errMsg}`), { exitCode: 4, response: payload });
+  }
+  return payload;
+}
+
+// ── config ──────────────────────────────────────────────────────────────
+
+async function cmdConfig() {
+  const fresh = ensurePlaceholderConfig();
+  console.log(fresh ? `created placeholder: ${CONFIG_PATH}` : `ensured prod block in: ${CONFIG_PATH}`);
+  const editor = process.env.EDITOR || process.env.VISUAL || 'nano';
+  console.log(`opening ${CONFIG_PATH} in ${editor} ...`);
+  await runChild(editor, [CONFIG_PATH]);
+}
+
+// ── status ──────────────────────────────────────────────────────────────
+
+async function cmdStatus() {
+  const out = {
+    env: ENV,
+    config_path: CONFIG_PATH,
+    exists: existsSync(CONFIG_PATH),
+    permissions: null,
+    fields: {},
+    api_token_masked: '',
+  };
+  if (out.exists) {
+    try {
+      const m = statSync(CONFIG_PATH).mode & 0o777;
+      out.permissions = '0' + m.toString(8);
+    } catch {}
+    try {
+      const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+      const block = (raw[ENV] && typeof raw[ENV] === 'object') ? raw[ENV] :
+                    (ENV === 'prod' && raw.api_token) ? raw : null;
+      if (block) {
+        for (const f of REQUIRED_FIELDS) {
+          const v = block[f];
+          out.fields[f] = !!(v && !(typeof v === 'string' && v.startsWith('<paste')));
+        }
+        if (out.fields.api_token) out.api_token_masked = maskToken(block.api_token);
+      } else {
+        out.error = `no '${ENV}' block`;
+      }
+    } catch (e) {
+      out.error = e.message;
+    }
+  }
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({ ok: true, data: out }));
+  } else {
+    console.log(`env:          ${out.env}`);
+    console.log(`config:       ${out.config_path}`);
+    console.log(`exists:       ${out.exists}`);
+    console.log(`permissions:  ${out.permissions || '(n/a)'}`);
+    for (const f of REQUIRED_FIELDS) {
+      const masked = f === 'api_token' && out.api_token_masked ? `  [${out.api_token_masked}]` : '';
+      console.log(`${(f + ':').padEnd(14)}${out.fields[f] ? '✓' : '(missing)'}${masked}`);
+    }
+    if (out.error) console.log(`error:        ${out.error}`);
+  }
+}
+
+// ── list ────────────────────────────────────────────────────────────────
+
+async function cmdList() {
+  const cfg = readEnvCfg();
+  const json = argv.includes('--json');
+
+  // Get tunnel ingress config
+  const cfgPayload = await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel/${cfg.tunnel_id}/configurations`,
+    {}, cfg,
+  );
+  const ingress = cfgPayload.result?.config?.ingress || [];
+
+  // Get DNS records matching g-*.<domain>
+  const dnsPayload = await cfFetch(
+    `/zones/${cfg.zone_id}/dns_records?per_page=200`,
+    {}, cfg,
+  );
+  const records = (dnsPayload.result || []).filter(
+    (r) => r.type === 'CNAME' && /^g-\d+\./.test(r.name) && r.name.endsWith('.' + cfg.domain),
+  );
+
+  const routes = [];
+  for (const r of ingress) {
+    const m = (r.hostname || '').match(/^g-(\d+)\./);
+    if (!m) continue;
+    routes.push({
+      port: parseInt(m[1], 10),
+      hostname: r.hostname,
+      service: r.service,
+    });
+  }
+  routes.sort((a, b) => a.port - b.port);
+
+  if (json) {
+    console.log(JSON.stringify({ ok: true, data: { env: ENV, domain: cfg.domain, routes, dns_count: records.length } }));
+    return;
+  }
+  if (routes.length === 0) {
+    console.log(`(no g-*.${cfg.domain} routes)`);
+    return;
+  }
+  console.log(`PORT   HOSTNAME${' '.repeat(40 - 'HOSTNAME'.length)}SERVICE`);
+  console.log('-'.repeat(80));
+  for (const r of routes) {
+    console.log(`${String(r.port).padEnd(6)} ${r.hostname.padEnd(40)} ${r.service}`);
+  }
+  console.log(`\n${routes.length} route(s) in ${ENV}.`);
+}
+
+// ── add ────────────────────────────────────────────────────────────────
+
+async function cmdAdd(args) {
+  const ports = parsePorts(args);
+  if (ports.length === 0) bail('usage: cf-tunnel add <port> [<port> ...]', 2);
+  const cfg = readEnvCfg();
+
+  // 1. fetch current ingress
+  const cfgPayload = await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel/${cfg.tunnel_id}/configurations`,
+    {}, cfg,
+  );
+  const config = cfgPayload.result?.config || {};
+  const ingress = (config.ingress || []).filter((r) => r.hostname); // preserve typed rules
+  const fallback = (cfgPayload.result?.config?.ingress || []).find((r) => !r.hostname) || { service: 'http_status:404' };
+
+  const added = [];
+  for (const port of ports) {
+    const hostname = `g-${port}.${cfg.domain}`;
+    const service = `http://localhost:${port}`;
+    // remove any existing rule for this hostname
+    const filtered = ingress.filter((r) => r.hostname !== hostname);
+    filtered.push({ hostname, service });
+    ingress.length = 0;
+    ingress.push(...filtered);
+    added.push({ port, hostname, service });
+  }
+
+  // PUT updated ingress (must include catch-all)
+  const newConfig = { ...config, ingress: [...ingress, fallback] };
+  await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel/${cfg.tunnel_id}/configurations`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ config: newConfig }),
+    },
+    cfg,
+  );
+
+  // 2. ensure DNS CNAMEs (proxied) point to <tunnel_id>.cfargotunnel.com
+  const cnameTarget = `${cfg.tunnel_id}.cfargotunnel.com`;
+  const dnsPayload = await cfFetch(`/zones/${cfg.zone_id}/dns_records?per_page=200`, {}, cfg);
+  const existing = dnsPayload.result || [];
+
+  for (const a of added) {
+    const cur = existing.find((r) => r.name === a.hostname);
+    if (cur) {
+      if (cur.content !== cnameTarget || cur.type !== 'CNAME' || !cur.proxied) {
+        await cfFetch(`/zones/${cfg.zone_id}/dns_records/${cur.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ type: 'CNAME', name: a.hostname, content: cnameTarget, proxied: true }),
+        }, cfg);
+        a.dns = 'updated';
+      } else {
+        a.dns = 'already';
+      }
+    } else {
+      await cfFetch(`/zones/${cfg.zone_id}/dns_records`, {
+        method: 'POST',
+        body: JSON.stringify({ type: 'CNAME', name: a.hostname, content: cnameTarget, proxied: true, ttl: 1 }),
+      }, cfg);
+      a.dns = 'created';
+    }
+  }
+
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({ ok: true, data: { env: ENV, added } }));
+  } else {
+    for (const a of added) {
+      console.log(`✓ ${a.hostname} → ${a.service}  (dns: ${a.dns})`);
+    }
+  }
+}
+
+// ── del ────────────────────────────────────────────────────────────────
+
+async function cmdDel(args) {
+  const ports = parsePorts(args);
+  if (ports.length === 0) bail('usage: cf-tunnel del <port> [<port> ...]', 2);
+  const cfg = readEnvCfg();
+
+  const cfgPayload = await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel/${cfg.tunnel_id}/configurations`,
+    {}, cfg,
+  );
+  const config = cfgPayload.result?.config || {};
+  const ingress = config.ingress || [];
+
+  const removed = [];
+  const fallback = ingress.find((r) => !r.hostname);
+  let kept = ingress.filter((r) => r.hostname);
+  for (const port of ports) {
+    const hostname = `g-${port}.${cfg.domain}`;
+    const before = kept.length;
+    kept = kept.filter((r) => r.hostname !== hostname);
+    if (before !== kept.length) {
+      removed.push({ port, hostname });
+    }
+  }
+
+  const newConfig = { ...config, ingress: [...kept, fallback || { service: 'http_status:404' }] };
+  await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel/${cfg.tunnel_id}/configurations`,
+    { method: 'PUT', body: JSON.stringify({ config: newConfig }) },
+    cfg,
+  );
+
+  // remove DNS records
+  const dnsPayload = await cfFetch(`/zones/${cfg.zone_id}/dns_records?per_page=200`, {}, cfg);
+  const existing = dnsPayload.result || [];
+  for (const r of removed) {
+    const cur = existing.find((x) => x.name === r.hostname);
+    if (cur) {
+      await cfFetch(`/zones/${cfg.zone_id}/dns_records/${cur.id}`, { method: 'DELETE' }, cfg);
+      r.dns = 'deleted';
+    } else {
+      r.dns = 'absent';
+    }
+  }
+
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({ ok: true, data: { env: ENV, removed } }));
+  } else {
+    if (removed.length === 0) console.log('(nothing to remove)');
+    for (const r of removed) {
+      console.log(`✗ ${r.hostname}  (dns: ${r.dns})`);
+    }
+  }
+}
+
+// ── helpers ────────────────────────────────────────────────────────────
+
+function parsePorts(args) {
+  const ports = [];
+  for (const a of args) {
+    if (a.startsWith('--')) continue;
+    const n = parseInt(a, 10);
+    if (Number.isNaN(n) || n < 1 || n > 65535) bail(`invalid port: ${a}`, 2);
+    ports.push(n);
+  }
+  return ports;
+}
+
+function runChild(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: 'inherit', ...opts });
+    child.on('error', (e) => reject(new Error(`spawn ${cmd}: ${e.message}`)));
+    child.on('exit', (code) => code === 0 ? resolve() : reject(Object.assign(new Error(`${cmd} exited ${code}`), { exitCode: code })));
+  });
+}

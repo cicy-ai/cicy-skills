@@ -1,0 +1,29 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cicy-todo",
+  "version": "1.0.0",
+  "title": "Cicy Todo",
+  "description": "Per-workspace todo list (todo/doing/done/dropped) backed by /api/todo on the local cicy-code server.",
+  "category": "dev",
+  "tags": ["todo", "task", "workspace"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-todo",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/cicy-todo",
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "permissions": "0600",
+    "secret_fields": ["api_token"]
+  },
+  "permissions": ["network:cicy-code"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

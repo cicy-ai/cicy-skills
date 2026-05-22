@@ -1,0 +1,215 @@
+#!/usr/bin/env node
+// email — Resend transactional email wrapper. Subcommands: config / status / send.
+// Zero npm dependencies. Pure ESM. Node 18+.
+
+import { readFileSync, writeFileSync, existsSync, statSync, chmodSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { spawn } from 'node:child_process';
+
+const CONFIG_PATH = process.env.CICY_EMAIL_CONFIG || join(homedir(), 'cicy-ai', 'db', 'email.json');
+const RESEND_API = 'https://api.resend.com/emails';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const cmd = argv[0];
+
+try {
+  switch (cmd) {
+    case 'config': await cmdConfig(); break;
+    case 'status': await cmdStatus(); break;
+    case 'send':   await cmdSend(argv.slice(1)); break;
+    default: bail(`unknown command: ${cmd}. Try email --help.`, 2);
+  }
+} catch (e) {
+  bail(e.message, e.exitCode || 1);
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  process.stderr.write(`email: ${msg}\n`);
+  process.exit(code);
+}
+
+function printHelp() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write(`Usage:
+  email config
+  email status [--json]
+  email send --to <addr> --subject <s> [--body <text>|--html <html>] [--from <addr>]
+`);
+  }
+}
+
+function readConfig() {
+  if (!existsSync(CONFIG_PATH)) {
+    const e = new Error(`config missing: ${CONFIG_PATH} — run 'email config'`);
+    e.exitCode = 3;
+    throw e;
+  }
+  let cfg;
+  try {
+    cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+  } catch (e) {
+    throw Object.assign(new Error(`parse ${CONFIG_PATH}: ${e.message}`), { exitCode: 1 });
+  }
+  if (!cfg.api_key || cfg.api_key.startsWith('<paste')) {
+    throw Object.assign(new Error(`api_key missing or placeholder in ${CONFIG_PATH}`), { exitCode: 3 });
+  }
+  if (!cfg.from_address || cfg.from_address.startsWith('<paste')) {
+    throw Object.assign(new Error(`from_address missing or placeholder in ${CONFIG_PATH}`), { exitCode: 3 });
+  }
+  return cfg;
+}
+
+function writePlaceholder() {
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true, mode: 0o700 });
+  const tmpl = {
+    api_key:      '<paste-your-resend-api-key-here>',
+    from_address: '<paste-your-verified-from-address-here>',
+    default_to:   '',
+  };
+  writeFileSync(CONFIG_PATH, JSON.stringify(tmpl, null, 2) + '\n', { mode: 0o600 });
+  try { chmodSync(CONFIG_PATH, 0o600); } catch {}
+}
+
+function maskKey(k) {
+  if (!k) return '';
+  if (k.length <= 8) return '***';
+  return k.slice(0, 4) + '***' + k.slice(-4);
+}
+
+// ── config ──────────────────────────────────────────────────────────────
+
+async function cmdConfig() {
+  if (!existsSync(CONFIG_PATH)) {
+    writePlaceholder();
+    console.log(`created placeholder: ${CONFIG_PATH}`);
+  }
+  const editor = process.env.EDITOR || process.env.VISUAL || 'nano';
+  console.log(`opening ${CONFIG_PATH} in ${editor} ...`);
+  await runChild(editor, [CONFIG_PATH]);
+}
+
+// ── status ──────────────────────────────────────────────────────────────
+
+async function cmdStatus() {
+  const status = {
+    config_path: CONFIG_PATH,
+    exists: existsSync(CONFIG_PATH),
+    permissions: null,
+    api_key_set: false,
+    from_address_set: false,
+    default_to: null,
+    api_key_masked: '',
+  };
+  if (status.exists) {
+    try {
+      const m = statSync(CONFIG_PATH).mode & 0o777;
+      status.permissions = '0' + m.toString(8);
+    } catch {}
+    try {
+      const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+      const isPlaceholder = (v) => typeof v === 'string' && v.startsWith('<paste');
+      status.api_key_set = !!(cfg.api_key && !isPlaceholder(cfg.api_key));
+      status.from_address_set = !!(cfg.from_address && !isPlaceholder(cfg.from_address));
+      status.default_to = cfg.default_to || null;
+      if (status.api_key_set) status.api_key_masked = maskKey(cfg.api_key);
+    } catch (e) {
+      status.error = e.message;
+    }
+  }
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({ ok: true, data: status }));
+  } else {
+    console.log(`config:       ${status.config_path}`);
+    console.log(`exists:       ${status.exists}`);
+    console.log(`permissions:  ${status.permissions || '(n/a)'}`);
+    console.log(`api_key:      ${status.api_key_set ? status.api_key_masked : '(missing)'}`);
+    console.log(`from_address: ${status.from_address_set ? '(set)' : '(missing)'}`);
+    if (status.default_to) console.log(`default_to:   ${status.default_to}`);
+    if (status.error) console.log(`error:        ${status.error}`);
+  }
+}
+
+// ── send ────────────────────────────────────────────────────────────────
+
+async function cmdSend(args) {
+  const flags = parseFlags(args);
+  const cfg = readConfig();
+
+  let toRaw = flags.to || cfg.default_to;
+  if (!toRaw) bail('--to required (or set default_to in config)', 2);
+  const to = toRaw.split(',').map((s) => s.trim()).filter(Boolean);
+
+  if (!flags.subject) bail('--subject required', 2);
+
+  const body = {
+    from: flags.from || cfg.from_address,
+    to,
+    subject: flags.subject,
+  };
+  if (flags.html) body.html = flags.html;
+  else if (flags.body) body.text = flags.body;
+  else bail('one of --body or --html required', 2);
+
+  const res = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${cfg.api_key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
+
+  if (!res.ok) {
+    if (flags.json) console.log(JSON.stringify({ ok: false, status: res.status, response: payload }));
+    else process.stderr.write(`send failed (${res.status}): ${text}\n`);
+    process.exit(4);
+  }
+
+  if (flags.json) {
+    console.log(JSON.stringify({ ok: true, data: payload }));
+  } else {
+    console.log(`✓ sent. id=${payload.id || '?'}`);
+  }
+}
+
+function parseFlags(args) {
+  const out = { json: false };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json') out.json = true;
+    else if (a.startsWith('--')) {
+      const key = a.slice(2);
+      const next = args[i + 1];
+      if (next === undefined || next.startsWith('--')) {
+        out[key] = true;
+      } else {
+        out[key] = next;
+        i++;
+      }
+    }
+  }
+  return out;
+}
+
+function runChild(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: 'inherit', ...opts });
+    child.on('error', (e) => reject(new Error(`spawn ${cmd}: ${e.message}`)));
+    child.on('exit', (code) => code === 0 ? resolve() : reject(Object.assign(new Error(`${cmd} exited ${code}`), { exitCode: code })));
+  });
+}

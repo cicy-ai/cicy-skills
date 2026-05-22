@@ -1,0 +1,29 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cf",
+  "version": "1.0.0",
+  "title": "Cloudflare API",
+  "description": "Secure Cloudflare API wrapper. Use cf curl to call any endpoint without exposing the api_token.",
+  "category": "cloud",
+  "tags": ["cloudflare", "api", "curl"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cf",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/cf",
+  "config": {
+    "path": "~/cicy-ai/db/cf.json",
+    "permissions": "0600",
+    "secret_fields": ["api_token", "account_id"]
+  },
+  "permissions": ["network", "filesystem:db"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

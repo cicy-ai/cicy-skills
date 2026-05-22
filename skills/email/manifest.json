@@ -1,0 +1,29 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "email",
+  "version": "1.0.0",
+  "title": "Email (Resend)",
+  "description": "Send transactional email from this host via Resend. Subcommands: config / status / send.",
+  "category": "productivity",
+  "tags": ["email", "resend", "smtp"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/email",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/email",
+  "config": {
+    "path": "~/cicy-ai/db/email.json",
+    "permissions": "0600",
+    "secret_fields": ["api_key"]
+  },
+  "permissions": ["network", "filesystem:db"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}
