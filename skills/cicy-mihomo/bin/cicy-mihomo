@@ -30,6 +30,81 @@ const CTRL_BASE   = process.env.MIHOMO_CTRL   || 'http://127.0.0.1:19001';
 const MIHOMO_VERSION = process.env.CICY_MIHOMO_VERSION || 'v1.10.2';
 const GH_PROXY = process.env.GITHUB_PROXY || 'https://gh-proxy.com/';
 
+const TEMPLATE = `# cicy-mihomo config (mihomo / clash-meta)
+# Edit this file then run: cicy-mihomo reload (or restart)
+
+mixed-port: 9001
+allow-lan: false
+mode: rule
+log-level: info
+
+external-controller: 127.0.0.1:19001
+external-ui: ""
+
+dns:
+  enable: true
+  listen: 127.0.0.1:53
+  enhanced-mode: fake-ip
+  nameserver:
+    - 119.29.29.29
+    - 223.5.5.5
+
+# globalPassword: any non-empty username + this password authenticates
+authentication: []
+# Uncomment + set per-user when needed:
+# - "alice:password"
+
+# Localhost callers skip auth so local Chrome / curl can use 127.0.0.1:9001
+skip-auth-prefixes:
+  - 127.0.0.1/32
+  - ::1/128
+
+# ── per-Chrome-profile listeners ────────────────────────────────────────
+# Chrome does not support proxies with username/password (Basic Auth in the
+# proxy URL is rejected, and SwitchyOmega is needed otherwise). The clean
+# workaround is to expose one listener per Chrome profile on a distinct
+# local port, then route each listener to its own proxy-group via IN-NAME.
+#
+# Convention: chrome-profile-<n> on port 20000 + <n>. Add an IN-NAME rule
+# at the TOP of the rules list (before any IN-USER / IN-USER-PREFIX rules
+# — listener rules fire first and reaching auth-user rules is irreversible).
+listeners:
+  # - name: chrome-profile-1
+  #   type: mixed
+  #   port: 20001
+  #   listen: 127.0.0.1
+  # - name: chrome-profile-2
+  #   type: mixed
+  #   port: 20002
+  #   listen: 127.0.0.1
+
+proxies:
+  # - { name: 'node-1', type: ss, server: 1.2.3.4, port: 8388, cipher: aes-256-gcm, password: '...' }
+
+proxy-groups:
+  - name: default_proxy_group
+    type: select
+    proxies:
+      - DIRECT
+  # Per-profile groups. Pin a single upstream or a select between several:
+  # - name: chrome-profile-1-group
+  #   type: select
+  #   proxies: [DIRECT]
+  # - name: chrome-profile-2-group
+  #   type: select
+  #   proxies: [DIRECT]
+
+rules:
+  # IN-NAME rules MUST be first — listener-named connections never reach
+  # IN-USER / IN-USER-PREFIX once IN-NAME matches.
+  # - IN-NAME,chrome-profile-1,chrome-profile-1-group
+  # - IN-NAME,chrome-profile-2,chrome-profile-2-group
+  - IN-USER-PREFIX,w-,default_proxy_group
+  - GEOIP,LAN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,default_proxy_group
+`;
+
 (async () => {
   try {
     switch (cmd) {
@@ -45,6 +120,9 @@ const GH_PROXY = process.env.GITHUB_PROXY || 'https://gh-proxy.com/';
       case 'reload':      await cmdReload(); return;
       case 'logs': case 'log': cmdLogs(rest); return;
       case 'test':        await cmdTest(); return;
+      case 'listeners':   await cmdListeners(); return;
+      case 'add-chrome-profile':    await cmdAddChromeProfile(rest); return;
+      case 'remove-chrome-profile': await cmdRemoveChromeProfile(rest); return;
       default: bail(`unknown command: ${cmd}. Try cicy-mihomo --help.`, 2);
     }
   } catch (e) {
@@ -129,51 +207,6 @@ function resolveDownloadURL() {
 }
 
 // ── template / gen-config / show-config ─────────────────────────────────
-
-const TEMPLATE = `# cicy-mihomo config (mihomo / clash-meta)
-# Edit this file then run: cicy-mihomo reload (or restart)
-
-mixed-port: 9001
-allow-lan: false
-mode: rule
-log-level: info
-
-external-controller: 127.0.0.1:19001
-external-ui: ""
-
-dns:
-  enable: true
-  listen: 127.0.0.1:53
-  enhanced-mode: fake-ip
-  nameserver:
-    - 119.29.29.29
-    - 223.5.5.5
-
-# globalPassword: any non-empty username + this password authenticates
-authentication: []
-# Uncomment + set per-user when needed:
-# - "alice:password"
-
-# Localhost callers skip auth so local Chrome / curl can use 127.0.0.1:9001
-skip-auth-prefixes:
-  - 127.0.0.1/32
-  - ::1/128
-
-proxies:
-  # - { name: 'node-1', type: ss, server: 1.2.3.4, port: 8388, cipher: aes-256-gcm, password: '...' }
-
-proxy-groups:
-  - name: default_proxy_group
-    type: select
-    proxies:
-      - DIRECT
-
-rules:
-  - IN-USER-PREFIX,w-,default_proxy_group
-  - GEOIP,LAN,DIRECT
-  - GEOIP,CN,DIRECT
-  - MATCH,default_proxy_group
-`;
 
 function cmdTemplate() { process.stdout.write(TEMPLATE); }
 
@@ -359,4 +392,310 @@ async function cmdTest() {
     const fmt = (v) => v < 0 ? 'fail' : `${v}ms`;
     console.log(`${r.node.slice(0, 30).padEnd(30)}  ${fmt(r.anthropic).padEnd(9)}  ${fmt(r.google).padEnd(7)}  ${fmt(r.github).padEnd(7)}  ${fmt(r.cf).padEnd(5)}`);
   }
+}
+
+
+// ── listeners (read-only) ───────────────────────────────────────────────
+
+async function cmdListeners() {
+  // Pull live listeners from controller; cross-reference IN-NAME rules from yaml.
+  const live = readPID() > 0;
+  const out = {
+    base_mixed_port: null,
+    listeners: [],
+    in_name_rules: [],
+    proxy_groups: [],
+  };
+
+  // 1) parse yaml for the static listener / rule view (single source of truth)
+  if (existsSync(CONFIG_PATH)) {
+    const yaml = readFileSync(CONFIG_PATH, 'utf8');
+    out.base_mixed_port = matchScalar(yaml, /^mixed-port:\s*(\d+)/m);
+    out.listeners = parseListenersBlock(yaml);
+    out.in_name_rules = parseInNameRules(yaml);
+    out.proxy_groups = parseProxyGroupNames(yaml);
+  }
+
+  // 2) when running, augment with controller view (gives runtime status)
+  if (live) {
+    try {
+      const r = await fetch(CTRL_BASE + '/version', { signal: AbortSignal.timeout(2000) });
+      if (r.ok) out.controller_reachable = true;
+    } catch {}
+  }
+
+  if (json) return ok(out);
+  if (out.base_mixed_port) console.log(`base mixed-port: ${out.base_mixed_port}`);
+  console.log('');
+  if (out.listeners.length === 0) {
+    console.log('(no listeners configured — see `cicy-mihomo template` for the listeners: block)');
+  } else {
+    console.log(`LISTENER NAME              PORT   TYPE   LISTEN          → IN-NAME GROUP`);
+    console.log('-'.repeat(80));
+    const ruleByName = Object.fromEntries(out.in_name_rules.map((r) => [r.listener, r.group]));
+    for (const l of out.listeners) {
+      const grp = ruleByName[l.name] || '(no IN-NAME rule)';
+      console.log(`${l.name.padEnd(26)} ${String(l.port).padEnd(6)} ${(l.type || '').padEnd(6)} ${(l.listen || '').padEnd(15)} → ${grp}`);
+    }
+  }
+  if (out.in_name_rules.length === 0) {
+    console.log('');
+    console.log('(no IN-NAME rules in rules: — listeners would fall through to IN-USER / MATCH)');
+  }
+  if (out.proxy_groups.length > 0) {
+    console.log('');
+    console.log(`proxy-groups: ${out.proxy_groups.join(', ')}`);
+  }
+}
+
+// ── chrome-profile add / remove ─────────────────────────────────────────
+
+// Convention: chrome-profile-<n> on port 20000 + <n>.
+function cmdAddChromeProfile(args) {
+  // cicy-mihomo add-chrome-profile <name> [--port N] [--upstream <proxy_or_group>] [--listen 127.0.0.1]
+  if (args.length < 1) bail('Usage: cicy-mihomo add-chrome-profile <name> [--port N] [--upstream <proxy_or_group>] [--listen ADDR]', 2);
+  if (!existsSync(CONFIG_PATH)) bail(`config missing: ${CONFIG_PATH} — run cicy-mihomo gen-config`, 3);
+
+  const name = args[0];
+  if (!/^[a-zA-Z][\w-]*$/.test(name)) bail(`invalid profile name: ${name} (must match [a-zA-Z][\\w-]*)`, 2);
+  const opts = parseProfileFlags(args.slice(1));
+  const upstream = opts.upstream || 'DIRECT';
+  const listen = opts.listen || '127.0.0.1';
+
+  const text = readFileSync(CONFIG_PATH, 'utf8');
+  const existing = parseListenersBlock(text);
+  const groupNames = parseProxyGroupNames(text);
+  const groupName = `${name}-group`;
+
+  if (existing.some((l) => l.name === name)) bail(`listener '${name}' already exists`, 4);
+  if (groupNames.includes(groupName)) bail(`proxy-group '${groupName}' already exists`, 4);
+
+  // pick port: explicit, else next available 20001+
+  let port;
+  if (opts.port) {
+    port = parseInt(opts.port, 10);
+    if (!port || port < 1 || port > 65535) bail(`invalid --port: ${opts.port}`, 2);
+    if (existing.some((l) => l.port === port)) bail(`port ${port} already used by listener '${existing.find((l) => l.port === port).name}'`, 4);
+  } else {
+    const used = new Set(existing.map((l) => l.port));
+    port = 20001;
+    while (used.has(port)) port++;
+  }
+
+  // edits — three append/insert operations on the yaml text:
+  //   1. insert listener block under listeners:
+  //   2. insert proxy-group block under proxy-groups:
+  //   3. insert IN-NAME rule at the TOP of rules:
+  let updated = appendUnderTopKey(text, 'listeners', `  - name: ${name}\n    type: mixed\n    port: ${port}\n    listen: ${listen}\n`);
+  updated = appendUnderTopKey(updated, 'proxy-groups', `  - name: ${groupName}\n    type: select\n    proxies:\n      - ${upstream}\n`);
+  updated = insertFirstRuleEntry(updated, `  - IN-NAME,${name},${groupName}\n`);
+
+  if (updated === text) bail('failed to update yaml — no listeners: / proxy-groups: / rules: top-level keys found', 4);
+
+  writeFileSync(CONFIG_PATH, updated, { mode: 0o600 });
+
+  const result = { name, port, listen, upstream, group: groupName, config: CONFIG_PATH };
+  if (json) return ok(result);
+  console.log(`✓ added chrome profile '${name}'`);
+  console.log(`  listener:    ${listen}:${port} (mixed)`);
+  console.log(`  proxy-group: ${groupName}`);
+  console.log(`  rule:        IN-NAME,${name},${groupName}`);
+  console.log(`  upstream:    ${upstream}${upstream === 'DIRECT' ? ' (no proxy — change with --upstream or edit yaml)' : ''}`);
+  console.log('');
+  console.log(`Reload mihomo to pick up the new listener:`);
+  console.log(`  cicy-mihomo reload`);
+  console.log('');
+  console.log(`Then point that Chrome profile at:  ${listen}:${port}  (no auth)`);
+}
+
+function cmdRemoveChromeProfile(args) {
+  if (args.length < 1) bail('Usage: cicy-mihomo remove-chrome-profile <name>', 2);
+  if (!existsSync(CONFIG_PATH)) bail(`config missing: ${CONFIG_PATH}`, 3);
+  const name = args[0];
+  const groupName = `${name}-group`;
+
+  let text = readFileSync(CONFIG_PATH, 'utf8');
+  const before = text;
+
+  text = removeListenerEntry(text, name);
+  text = removeProxyGroupEntry(text, groupName);
+  text = removeRuleLineMatching(text, new RegExp(`^\\s*-\\s*IN-NAME,${escapeRe(name)},`));
+
+  if (text === before) bail(`profile '${name}' not found in ${CONFIG_PATH}`, 4);
+  writeFileSync(CONFIG_PATH, text, { mode: 0o600 });
+
+  if (json) return ok({ removed: name, group: groupName });
+  console.log(`✓ removed chrome profile '${name}'`);
+  console.log(`  Reload mihomo to release the port:  cicy-mihomo reload`);
+}
+
+// ── yaml mini-helpers (top-level block append / list-item remove) ──────
+
+function matchScalar(text, re) {
+  const m = re.exec(text);
+  return m ? m[1].trim() : null;
+}
+
+// Parse `listeners:` block. Recognizes BOTH the canonical style:
+//   listeners:
+//     - name: chrome-profile-1
+//       type: mixed
+//       port: 20001
+//       listen: 127.0.0.1
+// and inline-flow style { name: ..., port: ..., ... } (best-effort).
+// Skips comment-only entries.
+function parseListenersBlock(text) {
+  const lines = text.split('\n');
+  const out = [];
+  let inBlock = false;
+  let current = null;
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (/^[A-Za-z][\w-]*:/.test(raw)) {
+      // top-level key
+      if (raw.startsWith('listeners:')) { inBlock = true; current = null; continue; }
+      if (inBlock) break;
+    }
+    if (!inBlock) continue;
+    const itemStart = /^\s*-\s+(.*)$/.exec(raw);
+    if (itemStart) {
+      if (current) out.push(current);
+      current = {};
+      const after = itemStart[1].trim();
+      // first line could be "name: foo" or fully inline { ... }
+      const kv = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(after);
+      if (kv) current[kv[1]] = stripQuotes(kv[2]);
+      continue;
+    }
+    if (current) {
+      const kv = /^\s+([A-Za-z_][\w-]*):\s*(.*)$/.exec(raw);
+      if (kv) {
+        const v = stripQuotes(kv[2]);
+        current[kv[1]] = /^\d+$/.test(v) ? parseInt(v, 10) : v;
+      }
+    }
+  }
+  if (current) out.push(current);
+  return out.filter((l) => l.name);
+}
+
+function parseInNameRules(text) {
+  const out = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/#.*/, '').trim();
+    const m = /^-\s*IN-NAME\s*,\s*([^,\s]+)\s*,\s*([^,\s]+)/.exec(line);
+    if (m) out.push({ listener: m[1], group: m[2] });
+  }
+  return out;
+}
+
+function parseProxyGroupNames(text) {
+  const lines = text.split('\n');
+  const names = [];
+  let inBlock = false;
+  for (const raw of lines) {
+    if (/^[A-Za-z][\w-]*:/.test(raw)) {
+      inBlock = raw.startsWith('proxy-groups:');
+      continue;
+    }
+    if (!inBlock) continue;
+    const m = /^\s*-\s+name:\s*(.+?)\s*(?:#.*)?$/.exec(raw);
+    if (m) names.push(stripQuotes(m[1]));
+  }
+  return names;
+}
+
+function stripQuotes(s) {
+  s = s.trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) return s.slice(1, -1);
+  return s;
+}
+
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function parseProfileFlags(args) {
+  const out = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--port') { out.port = args[++i]; continue; }
+    if (args[i] === '--upstream') { out.upstream = args[++i]; continue; }
+    if (args[i] === '--listen') { out.listen = args[++i]; continue; }
+    bail(`unknown flag: ${args[i]}`, 2);
+  }
+  return out;
+}
+
+// Append `block` (already 2-space-indented for list items) under a
+// top-level mapping key. If the key is missing or only commented,
+// returns text unchanged.
+function appendUnderTopKey(text, key, block) {
+  const lines = text.split('\n');
+  let keyIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (new RegExp(`^${escapeRe(key)}:\\s*(?:#.*)?$`).test(lines[i])) { keyIdx = i; break; }
+  }
+  if (keyIdx === -1) return text;
+  // find end of block: next line starting at column 0 with [A-Za-z] (next top-level key)
+  let endIdx = lines.length;
+  for (let i = keyIdx + 1; i < lines.length; i++) {
+    if (/^[A-Za-z]/.test(lines[i])) { endIdx = i; break; }
+  }
+  // strip a trailing blank line in the block so we insert immediately above it
+  while (endIdx > keyIdx + 1 && lines[endIdx - 1].trim() === '') endIdx--;
+  const blockLines = block.replace(/\n+$/, '').split('\n');
+  lines.splice(endIdx, 0, ...blockLines);
+  return lines.join('\n');
+}
+
+// Insert a single rule line as the FIRST item under rules:.
+function insertFirstRuleEntry(text, ruleLine) {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (/^rules:\s*(?:#.*)?$/.test(lines[i])) {
+      const stripped = ruleLine.replace(/\n+$/, '');
+      lines.splice(i + 1, 0, stripped);
+      return lines.join('\n');
+    }
+  }
+  return text;
+}
+
+// Remove a single - name: <name> list item (and its indented continuation
+// lines) from a top-level block.
+function removeNamedListItem(text, topKey, name) {
+  const lines = text.split('\n');
+  let inBlock = false;
+  let removeStart = -1;
+  let removeEnd = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^[A-Za-z][\w-]*:/.test(lines[i])) {
+      inBlock = new RegExp(`^${escapeRe(topKey)}:`).test(lines[i]);
+      if (removeStart !== -1 && removeEnd === -1) removeEnd = i;
+      if (!inBlock && removeStart !== -1) break;
+      continue;
+    }
+    if (!inBlock) continue;
+    const startMatch = /^(\s*)-\s+name:\s*(.+?)\s*(?:#.*)?$/.exec(lines[i]);
+    if (startMatch && stripQuotes(startMatch[2]) === name) {
+      removeStart = i;
+      // find next "- " at same indent OR end-of-block
+      const indent = startMatch[1].length;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^[A-Za-z]/.test(lines[j])) { removeEnd = j; break; }
+        const next = /^(\s*)-\s+/.exec(lines[j]);
+        if (next && next[1].length === indent) { removeEnd = j; break; }
+      }
+      if (removeEnd === -1) removeEnd = lines.length;
+      break;
+    }
+  }
+  if (removeStart === -1) return text;
+  lines.splice(removeStart, removeEnd - removeStart);
+  return lines.join('\n');
+}
+
+function removeListenerEntry(text, name)   { return removeNamedListItem(text, 'listeners',    name); }
+function removeProxyGroupEntry(text, name) { return removeNamedListItem(text, 'proxy-groups', name); }
+
+function removeRuleLineMatching(text, re) {
+  return text.split('\n').filter((l) => !re.test(l)).join('\n');
 }
