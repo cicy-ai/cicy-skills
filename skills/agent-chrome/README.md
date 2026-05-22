@@ -1,0 +1,34 @@
+# agent-chrome
+
+> Source-only Node.js, 247 LOC. Read [`bin/agent-chrome`](./bin/agent-chrome).
+> Requires Node **22+** for native WebSocket.
+
+Per-profile system Chrome control on a connected cicy-desktop host. Each
+subcommand maps to a `chrome_*` electronRPC tool, dispatched as
+`desktop_event { rpc_call, tool, args, requestId }` over the chat WebSocket.
+
+## Install
+
+```bash
+cicy-code skill install agent-chrome
+```
+
+## Quick usage
+
+```bash
+agent-chrome profiles                      # list profiles in ~/Private/chrome.json
+agent-chrome profile 1                     # show one profile + live debugger status
+agent-chrome add --gmail x@y.com --launch
+agent-chrome proxy 1 socks5://127.0.0.1:1080
+agent-chrome launch 1 --url https://example.com
+agent-chrome close 1
+agent-chrome targets --idx 1
+agent-chrome cdp Page.navigate '{"url":"https://example.com"}' --idx 1
+agent-chrome gmails
+agent-chrome github
+agent-chrome --client mcp-1 ...
+```
+
+## License
+
+MIT

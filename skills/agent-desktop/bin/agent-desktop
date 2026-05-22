@@ -1,0 +1,262 @@
+#!/usr/bin/env node
+// agent-desktop — control a connected cicy-desktop (Electron) client.
+// Pushes desktop_event { rpc_call, tool, args, requestId } and awaits
+// rpc_result over the chat WebSocket. Requires Node 22+.
+
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+if (typeof globalThis.WebSocket !== 'function') {
+  process.stderr.write('agent-desktop: native WebSocket missing — Node 22+ required\n');
+  process.exit(1);
+}
+
+// extract --client/-c flag
+let clientID = '';
+const args = [];
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--client' || argv[i] === '-c') { clientID = argv[++i] || ''; continue; }
+  args.push(argv[i]);
+}
+
+const json = args.includes('--json');
+const cmd = args[0];
+const rest = args.slice(1).filter((a) => a !== '--json');
+
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+const HTTP_BASE = `http://127.0.0.1:${API_PORT}`;
+const WS_BASE   = `ws://127.0.0.1:${API_PORT}`;
+const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 30000);
+
+(async () => {
+  try {
+    switch (cmd) {
+      case 'tools':       printTools(); return;
+      case 'clients':     await cmdClients(); return;
+      case 'ping':        await cmdPing(); return;
+      case 'screenshot':  await cmdScreenshot(); return;
+      case 'clipboard':   await cmdClipboard(rest); return;
+      case 'exec':        await cmdExec(rest); return;
+      case 'windows':     await cmdSimpleRPC('get_system_windows'); return;
+      case 'sysinfo':     await cmdSimpleRPC('get_system_info'); return;
+      case 'rpc':         await cmdRPC(rest); return;
+      default: bail(`unknown command: ${cmd}. Try agent-desktop --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`agent-desktop: ${msg}\n`);
+  process.exit(code);
+}
+function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
+
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('Usage: agent-desktop <ping|screenshot|clipboard|exec|windows|sysinfo|rpc|clients> [...] [--client ID]\n'); }
+}
+function printTools() {
+  try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('# agent-desktop tools\n'); }
+}
+
+function loadToken() {
+  if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
+  if (!existsSync(GLOBAL_JSON)) throw Object.assign(new Error(`api_token not found: set CICY_API_TOKEN or create ${GLOBAL_JSON}`), { exitCode: 3 });
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(GLOBAL_JSON, 'utf8')); }
+  catch (e) { throw Object.assign(new Error(`failed to parse ${GLOBAL_JSON}: ${e.message}`), { exitCode: 3 }); }
+  if (!cfg.api_token) throw Object.assign(new Error(`api_token not found in ${GLOBAL_JSON}`), { exitCode: 3 });
+  return cfg.api_token;
+}
+
+function currentAgentID() {
+  if (process.env.CICY_PANE_ID) return process.env.CICY_PANE_ID;
+  const m = /(w-\d+)/.exec(process.cwd());
+  return m ? m[1] : 'w-10001';
+}
+
+function randomID(prefix) { return `${prefix}-${Date.now()}-${randomBytes(4).toString('hex')}`; }
+
+async function api(method, path, payload) {
+  const token = loadToken();
+  const headers = { 'Authorization': `Bearer ${token}` };
+  const init = { method, headers };
+  if (payload !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(payload); }
+  let res;
+  try { res = await fetch(HTTP_BASE + path, init); }
+  catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${HTTP_BASE} (${e.message})`), { exitCode: 3 }); }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error(`auth failed (${res.status})`), { exitCode: 3 });
+  if (res.status >= 400) {
+    let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
+    throw Object.assign(new Error(`api error (${res.status}): ${body?.error || body?.message || text}`), { exitCode: 4 });
+  }
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function chatClients() {
+  const data = await api('GET', '/api/chat/clients');
+  return data?.clients || data?.data?.clients || data?.data || data || {};
+}
+
+// auto-select the single ElectronMCP client; explicit --client wins
+async function resolveDesktop() {
+  const clients = await chatClients();
+  if (clientID) {
+    for (const [agentID, m] of Object.entries(clients)) {
+      if (m && Object.prototype.hasOwnProperty.call(m, clientID)) return { agentID, clientID };
+    }
+    throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+  }
+  const matches = [];
+  for (const [agentID, m] of Object.entries(clients)) {
+    for (const [cid, info] of Object.entries(m || {})) {
+      const ua = String(info?.user_agent || '').toLowerCase();
+      if (ua.includes('electronmcp')) matches.push({ agentID, clientID: cid });
+    }
+  }
+  if (matches.length === 0) throw Object.assign(new Error('no cicy-desktop client connected'), { exitCode: 3 });
+  if (matches.length > 1)  throw Object.assign(new Error('multiple cicy-desktop clients connected; pass --client <id>'), { exitCode: 2 });
+  return matches[0];
+}
+
+// rpc: open WS, on open push desktop_event, await rpc_result with matching requestId
+async function rpc(tool, toolArgs) {
+  const target = await resolveDesktop();
+  const token = loadToken();
+  const url = `${WS_BASE}/api/chat/ws?agent_id=${encodeURIComponent(target.agentID)}&token=${encodeURIComponent(token)}`;
+  const ws = new WebSocket(url);
+  const opened = new Promise((res, rej) => {
+    ws.addEventListener('open', () => res());
+    ws.addEventListener('error', (e) => rej(Object.assign(new Error(`websocket error: ${e.message || e.type}`), { exitCode: 4 })));
+  });
+  const rid = randomID('drpc');
+  const matchedMsg = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { try { ws.close(); } catch {} reject(Object.assign(new Error('timeout waiting for rpc_result'), { exitCode: 4 })); }, RPC_TIMEOUT_MS);
+    ws.addEventListener('message', (ev) => {
+      let msg;
+      try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()); } catch { return; }
+      if (msg?.type === 'rpc_result' && msg?.data?.requestId === rid) {
+        clearTimeout(timer);
+        try { ws.close(); } catch {}
+        const data = msg.data || {};
+        if (data.error) reject(Object.assign(new Error(data.error), { exitCode: 4 }));
+        else resolve(data.result);
+      }
+    });
+  });
+  await opened;
+  await api('POST', '/api/chat/push', {
+    agent_id: target.agentID, client_id: target.clientID,
+    type: 'desktop_event',
+    data: { type: 'rpc_call', tool, args: toolArgs ?? {}, requestId: rid },
+  });
+  return { result: await matchedMsg, target };
+}
+
+// ── commands ────────────────────────────────────────────────────────────
+
+async function cmdClients() {
+  const clients = await chatClients();
+  const rows = [];
+  for (const [agentID, m] of Object.entries(clients)) {
+    for (const [cid, info] of Object.entries(m || {})) {
+      const ua = String(info?.user_agent || '');
+      rows.push({
+        client_id: cid, agent_id: agentID,
+        platform: info?.platform || '',
+        user_agent: ua,
+        is_cicy_desktop: ua.toLowerCase().includes('electronmcp'),
+      });
+    }
+  }
+  if (json) return ok(rows);
+  if (rows.length === 0) { console.log('no clients connected'); return; }
+  for (const r of rows) {
+    const tag = r.is_cicy_desktop ? 'cicy-desktop' : 'browser';
+    console.log(`[${tag}] ${r.client_id} (agent=${r.agent_id} platform=${r.platform})`);
+  }
+}
+
+async function cmdPing() {
+  // Simple: send rpc_call to a no-op tool ('get_system_info'); if it returns,
+  // the desktop side is fully responsive.
+  const t0 = Date.now();
+  const { target } = await rpc('get_system_info', {});
+  const ms = Date.now() - t0;
+  if (json) return ok({ ok: true, target, latency_ms: ms });
+  console.log(`✅ cicy-desktop online (client=${target.clientID}, latency=${ms}ms)`);
+}
+
+async function cmdScreenshot() {
+  const { result } = await rpc('webpage_screenshot_to_clipboard', {});
+  if (json) return ok(result);
+  if (typeof result === 'string') console.log(result);
+  else console.log(JSON.stringify(result));
+}
+
+async function cmdClipboard(args) {
+  const op = args[0];
+  if (op === 'get') {
+    const { result } = await rpc('clipboard_read_text', {});
+    if (json) return ok(result);
+    process.stdout.write(typeof result === 'string' ? result : JSON.stringify(result));
+    process.stdout.write('\n');
+    return;
+  }
+  if (op === 'set') {
+    if (args.length < 2) throw Object.assign(new Error('Usage: agent-desktop clipboard set <text>'), { exitCode: 2 });
+    const text = args.slice(1).join(' ');
+    const { result } = await rpc('clipboard_write_text', { text });
+    if (json) return ok(result);
+    console.log('✓ clipboard set');
+    return;
+  }
+  throw Object.assign(new Error('Usage: agent-desktop clipboard get|set ...'), { exitCode: 2 });
+}
+
+async function cmdExec(args) {
+  if (args.length < 1) throw Object.assign(new Error('Usage: agent-desktop exec <shell_cmd>'), { exitCode: 2 });
+  const command = args.join(' ');
+  const { result } = await rpc('exec_shell', { command });
+  if (json) return ok(result);
+  if (typeof result === 'string') console.log(result);
+  else console.log(JSON.stringify(result, null, 2));
+}
+
+async function cmdSimpleRPC(tool) {
+  const { result } = await rpc(tool, {});
+  if (json) return ok(result);
+  if (typeof result === 'string') console.log(result);
+  else console.log(JSON.stringify(result, null, 2));
+}
+
+async function cmdRPC(args) {
+  if (args.length < 1) throw Object.assign(new Error("Usage: agent-desktop rpc <tool> [json_args]"), { exitCode: 2 });
+  const tool = args[0];
+  let toolArgs = {};
+  if (args[1]) {
+    try { toolArgs = JSON.parse(args[1]); }
+    catch (e) { throw Object.assign(new Error(`invalid json_args: ${e.message}`), { exitCode: 2 }); }
+  }
+  const { result } = await rpc(tool, toolArgs);
+  if (json) return ok(result);
+  if (typeof result === 'string') console.log(result);
+  else console.log(JSON.stringify(result, null, 2));
+}

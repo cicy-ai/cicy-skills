@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "frp-client",
+  "version": "1.0.0",
+  "title": "FRP Client",
+  "description": "Manage a local frpc process on this host with background start, status, proxy connections, hot reload, and stop/start controls. Remote machines via ssh.",
+  "category": "network",
+  "tags": ["frp", "frpc", "tunneling", "process-manager"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/frp-client",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/frp-client",
+  "permissions": ["network", "filesystem:home", "process:spawn"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/db/frpc.toml",
+    "secret_fields": []
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

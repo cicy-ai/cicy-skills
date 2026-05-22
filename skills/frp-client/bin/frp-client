@@ -1,0 +1,257 @@
+#!/usr/bin/env node
+// frp-client — manage a local frpc process. Subcommands:
+//   start / stop / restart / status / reload / logs / connections / raw
+// `clients` not relevant for frpc; web-api endpoints differ slightly.
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { spawn, execSync } from 'node:child_process';
+
+const KIND = 'client';   // (only differs from frp-client by a few constants)
+const NAME = 'frp-client';
+const BINARY_NAME = 'frpc';
+const ROLE_LABEL = 'FRP client';
+const BIN_ENV = 'FRP_CLIENT_BIN';
+const LOG_ENV = 'FRP_CLIENT_LOG';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+const cmd = argv[0];
+const rest = argv.slice(1).filter((a) => a !== '--json');
+
+const HOME = homedir();
+const CONFIG_PATH = process.env.FRP_CONFIG || join(HOME, 'cicy-ai', 'db', BINARY_NAME + '.toml');
+const STATE_DIR = join(HOME, '.local', 'state', 'cicy-skills', 'frp', KIND);
+const PID_FILE = join(STATE_DIR, 'pid');
+const STATE_FILE = join(STATE_DIR, 'state.json');
+const DEFAULT_LOG = process.env[LOG_ENV] || join(HOME, 'logs', BINARY_NAME + '.log');
+
+const BINARY_CANDIDATES = [
+  process.env[BIN_ENV],
+  join(HOME, '.frp-tunnel', 'bin', BINARY_NAME),
+  join(HOME, '.local', 'bin', BINARY_NAME),
+  join(HOME, 'bin', BINARY_NAME),
+].filter(Boolean);
+
+(async () => {
+  try {
+    switch (cmd) {
+      case 'tools':       printTools(); return;
+      case 'start':       await cmdStart(rest); return;
+      case 'stop':        cmdStop(); return;
+      case 'restart':     await cmdRestart(rest); return;
+      case 'status':      await cmdStatus(); return;
+      case 'reload':      await cmdReload(); return;
+      case 'logs': case 'log': cmdLogs(rest); return;
+      case 'connections': case 'conns': await cmdConnections(); return;
+      case 'raw':         await cmdRaw(rest); return;
+      default: bail(`unknown command: ${cmd}. Try ${NAME} --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`${NAME}: ${msg}\n`);
+  process.exit(code);
+}
+function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
+
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write(`Usage: ${NAME} <start|stop|restart|status|reload|logs|connections|clients|raw>\n`); }
+}
+function printTools() {
+  try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write(`# ${NAME} tools\n`); }
+}
+
+function ensureDir(p) { if (!existsSync(p)) mkdirSync(p, { recursive: true }); }
+
+function findBinary() {
+  for (const c of BINARY_CANDIDATES) {
+    if (c && existsSync(c)) return c;
+  }
+  return null;
+}
+
+function readPID() {
+  if (!existsSync(PID_FILE)) return 0;
+  const raw = readFileSync(PID_FILE, 'utf8').trim();
+  const pid = parseInt(raw, 10);
+  if (!pid) return 0;
+  try { process.kill(pid, 0); return pid; }
+  catch { return 0; }
+}
+
+function loadState() {
+  if (!existsSync(STATE_FILE)) return {};
+  try { return JSON.parse(readFileSync(STATE_FILE, 'utf8')); } catch { return {}; }
+}
+function saveState(s) {
+  ensureDir(STATE_DIR);
+  writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
+}
+
+// crude TOML key reader for `webServer.{addr,port,user,password}` and
+// `bindAddr / bindPort` — frps native config syntax. Top-level only.
+function readConfigHints() {
+  if (!existsSync(CONFIG_PATH)) return {};
+  const text = readFileSync(CONFIG_PATH, 'utf8');
+  const hints = {};
+  const re = /^([A-Za-z_][\w]*(?:\.[\w]+)*)\s*=\s*"?([^"#\n]+?)"?\s*(?:#.*)?$/gm;
+  let m;
+  while ((m = re.exec(text))) {
+    hints[m[1]] = m[2].trim();
+  }
+  return hints;
+}
+
+function webServerURL() {
+  const h = readConfigHints();
+  const addr = h['webServer.addr'] || '127.0.0.1';
+  const port = h['webServer.port'] || '7500';
+  const user = h['webServer.user'] || '';
+  const pass = h['webServer.password'] || '';
+  const auth = (user || pass) ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : '';
+  return `http://${auth}${addr}:${port}`;
+}
+
+// ── commands ────────────────────────────────────────────────────────────
+
+async function cmdStart(args) {
+  if (readPID() > 0) bail(`already running (pid=${readPID()})`, 4);
+  const bin = findBinary();
+  if (!bin) bail(`${BINARY_NAME} binary not found. Install it and put on PATH or set ${BIN_ENV}.`, 3);
+  if (!existsSync(CONFIG_PATH)) bail(`config missing: ${CONFIG_PATH}`, 3);
+
+  // optional extra args after `--`: cicy-skills/frp-server start -- --foo bar
+  let extra = [];
+  const sep = args.indexOf('--');
+  if (sep !== -1) extra = args.slice(sep + 1);
+
+  ensureDir(STATE_DIR);
+  ensureDir(dirname(DEFAULT_LOG));
+  const fd = openSync(DEFAULT_LOG, 'a');
+  const finalArgs = ['-c', CONFIG_PATH, ...extra];
+  const child = spawn(bin, finalArgs, { detached: true, stdio: ['ignore', fd, fd] });
+  child.unref();
+  closeSync(fd);
+  await new Promise((r) => setTimeout(r, 400));
+  try { process.kill(child.pid, 0); }
+  catch { bail(`process died on launch — see ${DEFAULT_LOG}`, 4); }
+  writeFileSync(PID_FILE, String(child.pid));
+  saveState({ pid: child.pid, binary: bin, config: CONFIG_PATH, log: DEFAULT_LOG, started_at: new Date().toISOString(), extra_args: extra });
+  if (json) return ok({ pid: child.pid, binary: bin, config: CONFIG_PATH, log: DEFAULT_LOG });
+  console.log(`✓ started ${ROLE_LABEL} pid=${child.pid}`);
+  console.log(`  binary: ${bin}`);
+  console.log(`  config: ${CONFIG_PATH}`);
+  console.log(`  log:    ${DEFAULT_LOG}`);
+}
+
+function cmdStop() {
+  const pid = readPID();
+  if (!pid) bail('not running', 4);
+  try { process.kill(pid, 'SIGTERM'); } catch (e) { bail(`kill failed: ${e.message}`, 4); }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try { process.kill(pid, 0); }
+    catch { try { unlinkSync(PID_FILE); } catch {}; if (json) return ok({ stopped: pid }); console.log(`✓ stopped pid=${pid}`); return; }
+    execSync('sleep 0.1');
+  }
+  try { process.kill(pid, 'SIGKILL'); } catch {}
+  try { unlinkSync(PID_FILE); } catch {}
+  if (json) return ok({ killed: pid });
+  console.log(`! force-killed pid=${pid}`);
+}
+
+async function cmdRestart(args) {
+  if (readPID() > 0) cmdStop();
+  await cmdStart(args);
+}
+
+async function cmdStatus() {
+  const pid = readPID();
+  const bin = findBinary();
+  const out = {
+    role: ROLE_LABEL, pid, running: pid > 0,
+    binary: bin || `(not found in ${BINARY_CANDIDATES.join(', ')})`,
+    binary_installed: !!bin,
+    config: CONFIG_PATH, config_exists: existsSync(CONFIG_PATH),
+    log: DEFAULT_LOG,
+    web_dashboard: '',
+  };
+  if (pid > 0) {
+    const u = webServerURL();
+    out.web_dashboard = u;
+    try {
+      const r = await fetch(u + '/api/status', { signal: AbortSignal.timeout(2000) });
+      if (r.ok) out.serverinfo = await r.json();
+    } catch (e) { out.api_error = e.message; }
+  }
+  if (json) return ok(out);
+  console.log(`role:    ${out.role}`);
+  console.log(`pid:     ${out.pid || '(not running)'}`);
+  console.log(`binary:  ${out.binary}`);
+  console.log(`config:  ${out.config} ${out.config_exists ? '✓' : '(missing)'}`);
+  console.log(`log:     ${out.log}`);
+  if (out.web_dashboard) console.log(`webapi:  ${out.web_dashboard}`);
+  if (out.serverinfo)    console.log(`server:  v${out.serverinfo.version || '?'} ${out.serverinfo.bindPort ? '(:' + out.serverinfo.bindPort + ')' : ''}`);
+}
+
+async function cmdReload() {
+  const pid = readPID();
+  if (!pid) bail('not running', 4);
+  // frps does NOT support reload via web api in all versions; use SIGHUP if frps supports it
+  // (since frp v0.50 hot-reload by sending SIGHUP works)
+  try { process.kill(pid, 'SIGHUP'); }
+  catch (e) { bail(`SIGHUP failed: ${e.message}`, 4); }
+  if (json) return ok({ reloaded: true, pid, signal: 'SIGHUP' });
+  console.log(`✓ sent SIGHUP to pid=${pid} (frps v0.50+ hot-reloads)`);
+}
+
+function cmdLogs(args) {
+  let lines = 100;
+  let follow = false;
+  for (const a of args) {
+    if (a === '-f' || a === '--follow') follow = true;
+    else if (/^\d+$/.test(a)) lines = parseInt(a, 10);
+  }
+  if (!existsSync(DEFAULT_LOG)) bail(`no log at ${DEFAULT_LOG}`, 3);
+  const flags = ['-n', String(lines)];
+  if (follow) flags.push('-f');
+  flags.push(DEFAULT_LOG);
+  const child = spawn('tail', flags, { stdio: 'inherit' });
+  child.on('exit', (code) => process.exit(code ?? 0));
+}
+
+async function cmdConnections() {
+  if (readPID() === 0) bail('not running', 4);
+  const u = webServerURL();
+  let r; try { r = await fetch(u + '/api/status', { signal: AbortSignal.timeout(3000) }); } catch (e) { bail(`web api unreachable at ${u}: ${e.message}`, 4); }
+  if (!r.ok) bail(`web api error (${r.status})`, 4);
+  const data = await r.json();
+  if (json) return ok(data);
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function cmdRaw(args) {
+  if (args.length < 1) bail(`Usage: ${NAME} raw -- <real ${BINARY_NAME} args...>`, 2);
+  const sep = args.indexOf('--');
+  const realArgs = sep === -1 ? args : args.slice(sep + 1);
+  const bin = findBinary();
+  if (!bin) bail(`${BINARY_NAME} binary not found`, 3);
+  const child = spawn(bin, realArgs, { stdio: 'inherit' });
+  child.on('exit', (code) => process.exit(code ?? 0));
+}

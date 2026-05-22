@@ -1,0 +1,28 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "frp-server",
+  "version": "1.0.0",
+  "title": "FRP Server",
+  "description": "Manage a local frps process on this host with background start, status, connections, hot reload, and stop/start controls.",
+  "category": "network",
+  "tags": ["frp", "frps", "tunneling", "process-manager"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/frp-server",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/frp-server",
+  "permissions": ["network", "filesystem:home", "process:spawn"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/db/frps.toml",
+    "secret_fields": []
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}
