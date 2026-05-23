@@ -1,0 +1,67 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "us-spot-dev",
+  "version": "1.0.0",
+  "title": "Us Spot Dev",
+  "description": "Provision a US (Silicon Valley) Aliyun spot ECS dev box with a persistent ESSD data disk. Use when the user asks to spin up, rebuild, or destroy the US spot dev environment.",
+  "category": "cloud",
+  "author": "cicy-ai",
+  "license": "MIT",
+  "tags": [
+    "aliyun",
+    "ecs",
+    "spot",
+    "docker",
+    "US"
+  ],
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "python3"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/us-spot-dev",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "tools": [
+    {
+      "name": "us-spot-dev",
+      "example": "us-spot-dev",
+      "description": "Provision the spot instance (or re-provision after reclaim)"
+    },
+    {
+      "name": "us-spot-dev --destroy",
+      "example": "us-spot-dev --destroy",
+      "description": "Destroy the spot instance, keep the data disk"
+    },
+    {
+      "name": "us-spot-dev --push-image",
+      "example": "us-spot-dev --push-image",
+      "description": "Rebuild and push the container image after Dockerfile changes"
+    },
+    {
+      "name": "us-spot-dev --json",
+      "example": "us-spot-dev --json",
+      "description": "Machine-readable JSON output for agent-driven flows"
+    }
+  ],
+  "i18n": {
+    "zh-CN": {
+      "title": "US 硅谷 Spot Dev 开发机",
+      "description": "Provision a US (Silicon Valley) Aliyun spot ECS dev box with a persistent ESSD data disk. Use when the user asks to spin up, rebuild, or destroy the US spot dev environment."
+    }
+  }
+}
