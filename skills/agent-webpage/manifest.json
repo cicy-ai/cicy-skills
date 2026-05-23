@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-webpage",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "Agent Webpage",
   "description": "Talk to the live webpage client for an agent on this host. Run JS, ping, send custom events and await the real reply over the chat WebSocket.",
   "category": "dev",
@@ -44,5 +44,25 @@
       "title": "Agent Webpage",
       "description": "通过聊天 WebSocket 与 agent 当前页面客户端通信，执行 JS、ping、发送自定义事件并等待实际响应。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "ping",
+      "example": "agent-webpage ping",
+      "description": "Check if the webpage client is alive",
+      "prompt": "运行 agent-webpage ping 检查网页客户端状态"
+    },
+    {
+      "name": "eval",
+      "example": "agent-webpage eval 'document.title'",
+      "description": "Run JavaScript in the live agent webpage",
+      "prompt": "帮我用 agent-webpage eval 在网页中执行 JS，请告诉我代码"
+    },
+    {
+      "name": "send-event",
+      "example": "agent-webpage send-event '{\"type\":\"my-event\"}'",
+      "description": "Send a custom event to the webpage and await the reply",
+      "prompt": "帮我用 agent-webpage send-event 发送自定义事件"
+    }
+  ]
 }

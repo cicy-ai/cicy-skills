@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-mihomo",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "title": "Cicy Mihomo Proxy",
   "description": "Manage the local Cicy Mihomo proxy with start/stop/reload/status/logs, node speed-testing, and per-Chrome-profile listeners (multi-port + IN-NAME rules).",
   "category": "network",
@@ -46,5 +46,43 @@
       "title": "Cicy Mihomo 代理",
       "description": "管理本地 Cicy Mihomo (mihomo / clash-meta fork) 代理，包含 start/stop/reload/status/logs、节点测速和每 Chrome Profile 独立监听端口（多端口 + IN-NAME 规则）。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "start",
+      "example": "cicy-mihomo start",
+      "description": "Start the mihomo proxy daemon",
+      "prompt": "运行 cicy-mihomo start 启动 mihomo 代理"
+    },
+    {
+      "name": "stop",
+      "example": "cicy-mihomo stop",
+      "description": "Stop the mihomo proxy daemon",
+      "prompt": "运行 cicy-mihomo stop 停止 mihomo 代理"
+    },
+    {
+      "name": "status",
+      "example": "cicy-mihomo status",
+      "description": "Show mihomo proxy status and active proxies",
+      "prompt": "运行 cicy-mihomo status 查看代理状态"
+    },
+    {
+      "name": "reload",
+      "example": "cicy-mihomo reload",
+      "description": "Reload config without restarting",
+      "prompt": "运行 cicy-mihomo reload 重载配置"
+    },
+    {
+      "name": "add-chrome-profile",
+      "example": "cicy-mihomo add-chrome-profile work --port 7891",
+      "description": "Add a per-Chrome-profile proxy listener with IN-NAME rule",
+      "prompt": "帮我用 cicy-mihomo add-chrome-profile 添加一个 Chrome Profile 独立代理端口，请先问我 Profile 名称"
+    },
+    {
+      "name": "listeners",
+      "example": "cicy-mihomo listeners",
+      "description": "List all active per-profile listeners and their rule mappings",
+      "prompt": "运行 cicy-mihomo listeners 查看所有 Profile 监听端口"
+    }
+  ]
 }

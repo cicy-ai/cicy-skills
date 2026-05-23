@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cping",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "China-side Reachability",
   "description": "Check network latency and reachability to a domain or IP from this host, with emphasis on China-side reachability.",
   "category": "network",
@@ -37,5 +37,31 @@
       "title": "cping 网络探测",
       "description": "快速检测域名或 IP 的网络延迟和可达性，支持 DNS / HTTP / TCP 多种方式。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "cping",
+      "example": "cping example.com",
+      "description": "Check DNS + HTTPS reachability and latency to a host",
+      "prompt": "用 cping 检测一下 example.com 的连通性和延迟"
+    },
+    {
+      "name": "cping --json",
+      "example": "cping example.com --json",
+      "description": "Machine-readable JSON output",
+      "prompt": "用 cping example.com --json 输出结构化结果"
+    },
+    {
+      "name": "cping --dns-only",
+      "example": "cping example.com --dns-only",
+      "description": "DNS resolution only, skip HTTP probe",
+      "prompt": "用 cping 只测 DNS 解析：cping example.com --dns-only"
+    },
+    {
+      "name": "cping --tcp-only",
+      "example": "cping host:22 --tcp-only --port 22",
+      "description": "TCP connect probe only",
+      "prompt": "用 cping TCP 模式测 22 端口是否可达"
+    }
+  ]
 }

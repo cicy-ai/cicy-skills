@@ -16,7 +16,10 @@
     "entry"
   ],
   "properties": {
-    "$schema": { "type": "string", "format": "uri" },
+    "$schema": {
+      "type": "string",
+      "format": "uri"
+    },
     "name": {
       "type": "string",
       "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
@@ -28,16 +31,32 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+(-[A-Za-z0-9.-]+)?(\\+[A-Za-z0-9.-]+)?$",
       "description": "Strict SemVer 2.0.0"
     },
-    "title": { "type": "string", "minLength": 1, "maxLength": 100 },
-    "description": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
     "i18n": {
       "type": "object",
       "description": "Localized title/description keyed by BCP-47 language tag. If a lang is absent the base English title/description is used.",
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "title":       { "type": "string", "minLength": 1, "maxLength": 100 },
-          "description": { "type": "string", "minLength": 1, "maxLength": 200 }
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
         },
         "additionalProperties": false
       }
@@ -58,26 +77,48 @@
     },
     "tags": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": []
     },
-    "author": { "type": "string", "minLength": 1 },
-    "homepage": { "type": "string", "format": "uri" },
-    "license": { "type": "string", "minLength": 1 },
+    "author": {
+      "type": "string",
+      "minLength": 1
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri"
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1
+    },
     "runtime": {
       "type": "object",
-      "required": ["node"],
+      "required": [
+        "node"
+      ],
       "properties": {
-        "node": { "type": "string", "description": "semver range, e.g. '>=18'" }
+        "node": {
+          "type": "string",
+          "description": "semver range, e.g. '>=18'"
+        }
       },
       "additionalProperties": false
     },
     "system_requirements": {
       "type": "array",
-      "items": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_-]+$"
+      },
       "default": []
     },
-    "npm_dependencies": { "type": "boolean", "default": false },
+    "npm_dependencies": {
+      "type": "boolean",
+      "default": false
+    },
     "entry": {
       "type": "string",
       "pattern": "^bin/",
@@ -85,12 +126,17 @@
     },
     "bin_aliases": {
       "type": "array",
-      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      },
       "default": []
     },
     "config": {
       "type": "object",
-      "required": ["path"],
+      "required": [
+        "path"
+      ],
       "properties": {
         "path": {
           "type": "string",
@@ -104,9 +150,13 @@
         },
         "secret_fields": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "schema": { "type": "string" }
+        "schema": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -129,16 +179,28 @@
     },
     "compatible_agents": {
       "type": "array",
-      "items": { "type": "string" },
-      "default": ["*"]
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "*"
+      ]
     },
     "files": {
       "type": "object",
       "properties": {
-        "skill_md": { "type": "string" },
-        "help_md": { "type": "string" },
-        "tools_md": { "type": "string" },
-        "readme": { "type": "string" }
+        "skill_md": {
+          "type": "string"
+        },
+        "help_md": {
+          "type": "string"
+        },
+        "tools_md": {
+          "type": "string"
+        },
+        "readme": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -146,23 +208,84 @@
       "type": "object",
       "description": "auto-injected by publish pipeline; do not write by hand",
       "properties": {
-        "published_at": { "type": "string", "format": "date-time" },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "size": { "type": "integer", "minimum": 0 },
-        "download_url": { "type": "string", "format": "uri" },
+        "published_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "download_url": {
+          "type": "string",
+          "format": "uri"
+        },
         "source": {
           "type": "object",
           "properties": {
-            "type": { "type": "string", "enum": ["github", "url", "git"] },
-            "repository": { "type": "string" },
-            "tag": { "type": "string" },
-            "commit": { "type": "string", "pattern": "^[a-f0-9]{7,64}$" }
+            "type": {
+              "type": "string",
+              "enum": [
+                "github",
+                "url",
+                "git"
+              ]
+            },
+            "repository": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{7,64}$"
+            }
           },
           "additionalProperties": false
         },
-        "signature": { "type": ["string", "null"] }
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
+    },
+    "tools": {
+      "type": "array",
+      "description": "Structured tool list registered at publish time. Shown as a clickable panel in the marketplace detail UI.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "example": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

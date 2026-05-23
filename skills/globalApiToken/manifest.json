@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "globalApiToken",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Global API Token",
   "description": "Show or refresh the api_token in ~/cicy-ai/global.json on this host.",
   "category": "system",
@@ -44,5 +44,19 @@
       "title": "全局 API Token",
       "description": "查看或刷新 ~/cicy-ai/global.json 中的 api_token，Token 不会明文暴露给 Agent。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "globalApiToken show",
+      "example": "globalApiToken show",
+      "description": "Show current cicy-code API token",
+      "prompt": "运行 globalApiToken show 查看当前 API token"
+    },
+    {
+      "name": "globalApiToken refresh",
+      "example": "globalApiToken refresh",
+      "description": "Rotate and save a new API token",
+      "prompt": "运行 globalApiToken refresh 生成新的 API token"
+    }
+  ]
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "google",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "Google Workspace",
   "description": "Local google CLI wrapper for Gmail, Sheets, Drive and Calendar. OAuth login via oauth-flow.cicy-ai.com (relay never sees client_secret or tokens).",
   "category": "productivity",
@@ -47,5 +47,25 @@
       "title": "Google Workspace",
       "description": "本机 Google Workspace CLI：Gmail / Sheets / Drive / Calendar。OAuth 登录通过 oauth-flow.cicy-ai.com 中转（不经过 client_secret 和 token）。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "google search",
+      "example": "google search 'query'",
+      "description": "Search Google and return results",
+      "prompt": "帮我用 google search 搜索，请告诉我搜索词"
+    },
+    {
+      "name": "google login",
+      "example": "google login",
+      "description": "Authorize Google account via device-code flow",
+      "prompt": "运行 google login 完成 Google 账号授权"
+    },
+    {
+      "name": "google status",
+      "example": "google status",
+      "description": "Check Google OAuth status",
+      "prompt": "运行 google status 查看 Google 授权状态"
+    }
+  ]
 }

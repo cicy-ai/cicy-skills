@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "eng",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "English Correction",
   "description": "One-shot English correction wrapper. POSTs the input text to cicy-code's /api/ai/correct endpoint and prints the corrected version.",
   "category": "productivity",
@@ -44,5 +44,13 @@
       "title": "英文校对",
       "description": "一键英文语法校正包装器。将输入文本 POST 到 cicy-code 的 /api/ai/correct 并输出修正结果。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "eng",
+      "example": "eng '翻译这段话'",
+      "description": "Translate text to English",
+      "prompt": "帮我用 eng 翻译一段话，请告诉我内容"
+    }
+  ]
 }

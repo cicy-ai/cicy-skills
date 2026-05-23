@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "frp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "FRP Server",
   "description": "Manage a local frps process on this host with background start, status, connections, hot reload, and stop/start controls.",
   "category": "network",
@@ -43,5 +43,25 @@
       "title": "FRP 服务端",
       "description": "管理本机 frps 进程，支持后台启动、状态查询、连接列表、热重载和 start/stop。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "frp-server start",
+      "example": "frp-server start",
+      "description": "Start frps (FRP server) in background",
+      "prompt": "运行 frp-server start 启动 FRP 服务端"
+    },
+    {
+      "name": "frp-server status",
+      "example": "frp-server status",
+      "description": "Show frps status and connected clients",
+      "prompt": "运行 frp-server status 查看 FRP 服务端状态"
+    },
+    {
+      "name": "frp-server stop",
+      "example": "frp-server stop",
+      "description": "Stop frps",
+      "prompt": "运行 frp-server stop 停止 FRP 服务端"
+    }
+  ]
 }

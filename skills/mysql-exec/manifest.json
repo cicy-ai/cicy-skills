@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "mysql-exec",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "MySQL Exec",
   "description": "Run a one-shot SQL statement against the local cicy-mysql container via docker exec. Reads root password from ~/projects/cicy-code/.env.",
   "category": "dev",
@@ -40,5 +40,19 @@
       "title": "MySQL 执行",
       "description": "通过 docker exec 对本机 cicy-mysql 容器执行一条 SQL 语句，从 ~/projects/cicy-code/.env 读取 root 密码。"
     }
-  }
+  },
+  "tools": [
+    {
+      "name": "mysql-exec",
+      "example": "mysql-exec 'SELECT 1'",
+      "description": "Execute a MySQL query",
+      "prompt": "帮我用 mysql-exec 执行一条 SQL 查询，请告诉我 SQL"
+    },
+    {
+      "name": "mysql-exec --db",
+      "example": "mysql-exec --db mydb 'SHOW TABLES'",
+      "description": "Execute query on a specific database",
+      "prompt": "帮我用 mysql-exec 查看某个数据库的表，请告诉我数据库名"
+    }
+  ]
 }
