@@ -41,7 +41,3 @@ When `cf exec` is invoked, the child process additionally sees:
   }
 }
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

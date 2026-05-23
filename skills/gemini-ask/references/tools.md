@@ -25,7 +25,3 @@ Note: this push is **broadcast to all clients of the agent** (no
 
 - `win_id` is the cicy-desktop window index showing Gemini (default 4).
 - If multiple Gemini windows exist, pass an explicit `win_id`.
-
-## Exit codes
-
-See [help.md](./help.md).

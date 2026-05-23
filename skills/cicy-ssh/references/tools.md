@@ -49,7 +49,3 @@ under the hood (which does follow `Include`).
 - `cicy-ssh show <alias>` to see exact lines before editing
 - `cicy-ssh add` only appends; for renames or deletes edit the file by hand
 - for interactive ssh, **call `ssh` directly** — `exec` does NOT allocate a TTY
-
-## Exit codes
-
-See [help.md](./help.md).

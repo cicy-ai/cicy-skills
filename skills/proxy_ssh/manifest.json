@@ -1,0 +1,32 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "proxy_ssh",
+  "version": "1.0.0",
+  "title": "Proxy SSH",
+  "description": "Manage autossh-based SOCKS5 proxy profiles on this host. list/show/create/delete, start/stop/restart, connectivity test. Each profile pins a local SOCKS port to an SSH target.",
+  "category": "network",
+  "tags": ["ssh", "proxy", "socks5", "autossh", "tunnel"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/proxy_ssh",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": ["python3", "autossh"],
+  "npm_dependencies": false,
+  "entry": "bin/proxy_ssh_wrapper.js",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/db/proxy_ssh.json",
+    "secret_fields": []
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "SSH 代理管理",
+      "description": "管理基于 autossh 的 SOCKS5 代理配置（list/show/create/delete、start/stop/restart、连通性测试），每个 profile 绑定一个本地 SOCKS 端口到 SSH 目标。"
+    }
+  }
+}

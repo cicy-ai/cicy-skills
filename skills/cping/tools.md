@@ -77,7 +77,3 @@ On error:
 | `NETWORK`       | DNS or connect failure, exit 4     |
 | `TIMEOUT`       | step exceeded budget, exit 3 or 4  |
 | `INTERNAL`      | unexpected error, exit 1           |
-
-## Exit codes
-
-See [help.md](./help.md).

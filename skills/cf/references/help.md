@@ -39,14 +39,3 @@ cf exec npx wrangler kv namespace create FOO
 
 - `CICY_CF_CONFIG` — override config path (default `~/cicy-ai/db/cf.json`)
 - `EDITOR` / `VISUAL` — editor for `cf config`
-
-## Exit codes
-
-| code | meaning                                      |
-|------|----------------------------------------------|
-| 0    | success                                      |
-| 1    | generic error / unparseable response         |
-| 2    | invalid arguments                            |
-| 3    | config missing or placeholder                |
-| 4    | Cloudflare API returned non-2xx              |
-| 5    | filesystem permission error                  |

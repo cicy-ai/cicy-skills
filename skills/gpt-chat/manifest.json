@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "gpt-chat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "GPT Chat (with history)",
   "description": "Multi-turn chat against cicy-code's /api/ai/chat with persistent history at ~/Private/data/gpt-chat-history.json. Optional system prompt. Subcommands - --clear, --system, --show-system.",
   "category": "productivity",

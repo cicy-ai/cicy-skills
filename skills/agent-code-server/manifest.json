@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-code-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Agent Code Server",
   "description": "Open files in the page-bound code-server on this host. Bridges to the live :code-ext extension via cicy-code's chat push channel.",
   "category": "dev",

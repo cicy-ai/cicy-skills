@@ -62,7 +62,3 @@ The OAuth client file accepts either:
 - NEVER cat / read / print either config file
 - NEVER ask the user to paste client_secret / refresh_token / auth-code into chat
 - Walk the user through `google setup` step by step rather than skipping ahead
-
-## Exit codes
-
-See [help.md](./help.md).

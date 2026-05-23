@@ -37,7 +37,3 @@ After the call:
 | path                    | mode | secret_fields  |
 |-------------------------|------|----------------|
 | `~/cicy-ai/global.json` | 0600 | `api_token`    |
-
-## Exit codes
-
-See [help.md](./help.md).

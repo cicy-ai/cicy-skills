@@ -25,10 +25,6 @@ MySQL 8 prints `[Warning] Using a password on the command line interface
 can be insecure.` for every invocation. The wrapper strips this single
 line from stderr while preserving real error output.
 
-## Exit codes
-
-See [help.md](./help.md).
-
 ## Limitations
 
 - one statement per call (no `;`-separated scripts — pipe a `.sql` file directly via `docker exec -i ...` for that)

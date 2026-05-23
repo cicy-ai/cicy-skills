@@ -46,7 +46,3 @@ POST /api/tmux/send-keys
 POST /api/tmux/capture_pane
 { "pane_id": "w-10001" }
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

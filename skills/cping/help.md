@@ -71,16 +71,6 @@ On failure:
 }
 ```
 
-## Exit codes
-
-| code | meaning                           |
-|------|-----------------------------------|
-| 0    | reachable                         |
-| 1    | generic failure                   |
-| 2    | invalid arguments                 |
-| 3    | timeout (reserved)                |
-| 4    | DNS or network failure            |
-
 ## Environment variables
 
 (none — cping is stateless)

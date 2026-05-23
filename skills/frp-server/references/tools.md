@@ -47,7 +47,3 @@ frp-server start -- --log-level debug
 # raw passthrough:
 frp-server raw -- verify -c ~/cicy-ai/db/frps.toml
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

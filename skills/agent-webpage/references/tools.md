@@ -48,7 +48,3 @@ agent-webpage exec-js 'document.title' web-abc123
 # arbitrary JSON in / out
 agent-webpage send my_action '{"x":1}' web-abc123 my_action_reply --json
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

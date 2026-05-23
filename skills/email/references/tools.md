@@ -47,7 +47,3 @@ Config keys:
 ```json
 { "ok": false, "status": 422, "response": { "name": "validation_error", "message": "..." } }
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

@@ -1,0 +1,125 @@
+name: Publish skill
+
+# Triggered by tags of the form <name>-v<X.Y.Z>, e.g.  cping-v1.0.0
+#
+# Steps:
+#   1. Parse <name> + <version> from the tag.
+#   2. Validate skills/<name>/.
+#   3. Pack skills/<name>/ into dist/<name>-<version>.zip + sha256.
+#   4. Create / update GitHub Release with the zip asset.
+#   5. POST manifest + verify { sha256, size, download_url } to skills.cicy-ai.com
+#      so the Worker KV index picks up the new version.
+#
+# Required repo secret:
+#   SKILLS_REGISTRY_ADMIN_TOKEN   value of the Worker's ADMIN_TOKEN secret
+
+on:
+  push:
+    tags:
+      - "*-v[0-9]+.[0-9]+.[0-9]+"
+      - "*-v[0-9]+.[0-9]+.[0-9]+-*"
+
+  # allow manual re-run for a specific (already-tagged) version
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "tag, e.g. cping-v1.0.0"
+        required: true
+
+permissions:
+  contents: write    # needed for creating releases / uploading assets
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (tagged ref)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve tag → name + version
+        id: parse
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^([a-z][a-z0-9_-]*)-v([0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?)$ ]]; then
+            echo "tag '$TAG' does not match <name>-v<semver>" >&2
+            exit 1
+          fi
+          NAME="${BASH_REMATCH[1]}"
+          VERSION="${BASH_REMATCH[2]}"
+          echo "name=$NAME"       >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "→ name=$NAME version=$VERSION"
+
+      - name: Validate skill
+        shell: bash
+        run: |
+          node tools/validate-skill.js "skills/${{ steps.parse.outputs.name }}"
+
+      - name: Verify manifest version matches tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          M_VER=$(jq -r .version "skills/${{ steps.parse.outputs.name }}/manifest.json")
+          if [ "$M_VER" != "${{ steps.parse.outputs.version }}" ]; then
+            echo "manifest.version ($M_VER) != tag version (${{ steps.parse.outputs.version }})" >&2
+            exit 1
+          fi
+
+      - name: Pack zip
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/pack-skill.js "skills/${{ steps.parse.outputs.name }}" --out dist
+          ZIP="dist/${{ steps.parse.outputs.name }}-${{ steps.parse.outputs.version }}.zip"
+          SHA=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "$ZIP")
+          echo "zip=$ZIP"   >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE"  >> "$GITHUB_OUTPUT"
+
+      - name: Create / update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.parse.outputs.tag }}"
+          NAME="${{ steps.parse.outputs.name }}"
+          VERSION="${{ steps.parse.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists — uploading asset (will overwrite)"
+            gh release upload "$TAG" "${{ steps.pack.outputs.zip }}" --clobber
+          else
+            echo "creating release $TAG"
+            gh release create "$TAG" \
+              --title "$NAME v$VERSION" \
+              --notes "Automated release of skill $NAME@$VERSION. See skills/$NAME/README.md." \
+              "${{ steps.pack.outputs.zip }}"
+          fi
+
+      - name: Register with skills.cicy-ai.com
+        env:
+          ADMIN_TOKEN: ${{ secrets.SKILLS_REGISTRY_ADMIN_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ADMIN_TOKEN:-}" ]; then
+            echo "::warning::SKILLS_REGISTRY_ADMIN_TOKEN not set — skipping registry publish"
+            exit 0
+          fi
+          # publish.js HEADs the github release URL by default to confirm reachability
+          node tools/publish.js "skills/${{ steps.parse.outputs.name }}" \
+            --registry "https://skills.cicy-ai.com" \
+            --repo     "${{ github.repository }}"

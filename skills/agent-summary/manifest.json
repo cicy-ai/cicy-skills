@@ -1,0 +1,34 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "agent-summary",
+  "version": "1.0.0",
+  "title": "Agent Summary",
+  "description": "Generate conversation summaries and handoff documents from agent sessions (claude/codex/opencode).",
+  "category": "dev",
+  "tags": ["summary", "handoff", "agent", "claude", "codex", "opencode"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-summary",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": ["python3"],
+  "npm_dependencies": false,
+  "entry": "bin/agent-summary",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": ["api_token"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Agent 会话摘要",
+      "description": "从 claude/codex/opencode agent 会话生成摘要和工作交接文档。"
+    }
+  }
+}

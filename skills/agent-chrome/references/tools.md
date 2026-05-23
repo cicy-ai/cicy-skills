@@ -46,7 +46,3 @@ agent-chrome cdp Runtime.evaluate '{"expression":"document.title"}' --idx 1
 # screenshot the active tab
 agent-chrome cdp Page.captureScreenshot '{}' --idx 1
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

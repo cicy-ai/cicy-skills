@@ -43,7 +43,3 @@
 agent-desktop rpc clipboard_read_text '{}' --json
 agent-desktop rpc exec_shell '{"command":"ls -la"}'
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

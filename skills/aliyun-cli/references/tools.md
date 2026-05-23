@@ -54,7 +54,3 @@ Pinned version: `3.0.290`.
   }
 }
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

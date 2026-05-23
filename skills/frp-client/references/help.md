@@ -38,13 +38,3 @@ When the target FRP client is on another machine, manage it through ssh:
 ssh remote-box 'frp-client status'
 ssh remote-box 'frp-client reload'
 ```
-
-## Exit codes
-
-| code | meaning                       |
-|------|-------------------------------|
-| 0    | success                       |
-| 1    | generic                       |
-| 2    | invalid arguments             |
-| 3    | missing binary / config / log |
-| 4    | already running / web-api / kill error |

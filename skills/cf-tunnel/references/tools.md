@@ -76,7 +76,3 @@ compatibility with the `cf` skill, treating it as the `prod` block.
   }
 }
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

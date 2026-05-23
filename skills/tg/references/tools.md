@@ -27,7 +27,3 @@ The wrapper prints `✓ Sent.` on `ok: true`, `✗ <description>` on
 
 Telegram bot token / chat_id are **not** here — they're in cicy-code's own
 server-side config.
-
-## Exit codes
-
-See [help.md](./help.md).

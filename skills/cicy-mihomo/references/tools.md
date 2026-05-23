@@ -104,7 +104,3 @@ if the profile doesn't exist anywhere in the yaml.
 Connections coming through a named listener never reach the auth-user
 rules below them. `add-chrome-profile` always inserts the new
 `IN-NAME` line at the top of `rules:` for this reason.
-
-## Exit codes
-
-See [help.md](./help.md).

@@ -49,7 +49,3 @@ The token is also accepted from `CICY_API_TOKEN` env (overrides file).
 returned (typically `{ todo: {...} }`) wrapped in `{ ok, data }`.
 
 `rm --json` returns `{ ok: true, data: { ... } }`.
-
-## Exit codes
-
-See [help.md](./help.md).

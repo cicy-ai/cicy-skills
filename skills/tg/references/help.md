@@ -19,13 +19,3 @@ tg --help / -h / help
 
 Bot token + chat id are kept in cicy-code's own config (not in
 `global.json`). If sending fails with auth/chat errors, fix cicy-code.
-
-## Exit codes
-
-| code | meaning                              |
-|------|--------------------------------------|
-| 0    | success                              |
-| 1    | generic                              |
-| 2    | invalid arguments                    |
-| 3    | missing config / cicy-code unreachable |
-| 4    | api error (e.g. Telegram returned `ok:false`) |

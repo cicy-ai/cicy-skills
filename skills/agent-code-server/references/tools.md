@@ -47,7 +47,3 @@ is gated on a 1s sleep. Other errors fail immediately.
 `ping --json`: `{ ok, data: { connected: true, version, ... } }`
 `active --json` / `tabs --json`: extension payload as-is.
 `list --json`: `{ ok, data: [ { agent_id, page_client_id, code_server_client_id, code_server_connected } ] }`
-
-## Exit codes
-
-See [help.md](./help.md).

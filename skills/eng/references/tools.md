@@ -30,7 +30,3 @@ POST http://127.0.0.1:$CICY_API_PORT/api/ai/correct
 ```json
 { "ok": true, "data": { "result": "She doesn't know.", "input": "she dont know" } }
 ```
-
-## Exit codes
-
-See [help.md](./help.md).

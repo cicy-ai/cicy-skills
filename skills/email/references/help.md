@@ -36,13 +36,3 @@ email send --subject "Done" --body "Build OK"   # uses default_to
 
 - `CICY_EMAIL_CONFIG` — override config path
 - `EDITOR`/`VISUAL` — for `email config`
-
-## Exit codes
-
-| code | meaning                                  |
-|------|------------------------------------------|
-| 0    | success                                  |
-| 1    | generic error                            |
-| 2    | invalid arguments                        |
-| 3    | config missing / placeholder             |
-| 4    | Resend API returned non-2xx              |

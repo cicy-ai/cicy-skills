@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "aliyun-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Aliyun CLI Bootstrap",
   "description": "Install and configure the official Aliyun CLI on this host. Bootstrap-only wrapper: install / config / status. For real API calls use the native aliyun CLI.",
   "category": "cloud",

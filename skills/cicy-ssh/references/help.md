@@ -26,13 +26,3 @@ rsync -av ./local/ <alias>:/remote/
 ## Environment
 
 - `CICY_SSH_CONFIG` — override config path (default `~/.ssh/config`)
-
-## Exit codes
-
-| code | meaning                  |
-|------|--------------------------|
-| 0    | success                  |
-| 1    | generic error            |
-| 2    | invalid arguments        |
-| 3    | missing config           |
-| 4    | host not found / ssh err |

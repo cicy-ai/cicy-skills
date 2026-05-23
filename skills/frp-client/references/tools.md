@@ -46,7 +46,3 @@ ssh remote 'frp-client status --json'
 
 The wrapper is exit-code clean and JSON-friendly, so piping through ssh
 behaves naturally.
-
-## Exit codes
-
-See [help.md](./help.md).

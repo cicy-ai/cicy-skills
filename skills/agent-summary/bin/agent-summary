@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+// agent-summary — Node wrapper that delegates to agent-summary.py
+import { execFileSync } from 'node:child_process';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dir = dirname(fileURLToPath(import.meta.url));
+const script = join(__dir, 'agent-summary.py');
+
+if (process.argv.slice(2).some(a => a === '--help' || a === '-h' || a === 'help')) {
+  process.stdout.write(`agent-summary — Generate conversation summaries and handoff documents.
+
+Usage:
+  agent-summary <agent-id>                    # text summary
+  agent-summary <agent-id> --stats            # token stats
+  agent-summary <agent-id> --slim             # slim JSON
+  agent-summary <agent-id> --text             # structured text
+  agent-summary <agent-id> --ai               # AI handoff doc
+  agent-summary <agent-id> --ai --provider=X
+  agent-summary <agent-id> --ai --model=X
+  agent-summary <path/to/current.json>        # explicit file
+`);
+  process.exit(0);
+}
+
+try {
+  execFileSync('python3', [script, ...process.argv.slice(2)], { stdio: 'inherit' });
+} catch (e) {
+  process.exit(e.status ?? 1);
+}

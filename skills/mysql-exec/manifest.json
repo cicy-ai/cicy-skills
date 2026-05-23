@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "mysql-exec",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "MySQL Exec",
   "description": "Run a one-shot SQL statement against the local cicy-mysql container via docker exec. Reads root password from ~/projects/cicy-code/.env.",
   "category": "dev",

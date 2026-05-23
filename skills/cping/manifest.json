@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cping",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "China-side Reachability",
   "description": "Check network latency and reachability to a domain or IP from this host, with emphasis on China-side reachability.",
   "category": "network",
