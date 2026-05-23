@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cf-tunnel",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Cloudflare Tunnel",
   "description": "Manage Cloudflare Tunnel routes and DNS records on this host. Subcommands: config / status / list / add / del.",
   "category": "cloud",
@@ -52,32 +52,27 @@
     {
       "name": "cf-tunnel config",
       "example": "cf-tunnel config",
-      "description": "Show current tunnel configuration",
-      "prompt": "运行 cf-tunnel config 查看 Cloudflare Tunnel 配置"
+      "description": "Show current tunnel configuration"
     },
     {
       "name": "cf-tunnel status",
       "example": "cf-tunnel status",
-      "description": "Check tunnel daemon status",
-      "prompt": "运行 cf-tunnel status 查看 tunnel 状态"
+      "description": "Check tunnel daemon status"
     },
     {
       "name": "cf-tunnel list",
       "example": "cf-tunnel list",
-      "description": "List all tunnel routes and DNS records",
-      "prompt": "运行 cf-tunnel list 列出所有路由"
+      "description": "List all tunnel routes and DNS records"
     },
     {
       "name": "cf-tunnel add",
       "example": "cf-tunnel add 8080 myapp.example.com",
-      "description": "Add a new tunnel route with DNS record",
-      "prompt": "帮我用 cf-tunnel add 添加一个新路由，请先询问端口和域名"
+      "description": "Add a new tunnel route with DNS record"
     },
     {
       "name": "cf-tunnel del",
       "example": "cf-tunnel del myapp.example.com",
-      "description": "Remove a tunnel route and DNS record",
-      "prompt": "帮我用 cf-tunnel del 删除一个路由，请先询问要删哪个"
+      "description": "Remove a tunnel route and DNS record"
     }
   ]
 }

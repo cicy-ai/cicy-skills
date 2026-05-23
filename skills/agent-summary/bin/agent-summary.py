@@ -10,7 +10,7 @@ Usage:
     agent-summary <agent-id> --ai               # Generate AI summary (default provider)
     agent-summary <agent-id> --ai --provider=deepseek   # Use specific provider
     agent-summary <agent-id> --ai --model=deepseek-chat # Use specific model
-    agent-summary <agent-id> --ai --prompt="自定义提示"  # Custom prompt
+    agent-summary <agent-id> --ai --prompt="custom prompt"  # Custom prompt
 
 Supports both Anthropic and OpenAI (Responses API) formats.
 AI providers are configured in ~/cicy-ai/global.json
@@ -492,84 +492,84 @@ def load_opencode_as_snapshot(agent_id: str) -> dict:
     }
 
 
-DEFAULT_SUMMARY_PROMPT = """你是一个 AI Agent 工作交接专家。请分析以下会话记录，生成一份完整的工作交接文档，让一个全新的 AI Agent 可以直接接手继续工作。
+DEFAULT_SUMMARY_PROMPT = """You are an AI Agent handoff specialist. Analyze the conversation log below and produce a complete handoff document so a brand-new AI Agent can pick up the work immediately.
 
-**重要**：注意区分会话中间的临时错误和最终状态，以最后一次成功运行的结果为准。不要把已经修复的问题列为待完成任务。
+**Important**: Distinguish between transient errors mid-session and the final state. Base your output on the last successful outcome — do not list already-fixed issues as pending tasks.
 
-## 输出格式要求（必须包含以下所有部分）
+## Required Output Sections (include all)
 
-### 0. 必读文件（重要）
-从会话记录中找出项目中的以下文件位置（如果存在）：
-- `CLAUDE.md` - Claude Code 的项目配置文件
-- `AGENTS.md` - Agent 协作规范文件
-- 其他重要的配置文件（如 `.claude/settings.json`）
+### 0. Must-Read Files
+Identify the following files in the project (if they exist):
+- `CLAUDE.md` — Claude Code project config
+- `AGENTS.md` — Agent collaboration spec
+- Other important config files (e.g. `.claude/settings.json`)
 
-列出完整路径。
+List their full paths.
 
-### 1. 立即行动（最重要）
-**只列出一个最紧急的任务**，包含：
-- 要做什么（一句话）
-- 具体文件和行号（如 `path/to/file.go:123`）
-- 执行什么命令来验证修复成功
-- 预期结果是什么
+### 1. Immediate Action (most important)
+**List exactly one most-urgent task**, including:
+- What to do (one sentence)
+- Exact file and line number (e.g. `path/to/file.go:123`)
+- Command to verify the fix
+- Expected result
 
-如果会话中的任务已经全部完成，写"无待处理任务，可以开始新工作"。
+If all tasks in the session are complete, write "No pending tasks — ready for new work."
 
-示例格式：
+Example format:
 ```
-任务：修复 ensureLatestStreamingTurn 重复声明导致的编译错误
-文件：/path/to/CurrentHistoryView.tsx:456-478
-操作：删除第 456-478 行的重复函数定义
-验证：npm run build 应该成功，无 "Duplicate function" 错误
+Task: Fix duplicate declaration of ensureLatestStreamingTurn causing build error
+File: /path/to/CurrentHistoryView.tsx:456-478
+Action: Delete the duplicate function definition at lines 456-478
+Verify: npm run build — should succeed with no "Duplicate function" error
 ```
 
-### 2. 项目概述（简洁）
-- 项目名称和一句话描述
-- 技术栈（语言、框架）
-- 3-5 个最关键的文件路径
+### 2. Project Overview (brief)
+- Project name and one-line description
+- Tech stack (language, framework)
+- 3–5 most critical file paths
 
-### 3. 当前任务背景
-- 用户最初的需求是什么？（一句话）
-- 任务的范围和边界
+### 3. Current Task Context
+- What did the user originally ask for? (one sentence)
+- Scope and boundaries of the task
 
-### 4. 已完成的工作（列表）
-每项只需：文件路径 + 改了什么（一句话）
+### 4. Completed Work (list)
+Each item: file path + what changed (one sentence)
 
-### 5. 待完成任务（最多 3 个，按优先级排序）
-对于每个任务：
-- 任务描述（一句话）
-- 卡在哪里
-- 相关文件和行号
-- 验证命令
+### 5. Pending Tasks (max 3, by priority)
+For each task:
+- Description (one sentence)
+- Where it is stuck
+- Relevant files and line numbers
+- Verification command
 
-如果没有待完成任务，写"无"。
+If no pending tasks, write "None."
 
-### 6. 关键约束（必须遵守）
-- 用户明确要求的做法（列表）
-- 用户明确禁止的做法（列表）
+### 6. Key Constraints (must follow)
+- What the user explicitly required (list)
+- What the user explicitly forbade (list)
 
-### 7. 踩过的坑（避免重复）
-每个坑：尝试了什么 → 为什么失败 → 应该怎么做
+### 7. Pitfalls to Avoid
+Each pitfall: tried → why it failed → what to do instead
 
-### 8. 下一步行动
-新 Agent 接手后：
-1. **首先**：根据你的类型读取配置文件
-   - 如果你是 **Codex/OpenAI Agent** → 读取 `AGENTS.md`
-   - 如果你是 **Claude Agent** → 读取 `CLAUDE.md`
-   - 不要全读，只读与你相关的那个
-2. 执行"立即行动"中的任务
-3. 用验证命令确认修复成功
+### 8. Next Steps
+After taking over:
+1. **First**: read the appropriate config file for your agent type
+   - **Codex/OpenAI Agent** → read `AGENTS.md`
+   - **Claude Agent** → read `CLAUDE.md`
+   - Read only the one relevant to you
+2. Execute the "Immediate Action" task
+3. Run the verification command to confirm success
 
 ---
 
-**重要**：
-- 输出要简洁，每个部分不超过 10 行
-- 必须包含具体的文件路径和行号
-- 必须包含验证命令
-- "立即行动"部分是最重要的，要让新 agent 看完就能动手
-- 以会话结束时的最终状态为准，不要把中间的临时错误当成待处理任务
+**Important**:
+- Be concise — each section ≤ 10 lines
+- Must include specific file paths and line numbers
+- Must include verification commands
+- "Immediate Action" is the most critical section — a new agent must be able to act on it right away
+- Base everything on the final state of the session, not transient mid-session errors
 
-会话记录：
+Conversation log:
 """
 
 
@@ -1019,7 +1019,7 @@ def generate_structured_text(messages: list) -> str:
                 if role == 'user':
                     user_requests.append(f"[{msg_id}] {text}")
                 else:
-                    assistant_actions.append(f"[{msg_id}] 回复: {text}")
+                    assistant_actions.append(f"[{msg_id}] reply: {text}")
 
             elif btype == 'tool_use':
                 name = block.get('name', '')
@@ -1036,7 +1036,7 @@ def generate_structured_text(messages: list) -> str:
 
     # Build structured text
     lines.append("=" * 60)
-    lines.append("用户消息和需求")
+    lines.append("User Messages & Requests")
     lines.append("=" * 60)
     for req in user_requests:
         lines.append(req)
@@ -1044,7 +1044,7 @@ def generate_structured_text(messages: list) -> str:
 
     lines.append("")
     lines.append("=" * 60)
-    lines.append("AI 操作记录")
+    lines.append("AI Actions & Tool Use")
     lines.append("=" * 60)
     for action in assistant_actions:
         lines.append(action)
@@ -1057,30 +1057,30 @@ def format_tool_action(name: str, inp: dict) -> str:
     n = (name or "").lower()
     if n in ('bash', 'exec_command', 'shell'):
         cmd = (inp.get('command') or inp.get('cmd') or '')[:150]
-        return f"执行命令: {cmd}"
+        return f"run: {cmd}"
     elif n in ('read', 'glob', 'grep'):
         path = inp.get('file_path') or inp.get('path') or inp.get('pattern') or inp.get('query') or ''
-        return f"读取文件: {path}" if n == 'read' else f"搜索文件: {path}"
+        return f"read: {path}" if n == 'read' else f"search: {path}"
     elif n in ('write', 'fs_write'):
-        return f"写入文件: {inp.get('file_path') or inp.get('path') or ''}"
+        return f"write: {inp.get('file_path') or inp.get('path') or ''}"
     elif n in ('edit', 'apply_patch', 'str_replace', 'fs_patch', 'code'):
-        return f"编辑文件: {inp.get('file_path') or inp.get('path') or ''}"
+        return f"edit: {inp.get('file_path') or inp.get('path') or ''}"
     elif n in ('websearch', 'web_search'):
-        return f"搜索: {inp.get('query', '')}"
+        return f"search: {inp.get('query', '')}"
     elif n in ('webfetch', 'web_fetch'):
-        return f"获取网页: {inp.get('url', '')}"
+        return f"fetch: {inp.get('url', '')}"
     elif n == 'agent':
-        return f"启动子代理: {inp.get('description', '')}"
+        return f"spawn agent: {inp.get('description', '')}"
     elif n == 'skill':
-        return f"调用技能: {inp.get('name', '')}"
+        return f"call skill: {inp.get('name', '')}"
     elif n == 'task':
-        return f"创建任务: {inp.get('description') or inp.get('title') or ''}"
+        return f"task: {inp.get('description') or inp.get('title') or ''}"
     elif n in ('todo_list', 'todowrite', 'todoread'):
-        return f"更新任务列表"
+        return f"update todo list"
     elif n in ('knowledge', 'memory'):
-        return f"知识库操作: {inp.get('command', '') or inp.get('query', '')}"
+        return f"knowledge: {inp.get('command', '') or inp.get('query', '')}"
     elif name:
-        return f"调用工具: {name}"
+        return f"tool: {name}"
     return ""
 
 
@@ -1342,7 +1342,7 @@ def main():
         # Append reply.json content if available
         if reply_data and reply_data.get('items'):
             text += "\n\n" + "=" * 60 + "\n"
-            text += "当前回复 (reply.json)\n"
+            text += "current reply (reply.json)\n"
             text += "=" * 60 + "\n"
             text += f"Turn ID: {reply_data.get('turn_id', 'N/A')}\n"
             text += f"Status: {reply_data.get('status', 'N/A')}\n"
@@ -1377,7 +1377,7 @@ def main():
             tail = text.encode('utf-8')[-MAX_CONTENT_BYTES:].decode('utf-8', errors='ignore')
             # Re-align to a line boundary
             tail = tail[tail.find('\n') + 1:] if '\n' in tail else tail
-            text = "[会话记录过长，已截取最近部分]\n\n" + tail
+            text = "[conversation too long, showing recent portion]\n\n" + tail
             print(f"content truncated to ~{MAX_CONTENT_BYTES//1000}KB (keeping tail)", file=sys.stderr)
 
         # Call AI API
@@ -1457,26 +1457,13 @@ def main():
 
 ## Summary Prompt
 
-生成 AI Summary 时使用的提示词：
+Prompt used to generate AI Summary:
 
 <details>
 <summary>Click to expand</summary>
 
 ```
 {summary_prompt.strip()}
-```
-
-</details>
-
-## Original System Prompt
-
-原始会话的 System Prompt：
-
-<details>
-<summary>Click to expand</summary>
-
-```
-{original_system_prompt}
 ```
 
 </details>

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "gemini-ask",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Gemini Ask",
   "description": "Ask Google Gemini in a connected cicy-desktop window via desktop_event WebSocket RPC. Returns the assistant text.",
   "category": "productivity",
@@ -49,14 +49,12 @@
     {
       "name": "gemini-ask",
       "example": "gemini-ask 'your question'",
-      "description": "Ask a question to Gemini",
-      "prompt": "帮我用 gemini-ask 向 Gemini 提一个问题"
+      "description": "Ask a question to Gemini"
     },
     {
       "name": "gemini-ask --model",
       "example": "gemini-ask --model gemini-pro 'question'",
-      "description": "Use a specific Gemini model",
-      "prompt": "帮我用 gemini-ask --model gemini-pro 提问"
+      "description": "Use a specific Gemini model"
     }
   ]
 }

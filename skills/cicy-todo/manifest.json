@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-todo",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Cicy Todo",
   "description": "Per-workspace todo list (todo/doing/done/dropped) backed by /api/todo on the local cicy-code server.",
   "category": "dev",
@@ -48,26 +48,22 @@
     {
       "name": "todo list",
       "example": "cicy-todo list",
-      "description": "List all todos for current workspace",
-      "prompt": "运行 cicy-todo list 列出当前工作区的所有待办"
+      "description": "List all todos for current workspace"
     },
     {
       "name": "todo add",
       "example": "cicy-todo add '任务描述'",
-      "description": "Add a new todo item",
-      "prompt": "帮我用 cicy-todo add 添加一个新待办，请告诉我任务描述"
+      "description": "Add a new todo item"
     },
     {
       "name": "todo done",
       "example": "cicy-todo done <id>",
-      "description": "Mark a todo as done",
-      "prompt": "帮我用 cicy-todo done 标记一个待办为完成，先用 list 看 ID"
+      "description": "Mark a todo as done"
     },
     {
       "name": "todo doing",
       "example": "cicy-todo doing <id>",
-      "description": "Move a todo to in-progress",
-      "prompt": "帮我用 cicy-todo doing 将待办设为进行中"
+      "description": "Move a todo to in-progress"
     }
   ]
 }

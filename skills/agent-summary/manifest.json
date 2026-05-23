@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-summary",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "Agent Summary",
   "description": "Generate conversation summaries and handoff documents from agent sessions (claude/codex/opencode).",
   "category": "dev",
@@ -51,20 +51,17 @@
     {
       "name": "summary",
       "example": "agent-summary <agent-id>",
-      "description": "Generate a conversation summary for an agent session",
-      "prompt": "帮我用 agent-summary 生成一份对话摘要，请告诉我 agent ID"
+      "description": "Generate a conversation summary for an agent session"
     },
     {
       "name": "summary --ai",
       "example": "agent-summary <agent-id> --ai",
-      "description": "AI-generated summary using default provider",
-      "prompt": "帮我用 agent-summary --ai 生成 AI 摘要"
+      "description": "AI-generated summary using default provider"
     },
     {
       "name": "summary --stats",
       "example": "agent-summary <agent-id> --stats",
-      "description": "Show token usage statistics only",
-      "prompt": "用 agent-summary --stats 查看 token 使用统计"
+      "description": "Show token usage statistics only"
     }
   ]
 }

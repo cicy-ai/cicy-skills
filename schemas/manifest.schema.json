@@ -278,10 +278,6 @@
           "example": {
             "type": "string",
             "maxLength": 200
-          },
-          "prompt": {
-            "type": "string",
-            "maxLength": 500
           }
         },
         "additionalProperties": false

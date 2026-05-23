@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "email",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Email (Resend)",
   "description": "Send transactional email from this host via Resend. Subcommands: config / status / send.",
   "category": "productivity",
@@ -49,20 +49,17 @@
     {
       "name": "email send",
       "example": "email send --to user@example.com --subject 'Hello'",
-      "description": "Send an email via configured SMTP",
-      "prompt": "帮我用 email 发一封测试邮件，请先询问收件人和主题"
+      "description": "Send an email via configured SMTP"
     },
     {
       "name": "email config",
       "example": "email config",
-      "description": "Show or edit email configuration",
-      "prompt": "运行 email config 查看邮件配置"
+      "description": "Show or edit email configuration"
     },
     {
       "name": "email status",
       "example": "email status",
-      "description": "Check email service status",
-      "prompt": "运行 email status 检查邮件服务状态"
+      "description": "Check email service status"
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-desktop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Agent Desktop",
   "description": "Control a connected cicy-desktop (Electron) client on this host. Screenshot, clipboard, exec shell, list windows, raw electronRPC via desktop_event over WebSocket.",
   "category": "dev",
@@ -50,26 +50,22 @@
     {
       "name": "screenshot",
       "example": "agent-desktop screenshot",
-      "description": "Take a screenshot of the Electron desktop",
-      "prompt": "用 agent-desktop screenshot 截取桌面截图"
+      "description": "Take a screenshot of the Electron desktop"
     },
     {
       "name": "exec",
       "example": "agent-desktop exec 'open -a Calculator'",
-      "description": "Run a shell command on the desktop host",
-      "prompt": "帮我用 agent-desktop exec 在桌面主机执行命令，请告诉我命令"
+      "description": "Run a shell command on the desktop host"
     },
     {
       "name": "clipboard",
       "example": "agent-desktop clipboard",
-      "description": "Get current clipboard content",
-      "prompt": "用 agent-desktop clipboard 获取剪贴板内容"
+      "description": "Get current clipboard content"
     },
     {
       "name": "list-windows",
       "example": "agent-desktop list-windows",
-      "description": "List all open windows on the desktop",
-      "prompt": "运行 agent-desktop list-windows 列出所有窗口"
+      "description": "List all open windows on the desktop"
     }
   ]
 }

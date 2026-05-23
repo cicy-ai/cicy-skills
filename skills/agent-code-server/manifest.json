@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-code-server",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Agent Code Server",
   "description": "Open files in the page-bound code-server on this host. Bridges to the live :code-ext extension via cicy-code's chat push channel.",
   "category": "dev",
@@ -49,14 +49,12 @@
     {
       "name": "open",
       "example": "agent-code-server open /path/to/file",
-      "description": "Open a file in the code-server editor",
-      "prompt": "帮我用 agent-code-server open 打开一个文件，请告诉我文件路径"
+      "description": "Open a file in the code-server editor"
     },
     {
       "name": "ping",
       "example": "agent-code-server ping",
-      "description": "Check if code-server extension is alive",
-      "prompt": "运行 agent-code-server ping 检查 code-server 扩展状态"
+      "description": "Check if code-server extension is alive"
     }
   ]
 }

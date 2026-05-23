@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-chrome",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Agent Chrome",
   "description": "Control system Chrome on a connected cicy-desktop host with per-profile proxy support. CDP + ~/Private/chrome.json multi-profile via desktop_event RPC.",
   "category": "dev",
@@ -50,26 +50,22 @@
     {
       "name": "screenshot",
       "example": "agent-chrome screenshot",
-      "description": "Take a screenshot of the active Chrome tab",
-      "prompt": "用 agent-chrome 截图当前 Chrome 标签页"
+      "description": "Take a screenshot of the active Chrome tab"
     },
     {
       "name": "navigate",
       "example": "agent-chrome navigate https://example.com",
-      "description": "Navigate Chrome to a URL",
-      "prompt": "帮我用 agent-chrome 打开一个网址，请告诉我 URL"
+      "description": "Navigate Chrome to a URL"
     },
     {
       "name": "eval",
       "example": "agent-chrome eval 'document.title'",
-      "description": "Run JavaScript in the active Chrome tab via CDP",
-      "prompt": "帮我用 agent-chrome eval 在 Chrome 中运行 JS，请告诉我代码"
+      "description": "Run JavaScript in the active Chrome tab via CDP"
     },
     {
       "name": "profiles",
       "example": "agent-chrome profiles",
-      "description": "List available Chrome profiles with proxy config",
-      "prompt": "运行 agent-chrome profiles 列出所有 Chrome Profile 配置"
+      "description": "List available Chrome profiles with proxy config"
     }
   ]
 }

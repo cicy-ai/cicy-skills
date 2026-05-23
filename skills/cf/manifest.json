@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cf",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Cloudflare API",
   "description": "Secure Cloudflare API wrapper. Use cf curl to call any endpoint without exposing the api_token.",
   "category": "cloud",
@@ -50,26 +50,22 @@
     {
       "name": "cf status",
       "example": "cf status",
-      "description": "Show Cloudflare API config status (token masked)",
-      "prompt": "运行 cf status 查看 Cloudflare API 配置状态"
+      "description": "Show Cloudflare API config status (token masked)"
     },
     {
       "name": "cf curl",
       "example": "cf curl GET /zones",
-      "description": "Call any Cloudflare API endpoint with injected auth token",
-      "prompt": "用 cf curl GET /zones 列出我的所有 Cloudflare zone"
+      "description": "Call any Cloudflare API endpoint with injected auth token"
     },
     {
       "name": "cf exec",
       "example": "cf exec npx wrangler deploy",
-      "description": "Run a child process with CLOUDFLARE_API_TOKEN injected",
-      "prompt": "用 cf exec 注入 token 后部署：cf exec npx wrangler deploy"
+      "description": "Run a child process with CLOUDFLARE_API_TOKEN injected"
     },
     {
       "name": "cf config",
       "example": "cf config",
-      "description": "Open config file in editor to set api_token / account_id",
-      "prompt": "运行 cf config 配置 Cloudflare API token"
+      "description": "Open config file in editor to set api_token / account_id"
     }
   ]
 }

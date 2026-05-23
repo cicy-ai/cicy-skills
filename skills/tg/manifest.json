@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Telegram Bot",
   "description": "Send a Telegram message or photo via cicy-code's /api/tg/{send,photo} endpoints. Subcommands - send / photo.",
   "category": "productivity",
@@ -49,14 +49,12 @@
     {
       "name": "tg send",
       "example": "tg send --chat <id> 'message'",
-      "description": "Send a Telegram message",
-      "prompt": "帮我用 tg send 发一条 Telegram 消息，请告诉我聊天 ID 和内容"
+      "description": "Send a Telegram message"
     },
     {
       "name": "tg status",
       "example": "tg status",
-      "description": "Check Telegram bot configuration status",
-      "prompt": "运行 tg status 查看 Telegram Bot 配置状态"
+      "description": "Check Telegram bot configuration status"
     }
   ]
 }

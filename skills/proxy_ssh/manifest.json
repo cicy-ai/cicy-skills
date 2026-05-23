@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "proxy_ssh",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "title": "Proxy SSH",
   "description": "Manage autossh-based SOCKS5 proxy profiles on this host. list/show/create/delete, start/stop/restart, connectivity test. Each profile pins a local SOCKS port to an SSH target.",
   "category": "network",
@@ -49,32 +49,27 @@
     {
       "name": "list",
       "example": "proxy_ssh list",
-      "description": "List all SSH proxy profiles",
-      "prompt": "运行 proxy_ssh list 列出所有 SSH 代理配置"
+      "description": "List all SSH proxy profiles"
     },
     {
       "name": "create",
       "example": "proxy_ssh create <name> <user@host:port> <local-port>",
-      "description": "Create a new SOCKS5 proxy profile",
-      "prompt": "帮我用 proxy_ssh create 创建新的代理配置，请告诉我名称和目标地址"
+      "description": "Create a new SOCKS5 proxy profile"
     },
     {
       "name": "start",
       "example": "proxy_ssh start <name>",
-      "description": "Start a proxy profile (autossh)",
-      "prompt": "帮我用 proxy_ssh start 启动一个代理，请告诉我配置名称"
+      "description": "Start a proxy profile (autossh)"
     },
     {
       "name": "stop",
       "example": "proxy_ssh stop <name>",
-      "description": "Stop a proxy profile",
-      "prompt": "帮我用 proxy_ssh stop 停止一个代理"
+      "description": "Stop a proxy profile"
     },
     {
       "name": "test",
       "example": "proxy_ssh test <name>",
-      "description": "Test connectivity through a proxy profile",
-      "prompt": "帮我用 proxy_ssh test 测试代理连通性"
+      "description": "Test connectivity through a proxy profile"
     }
   ]
 }

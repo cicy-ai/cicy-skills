@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Cicy Agent (tmux)",
   "description": "Operate tmux panes and windows on this host. Wraps cicy-code's /api/tmux/* endpoints (list, capture, send-keys, msg, create, restart, clear).",
   "category": "dev",
@@ -49,26 +49,22 @@
     {
       "name": "tmux list",
       "example": "cicy-agent list",
-      "description": "List all tmux panes and windows",
-      "prompt": "运行 cicy-agent list 列出所有 tmux pane"
+      "description": "List all tmux panes and windows"
     },
     {
       "name": "tmux capture",
       "example": "cicy-agent capture <pane>",
-      "description": "Capture tmux pane output",
-      "prompt": "帮我用 cicy-agent capture 抓取一个 pane 的输出，请告诉我 pane ID"
+      "description": "Capture tmux pane output"
     },
     {
       "name": "tmux send",
       "example": "cicy-agent send <pane> <cmd>",
-      "description": "Send keys to a tmux pane",
-      "prompt": "帮我用 cicy-agent send 发送命令到指定 pane"
+      "description": "Send keys to a tmux pane"
     },
     {
       "name": "tmux msg",
       "example": "cicy-agent msg <worker> <message>",
-      "description": "Send a message to an agent worker",
-      "prompt": "帮我用 cicy-agent msg 发消息给指定 worker agent"
+      "description": "Send a message to an agent worker"
     }
   ]
 }

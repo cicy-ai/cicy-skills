@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "gpt-chat",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "GPT Chat (with history)",
   "description": "Multi-turn chat against cicy-code's /api/ai/chat with persistent history at ~/Private/data/gpt-chat-history.json. Optional system prompt. Subcommands - --clear, --system, --show-system.",
   "category": "productivity",
@@ -49,14 +49,12 @@
     {
       "name": "gpt-chat",
       "example": "gpt-chat 'your question'",
-      "description": "Ask a question to GPT (default model)",
-      "prompt": "帮我用 gpt-chat 问一个问题，请告诉我问题内容"
+      "description": "Ask a question to GPT (default model)"
     },
     {
       "name": "gpt-chat --model",
       "example": "gpt-chat --model gpt-4o 'question'",
-      "description": "Use a specific GPT model",
-      "prompt": "帮我用 gpt-chat --model gpt-4o 提问"
+      "description": "Use a specific GPT model"
     }
   ]
 }

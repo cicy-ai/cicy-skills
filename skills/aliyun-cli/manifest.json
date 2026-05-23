@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "aliyun-cli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Aliyun CLI Bootstrap",
   "description": "Install and configure the official Aliyun CLI on this host. Bootstrap-only wrapper: install / config / status. For real API calls use the native aliyun CLI.",
   "category": "cloud",
@@ -47,20 +47,17 @@
     {
       "name": "aliyun install",
       "example": "aliyun-cli install",
-      "description": "Install the official Aliyun CLI",
-      "prompt": "运行 aliyun-cli install 安装阿里云 CLI"
+      "description": "Install the official Aliyun CLI"
     },
     {
       "name": "aliyun config",
       "example": "aliyun configure",
-      "description": "Configure Aliyun CLI credentials",
-      "prompt": "运行 aliyun configure 配置阿里云 CLI 凭证"
+      "description": "Configure Aliyun CLI credentials"
     },
     {
       "name": "aliyun status",
       "example": "aliyun-cli status",
-      "description": "Check Aliyun CLI installation status",
-      "prompt": "运行 aliyun-cli status 查看安装状态"
+      "description": "Check Aliyun CLI installation status"
     }
   ]
 }
