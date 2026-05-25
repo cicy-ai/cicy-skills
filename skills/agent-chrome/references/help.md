@@ -25,6 +25,7 @@ agent-chrome tools
 - Each profile = entry under `~/cicy-ai/db/chrome.json` keyed by `account_<N>`.
 - Default user-data-dir: `~/chrome/account_<N>`. Default CDP port: `11000 + N`.
 - Per-profile proxy applies on **next** launch.
+- The `proxy` URL must point to a live listener. The recommended setup pairs each profile with a dedicated cicy-mihomo listener — see [proxy.md](./proxy.md) for the cicy-mihomo integration topology, setup flow, and the six most common failure modes (stale port, broken default route, MATCH,REJECT, listener block silently skipped, reload safe-path restriction, proxy change requires relaunch).
 
 ## Environment
 
