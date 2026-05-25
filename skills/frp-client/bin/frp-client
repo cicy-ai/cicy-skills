@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // frp-client — manage a local frpc process. Subcommands:
-//   start / stop / restart / status / reload / logs / connections / raw
-// `clients` not relevant for frpc; web-api endpoints differ slightly.
+//   install / start / stop / restart / status / reload / logs / connections / raw
+//   service <install|enable|disable|status>
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync, closeSync } from 'node:fs';
+import { homedir, platform, arch } from 'node:os';
 import { join, dirname } from 'node:path';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execSync, execFileSync } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 
-const KIND = 'client';   // (only differs from frp-client by a few constants)
+const KIND = 'client';
 const NAME = 'frp-client';
 const BINARY_NAME = 'frpc';
 const ROLE_LABEL = 'FRP client';
@@ -32,10 +34,12 @@ const STATE_DIR = join(HOME, '.local', 'state', 'cicy-skills', 'frp', KIND);
 const PID_FILE = join(STATE_DIR, 'pid');
 const STATE_FILE = join(STATE_DIR, 'state.json');
 const DEFAULT_LOG = process.env[LOG_ENV] || join(HOME, 'logs', BINARY_NAME + '.log');
+const INSTALL_BIN_DIR = join(HOME, '.frp-tunnel', 'bin');
+const INSTALL_BIN = join(INSTALL_BIN_DIR, BINARY_NAME);
 
 const BINARY_CANDIDATES = [
   process.env[BIN_ENV],
-  join(HOME, '.frp-tunnel', 'bin', BINARY_NAME),
+  INSTALL_BIN,
   join(HOME, '.local', 'bin', BINARY_NAME),
   join(HOME, 'bin', BINARY_NAME),
 ].filter(Boolean);
@@ -44,6 +48,8 @@ const BINARY_CANDIDATES = [
   try {
     switch (cmd) {
       case 'tools':       printTools(); return;
+      case 'install':     await cmdInstall(rest); return;
+      case 'service':     await cmdService(rest); return;
       case 'start':       await cmdStart(rest); return;
       case 'stop':        cmdStop(); return;
       case 'restart':     await cmdRestart(rest); return;
@@ -121,7 +127,7 @@ function readConfigHints() {
 function webServerURL() {
   const h = readConfigHints();
   const addr = h['webServer.addr'] || '127.0.0.1';
-  const port = h['webServer.port'] || '7500';
+  const port = h['webServer.port'] || '7400';
   const user = h['webServer.user'] || '';
   const pass = h['webServer.password'] || '';
   const auth = (user || pass) ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : '';
@@ -254,4 +260,285 @@ async function cmdRaw(args) {
   if (!bin) bail(`${BINARY_NAME} binary not found`, 3);
   const child = spawn(bin, realArgs, { stdio: 'inherit' });
   child.on('exit', (code) => process.exit(code ?? 0));
+}
+
+// ── install ──────────────────────────────────────────────────────────────
+// frp-client install [options]
+//   Downloads frpc, writes ~/cicy-ai/db/frpc.toml, installs systemd/launchd.
+//
+// Options:
+//   --server <HOST>        FRP server address (required on first install)
+//   --token <TOKEN>        FRP auth token (required on first install)
+//   --server-port <PORT>   default 9500
+//   --remote-port <PORT>   default 9502
+//   --local-port <PORT>    default 22
+//   --local-ip <IP>        default 127.0.0.1
+//   --name <NAME>          default auto
+//   --admin-port <PORT>    default 7400
+//   --frp-version <VER>    default 0.68.1
+//   --service <auto|systemd|launchd|none>  default auto
+//   --github-proxy <URL>   default https://gh-proxy.com/
+
+async function cmdInstall(args) {
+  const opt = {
+    server: process.env.FRP_SERVER || '',
+    token: process.env.FRP_TOKEN || '',
+    serverPort: '9500',
+    remotePort: '9502',
+    localPort: '22',
+    localIp: '127.0.0.1',
+    name: '',
+    adminPort: '7400',
+    frpVersion: '0.68.1',
+    service: 'auto',
+    githubProxy: process.env.GITHUB_PROXY || 'https://gh-proxy.com/',
+  };
+  let configArgsProvided = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const v = () => { configArgsProvided = true; return args[++i] || ''; };
+    if (a === '--server') { opt.server = v(); }
+    else if (a === '--token') { opt.token = v(); }
+    else if (a === '--server-port') { opt.serverPort = v(); }
+    else if (a === '--remote-port') { opt.remotePort = v(); }
+    else if (a === '--local-port') { opt.localPort = v(); }
+    else if (a === '--local-ip') { opt.localIp = v(); }
+    else if (a === '--name') { opt.name = v(); }
+    else if (a === '--admin-port') { opt.adminPort = v(); }
+    else if (a === '--frp-version') { opt.frpVersion = args[++i] || opt.frpVersion; }
+    else if (a === '--service') { opt.service = args[++i] || opt.service; }
+    else if (a === '--github-proxy') { opt.githubProxy = args[++i] || opt.githubProxy; }
+    else bail(`unknown install option: ${a}`, 2);
+  }
+
+  const os = platform(); // 'linux' | 'darwin'
+  const cpuArch = arch(); // 'x64' | 'arm64'
+  let frpPlatform;
+  if (os === 'linux') {
+    frpPlatform = cpuArch === 'arm64' ? 'linux_arm64' : 'linux_amd64';
+    if (!opt.name) opt.name = 'linux-ssh';
+  } else if (os === 'darwin') {
+    frpPlatform = cpuArch === 'arm64' ? 'darwin_arm64' : 'darwin_amd64';
+    if (!opt.name) opt.name = 'mac-ssh';
+  } else {
+    bail(`unsupported OS: ${os}. Windows not yet supported.`, 2);
+  }
+
+  // ── 1. download frpc ───────────────────────────────────────────────────
+  process.stderr.write(`[1/4] downloading frpc ${opt.frpVersion} (${frpPlatform})\n`);
+  const archive = `frp_${opt.frpVersion}_${frpPlatform}.tar.gz`;
+  const sourceURL = `https://github.com/fatedier/frp/releases/download/v${opt.frpVersion}/${archive}`;
+  const tmpDir = join(HOME, '.local', 'state', 'cicy-skills', 'frp', 'install-tmp');
+  mkdirSync(tmpDir, { recursive: true });
+  const archivePath = join(tmpDir, archive);
+
+  const proxies = [opt.githubProxy, 'https://ghfast.top/', 'https://ghproxy.net/', ''];
+  let downloaded = false;
+  for (const proxy of proxies) {
+    const url = proxy ? proxy + sourceURL : sourceURL;
+    process.stderr.write(`  trying ${url}\n`);
+    try {
+      const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+      if (!res.ok) { process.stderr.write(`  HTTP ${res.status}\n`); continue; }
+      const ws = createWriteStream(archivePath);
+      await pipeline(res.body, ws);
+      downloaded = true;
+      break;
+    } catch (e) { process.stderr.write(`  failed: ${e.message}\n`); }
+  }
+  if (!downloaded) bail('frpc download failed. Check network or set GITHUB_PROXY.', 3);
+
+  mkdirSync(INSTALL_BIN_DIR, { recursive: true });
+  execFileSync('tar', ['-xzf', archivePath, '-C', tmpDir]);
+  const frpcSrc = join(tmpDir, `frp_${opt.frpVersion}_${frpPlatform}`, 'frpc');
+  execFileSync('install', ['-m', '0755', frpcSrc, INSTALL_BIN]);
+  process.stderr.write(`  installed: ${INSTALL_BIN}\n`);
+
+  // ── 2. config ─────────────────────────────────────────────────────────
+  process.stderr.write('[2/4] config\n');
+  let configReused = false;
+  if (existsSync(CONFIG_PATH)) {
+    configReused = true;
+    process.stderr.write(`  reusing existing config: ${CONFIG_PATH}\n`);
+    if (configArgsProvided) process.stderr.write('  note: --server/--token/--port flags ignored (config already exists)\n');
+  } else {
+    if (!opt.server) bail('--server <HOST> required on first install (or set FRP_SERVER)', 2);
+    if (!opt.token) bail('--token <TOKEN> required on first install (or set FRP_TOKEN)', 2);
+    mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+    writeFileSync(CONFIG_PATH, [
+      `serverAddr = "${opt.server}"`,
+      `serverPort = ${opt.serverPort}`,
+      '',
+      `auth.method = "token"`,
+      `auth.token = "${opt.token}"`,
+      '',
+      `webServer.addr = "127.0.0.1"`,
+      `webServer.port = ${opt.adminPort}`,
+      '',
+      `[[proxies]]`,
+      `name = "${opt.name}"`,
+      `type = "tcp"`,
+      `localIP = "${opt.localIp}"`,
+      `localPort = ${opt.localPort}`,
+      `remotePort = ${opt.remotePort}`,
+    ].join('\n') + '\n');
+    process.stderr.write(`  wrote config: ${CONFIG_PATH}\n`);
+  }
+
+  // ── 3. service ────────────────────────────────────────────────────────
+  process.stderr.write('[3/4] service\n');
+  const svcMode = resolveServiceMode(opt.service, os);
+  if (svcMode === 'systemd') {
+    installSystemd();
+  } else if (svcMode === 'launchd') {
+    installLaunchd();
+  } else {
+    process.stderr.write('  service=none; use "frp-client start" to run manually\n');
+  }
+
+  // ── 4. verify ─────────────────────────────────────────────────────────
+  process.stderr.write('[4/4] verify\n');
+  await new Promise((r) => setTimeout(r, 2000));
+  let verifyOut = '';
+  try { verifyOut = execFileSync(INSTALL_BIN, ['status', '-c', CONFIG_PATH], { encoding: 'utf8', timeout: 5000 }); } catch {}
+  if (verifyOut) process.stderr.write(verifyOut);
+
+  const summary = {
+    binary: INSTALL_BIN,
+    config: CONFIG_PATH,
+    config_reused: configReused,
+    log: DEFAULT_LOG,
+    service: svcMode,
+  };
+  if (json) return ok(summary);
+  console.log(`\n✓ frp-client installed`);
+  console.log(`  binary:  ${INSTALL_BIN}`);
+  console.log(`  config:  ${CONFIG_PATH}`);
+  console.log(`  service: ${svcMode}`);
+  console.log(`  log:     ${DEFAULT_LOG}`);
+}
+
+// ── service subcommand ───────────────────────────────────────────────────
+// frp-client service <install|enable|disable|status>
+
+async function cmdService(args) {
+  const sub = args[0];
+  if (!sub) bail('usage: frp-client service <install|enable|disable|status>', 2);
+  const os = platform();
+  const svcMode = resolveServiceMode('auto', os);
+  switch (sub) {
+    case 'install':
+      if (svcMode === 'systemd') installSystemd();
+      else if (svcMode === 'launchd') installLaunchd();
+      else bail('no service manager available (systemd or launchd required)', 3);
+      if (json) return ok({ service: svcMode, installed: true });
+      console.log(`✓ service installed (${svcMode})`);
+      break;
+    case 'enable':
+      if (svcMode === 'systemd') {
+        execSync(`sudo systemctl enable "${systemdServiceName()}"`, { stdio: 'inherit' });
+      } else if (svcMode === 'launchd') {
+        execSync(`launchctl enable "gui/$(id -u)/${launchdLabel()}"`, { stdio: 'inherit' });
+      } else bail('no service manager', 3);
+      break;
+    case 'disable':
+      if (svcMode === 'systemd') {
+        try { execSync(`sudo systemctl stop "${systemdServiceName()}" 2>/dev/null || true`); } catch {}
+        execSync(`sudo systemctl disable "${systemdServiceName()}"`, { stdio: 'inherit' });
+      } else if (svcMode === 'launchd') {
+        try { execSync(`launchctl bootout "gui/$(id -u)/${launchdLabel()}" 2>/dev/null || true`); } catch {}
+      } else bail('no service manager', 3);
+      break;
+    case 'status':
+      if (svcMode === 'systemd') {
+        execSync(`systemctl status "${systemdServiceName()}" --no-pager 2>&1 || true`, { stdio: 'inherit' });
+      } else if (svcMode === 'launchd') {
+        execSync(`launchctl print "gui/$(id -u)/${launchdLabel()}" 2>&1 || true`, { stdio: 'inherit' });
+      } else {
+        await cmdStatus();
+      }
+      break;
+    default:
+      bail(`unknown service subcommand: ${sub}. Use install|enable|disable|status.`, 2);
+  }
+}
+
+// ── service helpers ──────────────────────────────────────────────────────
+
+function resolveServiceMode(requested, os) {
+  if (requested === 'auto') {
+    if (os === 'darwin') return 'launchd';
+    if (os === 'linux') {
+      try { execFileSync('which', ['systemctl'], { stdio: 'ignore' }); return 'systemd'; } catch {}
+      return 'none';
+    }
+    return 'none';
+  }
+  if (requested === 'systemd') return 'systemd';
+  if (requested === 'launchd') return 'launchd';
+  return 'none';
+}
+
+function systemdServiceName() {
+  const user = process.env.USER || process.env.LOGNAME || 'cicy';
+  return `frpc-cicy-${user}.service`;
+}
+
+function launchdLabel() { return 'com.cicy.frpc'; }
+
+function installSystemd() {
+  const svcName = systemdServiceName();
+  const svcPath = `/etc/systemd/system/${svcName}`;
+  const unit = [
+    '[Unit]',
+    'Description=FRP Client for CiCy',
+    'After=network-online.target',
+    'Wants=network-online.target',
+    '',
+    '[Service]',
+    'Type=simple',
+    `User=${process.env.USER || process.env.LOGNAME || 'cicy'}`,
+    `Environment=HOME=${HOME}`,
+    `WorkingDirectory=${HOME}`,
+    `ExecStart=${INSTALL_BIN} -c ${CONFIG_PATH}`,
+    'Restart=always',
+    'RestartSec=5',
+    '',
+    '[Install]',
+    'WantedBy=multi-user.target',
+  ].join('\n') + '\n';
+  execSync(`echo ${JSON.stringify(unit)} | sudo tee ${svcPath} > /dev/null`);
+  execSync('sudo systemctl daemon-reload');
+  execSync(`sudo systemctl enable --now "${svcName}"`, { stdio: 'inherit' });
+  process.stderr.write(`  systemd service: ${svcName}\n`);
+}
+
+function installLaunchd() {
+  const label = launchdLabel();
+  const plistPath = join(HOME, 'Library', 'LaunchAgents', `${label}.plist`);
+  mkdirSync(dirname(plistPath), { recursive: true });
+  const logDir = dirname(DEFAULT_LOG);
+  mkdirSync(logDir, { recursive: true });
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key><string>${label}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>${INSTALL_BIN}</string>
+      <string>-c</string>
+      <string>${CONFIG_PATH}</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>${DEFAULT_LOG}</string>
+    <key>StandardErrorPath</key><string>${DEFAULT_LOG}</string>
+  </dict>
+</plist>
+`;
+  writeFileSync(plistPath, plist);
+  execSync(`launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || launchctl unload "${plistPath}" 2>/dev/null || true`);
+  execSync(`launchctl bootstrap "gui/$(id -u)/${label}" "${plistPath}" 2>/dev/null || launchctl load -w "${plistPath}"`);
+  process.stderr.write(`  launchd plist: ${plistPath}\n`);
 }
