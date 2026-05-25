@@ -22,7 +22,7 @@ agent-chrome tools
 ## Notes
 
 - System Chrome is required on the desktop machine.
-- Each profile = entry under `~/Private/chrome.json` keyed by `account_<N>`.
+- Each profile = entry under `~/cicy-ai/db/chrome.json` keyed by `account_<N>`.
 - Default user-data-dir: `~/chrome/account_<N>`. Default CDP port: `11000 + N`.
 - Per-profile proxy applies on **next** launch.
 

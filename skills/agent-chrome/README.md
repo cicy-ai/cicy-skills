@@ -16,7 +16,7 @@ cicy-code skill install agent-chrome
 ## Quick usage
 
 ```bash
-agent-chrome profiles                      # list profiles in ~/Private/chrome.json
+agent-chrome profiles                      # list profiles in ~/cicy-ai/db/chrome.json
 agent-chrome profile 1                     # show one profile + live debugger status
 agent-chrome add --gmail x@y.com --launch
 agent-chrome proxy 1 socks5://127.0.0.1:1080

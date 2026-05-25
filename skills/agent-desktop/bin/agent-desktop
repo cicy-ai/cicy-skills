@@ -112,23 +112,23 @@ async function api(method, path, payload) {
 
 async function chatClients() {
   const data = await api('GET', '/api/chat/clients');
-  // Server returns an array of client records: { client_id, master_agent_id,
-  // active_agent_id, isElectron, platform, user_agent, ... }. Older payloads
-  // returned a nested { agentID: { clientID: info } } shape — flatten that
-  // into the array form so the rest of the code treats one shape only.
+  // Server returns an array of client records: { client_id, isElectron,
+  // platform, user_agent, ..., non_routing_*_agent_id_display_only }.
+  // Older payloads used a nested { agentID: { clientID: info } } shape —
+  // flatten so the rest of the code treats one shape only. The
+  // non_routing_*_agent_id_display_only fields are metadata; routing is by
+  // client_id alone.
   let raw = data?.clients || data?.data?.clients || data?.data || data || [];
   if (!Array.isArray(raw)) {
     const flat = [];
-    for (const [agentID, m] of Object.entries(raw)) {
+    for (const [aid, m] of Object.entries(raw)) {
       for (const [cid, info] of Object.entries(m || {})) {
-        flat.push({ client_id: cid, master_agent_id: agentID, ...info });
+        flat.push({ client_id: cid, non_routing_master_agent_id_display_only: aid, ...info });
       }
     }
     raw = flat;
   }
-  return raw.filter(
-    (c) => c?.client_id && !['master_agent_id', 'active_agent_id', 'client_id'].includes(c.client_id)
-  );
+  return raw.filter((c) => c?.client_id);
 }
 
 // auto-select the single ElectronMCP client; explicit --client wins
@@ -173,8 +173,8 @@ async function cmdClients() {
     const ua = String(c?.user_agent || '');
     return {
       client_id: c.client_id,
-      master_agent_id: c?.master_agent_id || '',
-      active_agent_id: c?.active_agent_id || '',
+      non_routing_master_agent_id_display_only: c?.non_routing_master_agent_id_display_only || '',
+      non_routing_active_agent_id_display_only: c?.non_routing_active_agent_id_display_only || '',
       platform: c?.platform || '',
       user_agent: ua,
       is_cicy_desktop: c?.isElectron === true || ua.toLowerCase().includes('electronmcp') || ua.toLowerCase().includes('cicydesktop'),
@@ -184,7 +184,9 @@ async function cmdClients() {
   if (rows.length === 0) { console.log('no clients connected'); return; }
   for (const r of rows) {
     const tag = r.is_cicy_desktop ? 'cicy-desktop' : 'browser';
-    console.log(`[${tag}] ${r.client_id} (master=${r.master_agent_id} active=${r.active_agent_id} platform=${r.platform})`);
+    const m = r.non_routing_master_agent_id_display_only;
+    const a = r.non_routing_active_agent_id_display_only;
+    console.log(`[${tag}] ${r.client_id} (master=${m} active=${a} platform=${r.platform})  [agent fields are display only — route by client_id]`);
   }
 }
 
