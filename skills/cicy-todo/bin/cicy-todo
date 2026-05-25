@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// cicy-todo — per-workspace todo list, calls cicy-code /api/todo/*.
+// cicy-todo — central todo list, calls cicy-code /api/todo/*.
 // Zero npm dependencies. Pure ESM. Node 18+.
+//
+// All todos live in the master pane (w-10001) workspace. Each todo carries
+// a pane_id marking which worker owns it. Workers can only see/mutate
+// their own todos; master sees everything and can filter by --pane.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -8,31 +12,42 @@ import { join } from 'node:path';
 
 const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
 const API_PORT = process.env.CICY_API_PORT || '8008';
-const PANE_RE = /^w-\d+$/;
+const MASTER_PANE = 'w-10001';
 
 const args = process.argv.slice(2);
 
-if (args.includes('--help') || args.includes('-h') || args[0] === 'help') {
+if (args.length === 0 || args.includes('--help') || args.includes('-h') || args[0] === 'help') {
   printHelp();
-  process.exit(0);
+  process.exit(args.length === 0 ? 2 : 0);
 }
 
-// ── pane parsing ───────────────────────────────────────────────────────
-// First positional matching ^w-\d+$ is the pane override.
-let pane = '';
+// ── identity + flag parsing ─────────────────────────────────────────────
+// Self pane (X-Agent-Show-Id) comes from the env var the tmux boot script
+// sets. Falls back to CICY_PANE_ID then to MASTER_PANE.
+const SELF_PANE = (
+  process.env.X_AGENT_SHORT_ID ||
+  process.env.CICY_PANE_ID ||
+  MASTER_PANE
+).trim();
+
+const json = args.includes('--json');
+const isMaster = SELF_PANE === MASTER_PANE;
+
+// --pane <filter> (master-only) selects which worker's todos to act on
+let paneFilter = '';
 const rest = [];
-for (const a of args) {
-  if (!pane && PANE_RE.test(a)) pane = a;
-  else rest.push(a);
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === '--pane') { paneFilter = args[++i] || ''; continue; }
+  if (a.startsWith('--pane=')) { paneFilter = a.slice('--pane='.length); continue; }
+  rest.push(a);
 }
-if (!pane) pane = process.env.CICY_PANE_ID || 'w-10001';
+if (paneFilter && !isMaster) {
+  bail('--pane is only available from the master pane (w-10001)', 2);
+}
 
-const json = rest.includes('--json');
 const cmd = rest.find((a) => !a.startsWith('--')) || 'list';
-const cmdArgs = rest.filter((a, i) => {
-  // exclude the cmd word itself + flags + their values
-  return a !== cmd && !a.startsWith('--');
-});
+const cmdArgs = rest.filter((a) => !a.startsWith('--') && a !== cmd);
 
 try {
   switch (cmd) {
@@ -62,7 +77,7 @@ function printHelp() {
   try {
     process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
   } catch {
-    process.stdout.write(`cicy-todo [pane] <list|add|show|start|done|drop|back|edit|rm> ...\n`);
+    process.stdout.write(`cicy-todo <list|add|show|start|done|drop|back|edit|rm> [--pane <w-xxxxx>] [--json]\n`);
   }
 }
 
@@ -89,7 +104,7 @@ async function api(method, path, body) {
     method,
     headers: {
       'Authorization': `Bearer ${token}`,
-      'X-Agent-Show-Id': pane,
+      'X-Agent-Show-Id': SELF_PANE,
       'Content-Type': 'application/json',
     },
   };
@@ -104,7 +119,7 @@ async function api(method, path, body) {
   let payload;
   try { payload = text ? JSON.parse(text) : {}; } catch { payload = { raw: text }; }
   if (res.status === 401 || res.status === 403) {
-    throw Object.assign(new Error(`auth failed (HTTP ${res.status}) — check api_token`), { exitCode: 3 });
+    throw Object.assign(new Error(`auth failed (HTTP ${res.status}): ${payload.detail || ''}`.trim()), { exitCode: 3 });
   }
   if (res.status === 404) {
     throw Object.assign(new Error(payload.detail || 'not found'), { exitCode: 2 });
@@ -118,7 +133,11 @@ async function api(method, path, body) {
 // ── id resolution ───────────────────────────────────────────────────────
 
 async function resolveId(prefix) {
-  const resp = await api('GET', '/list');
+  const params = [];
+  if (paneFilter) params.push(`pane_id=${encodeURIComponent(paneFilter)}`);
+  if (isMaster && !paneFilter) params.push('all_agents=true');
+  const qs = params.length ? '?' + params.join('&') : '';
+  const resp = await api('GET', '/list' + qs);
   const matches = (resp.todos || []).filter(
     (t) => t.id === prefix || t.id.startsWith(prefix),
   );
@@ -150,15 +169,17 @@ function humanTime(iso) {
 
 function shortId(id) { return id.slice(0, 10); }
 
-function printTable(todos) {
+function printTable(todos, { withPane = false } = {}) {
   if (todos.length === 0) {
     console.log('(no todos)');
     return;
   }
-  console.log(`     ${'ID'.padEnd(12)} ${'STATUS'.padEnd(7)} ${'UPDATED'.padEnd(10)} TITLE`);
+  const paneCol = withPane ? ` ${'PANE'.padEnd(8)}` : '';
+  console.log(`     ${'ID'.padEnd(12)} ${'STATUS'.padEnd(7)} ${'UPDATED'.padEnd(10)}${paneCol} TITLE`);
   for (const t of todos) {
     const g = GLYPH[t.status] || '?';
-    console.log(`  ${g}  ${shortId(t.id).padEnd(12)} ${(t.status || '').padEnd(7)} ${humanTime(t.updated_at).padEnd(10)} ${t.title}`);
+    const paneCell = withPane ? ` ${(t.pane_id || '-').padEnd(8)}` : '';
+    console.log(`  ${g}  ${shortId(t.id).padEnd(12)} ${(t.status || '').padEnd(7)} ${humanTime(t.updated_at).padEnd(10)}${paneCell} ${t.title}`);
   }
 }
 
@@ -177,40 +198,48 @@ async function cmdList(restArgs) {
     else if (a === '-q' || a === '--query') { q = restArgs[++i] || ''; }
     else if (a === '--all') { all = true; }
   }
-  let path = '/list';
   const params = [];
   if (status) params.push(`status=${encodeURIComponent(status)}`);
   if (q) params.push(`q=${encodeURIComponent(q)}`);
-  if (params.length) path += '?' + params.join('&');
+  if (paneFilter) params.push(`pane_id=${encodeURIComponent(paneFilter)}`);
+  // Master without an explicit pane filter sees every worker by default.
+  if (isMaster && !paneFilter) params.push('all_agents=true');
+  const qs = params.length ? '?' + params.join('&') : '';
 
-  const resp = await api('GET', path);
+  const resp = await api('GET', '/list' + qs);
   let todos = resp.todos || [];
   if (!all && !status) {
     todos = todos.filter((t) => t.status === 'todo' || t.status === 'doing');
   }
+  // Show the pane column whenever results may span multiple workers.
+  const withPane = isMaster && !paneFilter;
   if (json) {
-    console.log(JSON.stringify({ ok: true, data: { pane, todos } }));
+    console.log(JSON.stringify({ ok: true, data: { self_pane: SELF_PANE, pane_filter: paneFilter || null, todos } }));
   } else {
-    printTable(todos);
+    printTable(todos, { withPane });
   }
 }
 
 async function cmdAdd(restArgs) {
-  // pick first non-flag, non-"add" arg as title
   const title = restArgs.find((a, i) => i > restArgs.indexOf('add') && !a.startsWith('--'));
-  if (!title) bail('usage: cicy-todo [pane] add "<title>"', 2);
-  const resp = await api('POST', '/add', { title });
+  if (!title) bail('usage: cicy-todo add "<title>" [--pane <w-xxxxx>]', 2);
+  // Master with --pane creates on behalf of the named worker; everyone else
+  // creates for themselves.
+  const body = { title };
+  if (isMaster && paneFilter) body.pane_id = paneFilter;
+  const resp = await api('POST', '/add', body);
   if (json) console.log(JSON.stringify({ ok: true, data: resp }));
-  else console.log(`+ ${resp.todo?.id || '?'}  ${resp.todo?.title || title}`);
+  else console.log(`+ ${resp.todo?.id || '?'}  [${resp.todo?.pane_id || SELF_PANE}]  ${resp.todo?.title || title}`);
 }
 
 async function cmdShow(args) {
   const id = args[0];
-  if (!id) bail('usage: cicy-todo [pane] show <id>', 2);
+  if (!id) bail('usage: cicy-todo show <id>', 2);
   const t = await resolveId(id);
   if (json) console.log(JSON.stringify({ ok: true, data: t }));
   else {
     console.log(`id:         ${t.id}`);
+    console.log(`pane:       ${t.pane_id || '-'}`);
     console.log(`status:     ${t.status}`);
     console.log(`created:    ${t.created_at}`);
     console.log(`updated:    ${t.updated_at}`);
@@ -220,7 +249,7 @@ async function cmdShow(args) {
 
 async function cmdSetStatus(newStatus, args) {
   const id = args[0];
-  if (!id) bail(`usage: cicy-todo [pane] <start|done|drop|back> <id>`, 2);
+  if (!id) bail(`usage: cicy-todo <start|done|drop|back> <id>`, 2);
   const target = await resolveId(id);
   const resp = await api('PATCH', `/${target.id}`, { status: newStatus });
   if (json) console.log(JSON.stringify({ ok: true, data: resp }));
@@ -230,7 +259,7 @@ async function cmdSetStatus(newStatus, args) {
 async function cmdEdit(args) {
   const id = args[0];
   const title = args[1];
-  if (!id || !title) bail('usage: cicy-todo [pane] edit <id> "<new title>"', 2);
+  if (!id || !title) bail('usage: cicy-todo edit <id> "<new title>"', 2);
   const target = await resolveId(id);
   const resp = await api('PATCH', `/${target.id}`, { title });
   if (json) console.log(JSON.stringify({ ok: true, data: resp }));
@@ -239,7 +268,7 @@ async function cmdEdit(args) {
 
 async function cmdRm(args) {
   const id = args[0];
-  if (!id) bail('usage: cicy-todo [pane] rm <id>', 2);
+  if (!id) bail('usage: cicy-todo rm <id>', 2);
   const target = await resolveId(id);
   const resp = await api('DELETE', `/${target.id}`);
   if (json) console.log(JSON.stringify({ ok: true, data: resp }));
