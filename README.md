@@ -20,7 +20,10 @@ $EDITOR skills/<name>/bin/<name>
 # 3. 验证
 node tools/validate-skill.js skills/<name>
 
-# 4. 一键发布（改完版本号后直接跑）
+# 4. 测试（发布前必须通过）
+node tools/test-skill.js skills/<name>
+
+# 5. 一键发布（改完版本号后直接跑）
 name=<name>
 version=$(jq -r .version skills/$name/manifest.json)
 ADMIN_TOKEN=$(jq -r .admin_token ~/cicy-ai/db/skills-registry-admin.json)
@@ -28,21 +31,19 @@ ADMIN_TOKEN=$(jq -r .admin_token ~/cicy-ai/db/skills-registry-admin.json)
 node tools/pack-skill.js skills/$name
 git add skills/$name && git commit -m "bump $name to $version" && git push origin main
 git tag $name-v$version && git push origin $name-v$version
-gh release create $name-v$version dist/$name-$version.zip \
-  --target main --title "$name-v$version" --repo cicy-ai/cicy-skills
-ADMIN_TOKEN=$ADMIN_TOKEN node tools/publish.js skills/$name $ADMIN_TOKEN
+ADMIN_TOKEN=$ADMIN_TOKEN node tools/publish.js skills/$name
 ```
 
 ### 各步骤说明
 
 | 步骤 | 作用 |
 |------|------|
-| `pack-skill.js` | 打包成 `dist/<name>-<version>.zip` + 计算 sha256 |
-| `git tag` + `push` | 在 GitHub 上打版本标签 |
-| `gh release create` | 创建 GitHub Release 并上传 zip（Worker 把它作为下载源） |
-| `publish.js` | 把 manifest + `download_url` 注册到 `skills.cicy-ai.com` KV 索引 |
+| `validate-skill.js` | 校验 manifest.json 结构、必需文件是否存在 |
+| `test-skill.js` | **运行 test case，发布前必须通过** |
+| `pack-skill.js` | 打包成 `dist/<name>-<version>.zip` |
+| `publish.js` | 上传 zip 到 GitHub Release → 下载真实 asset 计算 sha256 → 注册到 registry |
 
-> `publish.js` 发布前会 HEAD 验证 `download_url` 可访问，所以 **GitHub Release 必须在 publish 之前创建**。
+> `publish.js` 会自动执行 `gh release create` + `gh release upload`，然后从 GitHub 下载 asset 计算真实 sha256 注册到 registry，确保用户下载的 hash 与 registry 记录一致。
 
 ---
 
@@ -66,6 +67,7 @@ cp -r templates/skill-template skills/<name>
 
 # 6. 验证 + 测试
 node tools/validate-skill.js skills/<name>
+node tools/test-skill.js skills/<name>
 ./skills/<name>/bin/<name> --help
 
 # 7. 发布（同"修改 skill"步骤 4-7）
