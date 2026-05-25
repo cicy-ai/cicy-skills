@@ -20,25 +20,29 @@ $EDITOR skills/<name>/bin/<name>
 # 3. 验证
 node tools/validate-skill.js skills/<name>
 
-# 4. 打包
-node tools/pack-skill.js skills/<name>
+# 4. 一键发布（改完版本号后直接跑）
+name=<name>
+version=$(jq -r .version skills/$name/manifest.json)
+ADMIN_TOKEN=$(jq -r .admin_token ~/cicy-ai/db/skills-registry-admin.json)
 
-# 5. 提交 + push + 打 tag
-git add skills/<name>/
-git commit -m "feat(<name>): describe change"
-git push origin main
-
-git tag <name>-v<version>        # 例: cping-v1.0.1
-git push origin <name>-v<version>
-
-# 6. 在 GitHub 上为这个 tag 创建 Release，上传 dist/<name>-<version>.zip
-#    (push tag 会触发 .github/workflows/publish.yml 自动完成此步)
-
-# 7. 发布到 registry（如果 CI 没有自动触发，手动发布）
-ADMIN_TOKEN=<admin_token> node tools/publish.js skills/<name> <admin_token>
+node tools/pack-skill.js skills/$name
+git add skills/$name && git commit -m "bump $name to $version" && git push origin main
+git tag $name-v$version && git push origin $name-v$version
+gh release create $name-v$version dist/$name-$version.zip \
+  --target main --title "$name-v$version" --repo cicy-ai/cicy-skills
+ADMIN_TOKEN=$ADMIN_TOKEN node tools/publish.js skills/$name $ADMIN_TOKEN
 ```
 
-> **注意**：`ADMIN_TOKEN` 在 `~/cicy-ai/db/skills-registry-admin.json` 里。
+### 各步骤说明
+
+| 步骤 | 作用 |
+|------|------|
+| `pack-skill.js` | 打包成 `dist/<name>-<version>.zip` + 计算 sha256 |
+| `git tag` + `push` | 在 GitHub 上打版本标签 |
+| `gh release create` | 创建 GitHub Release 并上传 zip（Worker 把它作为下载源） |
+| `publish.js` | 把 manifest + `download_url` 注册到 `skills.cicy-ai.com` KV 索引 |
+
+> `publish.js` 发布前会 HEAD 验证 `download_url` 可访问，所以 **GitHub Release 必须在 publish 之前创建**。
 
 ---
 
