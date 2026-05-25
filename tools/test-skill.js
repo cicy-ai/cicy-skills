@@ -36,6 +36,17 @@ if (all) {
 
 let passed = 0, failed = 0, skipped = 0;
 
+// run tools test suite when --all
+if (all) {
+  const toolsTest = resolve('test/tools/test.js');
+  if (existsSync(toolsTest)) {
+    process.stdout.write('▸ tools\n');
+    const r = spawnSync('node', [toolsTest], { stdio: 'inherit' });
+    if (r.status === 0) passed++;
+    else { process.stderr.write('✗ tools tests FAILED\n'); failed++; }
+  }
+}
+
 for (const skillDir of dirs) {
   const name = basename(skillDir);
   const testFile = join(skillDir, 'test', 'test.js');
