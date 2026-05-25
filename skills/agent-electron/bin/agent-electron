@@ -1,0 +1,270 @@
+#!/usr/bin/env node
+// agent-electron — drive a cicy-desktop host's Electron BrowserWindows and
+// per-account sessions (the Electron analog of agent-chrome).
+//
+// A "session" here is `session.fromPartition('persist:sandbox-<N>')`. Its
+// proxy applies to every BrowserWindow opened under that accountIdx.
+//
+// Each subcommand maps to an electronRPC tool dispatched as a desktop_event
+// over /api/chat/push with wait_ack. Requires Node 22+.
+
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+let clientID = '';
+const args = [];
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--client' || argv[i] === '-c') { clientID = argv[++i] || ''; continue; }
+  args.push(argv[i]);
+}
+
+const json = args.includes('--json');
+const cmd = args[0];
+const rest = args.slice(1).filter((a) => a !== '--json');
+
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+const HTTP_BASE = `http://127.0.0.1:${API_PORT}`;
+const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000);
+
+(async () => {
+  try {
+    switch (cmd) {
+      case 'tools':      printTools(); return;
+      case 'sessions':   await cmdSessions(rest); return;
+      case 'session':    await cmdSession(rest); return;
+      case 'proxy':      await cmdProxy(rest); return;
+      case 'open':       await cmdOpen(rest); return;
+      case 'close':      await cmdClose(rest); return;
+      case 'windows':    await cmdWindows(rest); return;
+      case 'window':     await cmdWindow(rest); return;
+      case 'url':        await cmdUrl(rest); return;
+      case 'cdp':        await cmdCDP(rest); return;
+      case 'screenshot': await cmdScreenshot(rest); return;
+      case 'snapshot':   await cmdSnapshot(rest); return;
+      case 'sysinfo':    await cmdSysinfo(rest); return;
+      default: bail(`unknown command: ${cmd}. Try agent-electron --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── boilerplate (mirrors agent-chrome) ──────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`agent-electron: ${msg}\n`);
+  process.exit(code);
+}
+function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
+function emit(result) {
+  if (json) return ok(result);
+  if (typeof result === 'string') console.log(result);
+  else console.log(JSON.stringify(result, null, 2));
+}
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('Usage: agent-electron <sessions|session|proxy|open|close|windows|window|url|cdp|screenshot|snapshot|sysinfo> [...] [--client ID]\n'); }
+}
+function printTools() {
+  try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('# agent-electron tools\n'); }
+}
+function intArg(s, name) {
+  const n = parseInt(s, 10);
+  if (Number.isNaN(n)) throw Object.assign(new Error(`${name} must be a number, got: ${s}`), { exitCode: 2 });
+  return n;
+}
+function loadToken() {
+  if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
+  if (!existsSync(GLOBAL_JSON)) throw Object.assign(new Error(`api_token not found: set CICY_API_TOKEN or create ${GLOBAL_JSON}`), { exitCode: 3 });
+  const cfg = JSON.parse(readFileSync(GLOBAL_JSON, 'utf8'));
+  if (!cfg.api_token) throw Object.assign(new Error(`api_token missing in ${GLOBAL_JSON}`), { exitCode: 3 });
+  return cfg.api_token;
+}
+function randomID(prefix) { return `${prefix}-${Date.now()}-${randomBytes(4).toString('hex')}`; }
+
+async function api(method, path, payload) {
+  const headers = { 'Authorization': `Bearer ${loadToken()}` };
+  const init = { method, headers };
+  if (payload !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(payload); }
+  let res;
+  try { res = await fetch(HTTP_BASE + path, init); }
+  catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${HTTP_BASE} (${e.message})`), { exitCode: 3 }); }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error(`auth failed (${res.status})`), { exitCode: 3 });
+  if (res.status >= 400) {
+    let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
+    throw Object.assign(new Error(`api error (${res.status}): ${body?.error || body?.message || text}`), { exitCode: 4 });
+  }
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function chatClients() {
+  const data = await api('GET', '/api/chat/clients');
+  let raw = data?.data || data || [];
+  if (!Array.isArray(raw)) raw = [];
+  return raw.filter((c) => c?.client_id);
+}
+
+async function resolveDesktop() {
+  const clients = await chatClients();
+  if (clientID) {
+    const c = clients.find((x) => x.client_id === clientID);
+    if (!c) throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+    return { clientID: c.client_id };
+  }
+  const matches = clients.filter((c) => {
+    const ua = String(c.user_agent || '').toLowerCase();
+    return c.isElectron === true || ua.includes('cicydesktop') || ua.includes('electronmcp');
+  });
+  if (matches.length === 0) throw Object.assign(new Error('no cicy-desktop client connected'), { exitCode: 3 });
+  if (matches.length > 1)  throw Object.assign(new Error('multiple cicy-desktop clients connected; pass --client <id>'), { exitCode: 2 });
+  return { clientID: matches[0].client_id };
+}
+
+async function rpc(tool, toolArgs) {
+  const target = await resolveDesktop();
+  const rid = randomID('elec');
+  const resp = await api('POST', '/api/chat/push', {
+    client_id: target.clientID,
+    type: 'desktop_event',
+    wait_ack: true,
+    timeout_ms: RPC_TIMEOUT_MS,
+    data: { type: 'rpc_call', tool, args: toolArgs ?? {}, requestId: rid },
+  });
+  const data = resp?.data || {};
+  if (data.error) throw Object.assign(new Error(String(data.error)), { exitCode: 4 });
+  return data.result;
+}
+
+// cicy-desktop electronRPC tools return MCP-style `{content:[{type:"text", text:"..."}]}`.
+// The server may flatten this to the `text` string before delivering to us.
+// Try to land on a structured value either way.
+function unwrap(result) {
+  if (typeof result === 'string') {
+    try { return JSON.parse(result); } catch { return result; }
+  }
+  if (result && typeof result === 'object' && Array.isArray(result.content)) {
+    const txt = result.content[0]?.text;
+    if (typeof txt === 'string') { try { return JSON.parse(txt); } catch { return txt; } }
+    return result.content[0];
+  }
+  return result;
+}
+
+// ── commands ────────────────────────────────────────────────────────────
+
+// sessions: enumerate accountIdx values seen across all live windows.
+// (Electron has no "list all partitions" API; persisted partitions exist on
+// disk but reflect prior runs, not necessarily what's loaded now.)
+async function cmdSessions(_args) {
+  const wins = unwrap(await rpc('get_windows', {})) || [];
+  const list = Array.isArray(wins) ? wins : [];
+  const byIdx = new Map();
+  for (const w of list) {
+    const idx = w.accountIdx ?? 0;
+    if (!byIdx.has(idx)) byIdx.set(idx, { accountIdx: idx, partition: w.partition || `persist:sandbox-${idx}`, windows: [] });
+    byIdx.get(idx).windows.push({ winId: w.id, url: w.url, title: w.title });
+  }
+  emit({ sessions: Array.from(byIdx.values()).sort((a,b) => a.accountIdx - b.accountIdx) });
+}
+
+async function cmdSession(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron session <accountIdx>'), { exitCode: 2 });
+  const idx = intArg(args[0], 'accountIdx');
+  const wins = unwrap(await rpc('get_windows', {})) || [];
+  const list = Array.isArray(wins) ? wins : [];
+  const my = list.filter((w) => (w.accountIdx ?? 0) === idx);
+  emit({
+    accountIdx: idx,
+    partition: my[0]?.partition || `persist:sandbox-${idx}`,
+    windowCount: my.length,
+    windows: my.map((w) => ({ winId: w.id, url: w.url, title: w.title, isDomReady: w.isDomReady, isLoading: w.isLoading })),
+  });
+}
+
+async function cmdProxy(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron proxy <accountIdx> <url|"">'), { exitCode: 2 });
+  const idx = intArg(args[0], 'accountIdx');
+  emit(unwrap(await rpc('set_account_proxy', { accountIdx: idx, proxy: args[1] })));
+}
+
+async function cmdOpen(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron open <accountIdx> --url <url> [--no-reuse]'), { exitCode: 2 });
+  const idx = intArg(args[0], 'accountIdx');
+  let url = '', reuseWindow = true;
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === '--url')       { url = args[++i]; continue; }
+    if (args[i] === '--no-reuse')  { reuseWindow = false; continue; }
+  }
+  if (!url) throw Object.assign(new Error('--url <url> is required'), { exitCode: 2 });
+  const r = unwrap(await rpc('open_window', { url, accountIdx: idx, reuseWindow }));
+  // open_window returns plain text "Opened window with ID: N" or "...reusing it"
+  const txt = typeof r === 'string' ? r : (r?.text || JSON.stringify(r));
+  const m = /ID:?\s*(\d+)/.exec(txt);
+  emit({ message: txt, winId: m ? parseInt(m[1], 10) : null, accountIdx: idx, url, reuseWindow });
+}
+
+async function cmdClose(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron close <winId>'), { exitCode: 2 });
+  emit(unwrap(await rpc('close_window', { win_id: intArg(args[0], 'winId') })));
+}
+
+async function cmdWindows(_args) {
+  emit(unwrap(await rpc('get_windows', {})));
+}
+
+async function cmdWindow(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron window <winId>'), { exitCode: 2 });
+  emit(unwrap(await rpc('get_window_info', { win_id: intArg(args[0], 'winId') })));
+}
+
+async function cmdUrl(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron url <winId> <url>'), { exitCode: 2 });
+  emit(unwrap(await rpc('load_url', { win_id: intArg(args[0], 'winId'), url: args[1] })));
+}
+
+async function cmdCDP(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron cdp <winId> <method> [json_params]'), { exitCode: 2 });
+  const params = { win_id: intArg(args[0], 'winId'), method: args[1] };
+  if (args[2] && !args[2].startsWith('--')) {
+    try { params.params = JSON.parse(args[2]); }
+    catch (e) { throw Object.assign(new Error(`invalid json_params: ${e.message}`), { exitCode: 2 }); }
+  }
+  emit(unwrap(await rpc('cdp_sendcmd', params)));
+}
+
+async function cmdScreenshot(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron screenshot <winId> [--out path]'), { exitCode: 2 });
+  const winId = intArg(args[0], 'winId');
+  let outPath = '';
+  for (let i = 1; i < args.length; i++) if (args[i] === '--out') outPath = args[++i];
+  // Use webpage_screenshot_to_clipboard which avoids the WS payload size limit
+  // hit by Page.captureScreenshot's base64 response on large windows.
+  if (!outPath) { emit(unwrap(await rpc('webpage_screenshot_to_clipboard', { win_id: winId }))); return; }
+  const r = unwrap(await rpc('cdp_sendcmd', { win_id: winId, method: 'Page.captureScreenshot', params: { format: 'png' } }));
+  const b64 = r?.data;
+  if (!b64) throw Object.assign(new Error('no screenshot data returned'), { exitCode: 5 });
+  writeFileSync(outPath, Buffer.from(b64, 'base64'));
+  emit({ ok: true, out: outPath, bytes: Buffer.from(b64, 'base64').length });
+}
+
+async function cmdSnapshot(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron snapshot <winId>'), { exitCode: 2 });
+  emit(unwrap(await rpc('webpage_snapshot', { win_id: intArg(args[0], 'winId') })));
+}
+
+async function cmdSysinfo(_args) {
+  emit(unwrap(await rpc('get_system_info', {})));
+}

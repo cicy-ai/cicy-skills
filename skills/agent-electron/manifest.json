@@ -1,0 +1,72 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "agent-electron",
+  "version": "1.0.0",
+  "title": "Agent Electron",
+  "description": "Drive cicy-desktop Electron BrowserWindows and per-account sessions. Each accountIdx = an Electron session.fromPartition('persist:sandbox-<N>') with its own proxy; windows in that session inherit it. The Electron analog of agent-chrome.",
+  "category": "dev",
+  "tags": [
+    "electron",
+    "cicy-desktop",
+    "cdp",
+    "agent-bridge",
+    "session",
+    "browserwindow"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-electron",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=22"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/agent-electron",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": [
+      "api_token"
+    ]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Agent Electron",
+      "description": "驱动 cicy-desktop 的 Electron BrowserWindow 和 per-account session。accountIdx = sandbox-N partition，可设置 proxy；session 下所有 window 共享代理。对标 agent-chrome 的电子端版本。"
+    }
+  },
+  "tools": [
+    {
+      "name": "open",
+      "example": "agent-electron open 1 --url https://example.com",
+      "description": "Open a BrowserWindow under the given session (accountIdx)"
+    },
+    {
+      "name": "proxy",
+      "example": "agent-electron proxy 1 socks5://127.0.0.1:9001",
+      "description": "Set the upstream proxy on a session — applies to every window opened under that accountIdx"
+    },
+    {
+      "name": "cdp",
+      "example": "agent-electron cdp 4 Runtime.evaluate '{\"expression\":\"document.title\"}'",
+      "description": "Send a raw Chrome DevTools Protocol command to a BrowserWindow"
+    },
+    {
+      "name": "windows",
+      "example": "agent-electron windows",
+      "description": "List all live Electron BrowserWindows on the host"
+    }
+  ]
+}
