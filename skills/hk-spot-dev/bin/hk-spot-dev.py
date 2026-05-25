@@ -450,6 +450,9 @@ def bootstrap_container(ip):
                      "StrictHostKeyChecking accept-new\\n' >> ~/.ssh/config; "
                      "touch ~/.ssh/config; chmod 600 ~/.ssh/config")
         ssh_cicy(ip, f"git clone {CICY_CODE_REPO} ~/projects/cicy-code 2>/dev/null || true", timeout=300)
+    # always: ensure make + go are installed in the cicy-code-dev container
+    ssh_cicy(ip, "docker exec cicy-code-dev bash -c 'which make 2>/dev/null || (apt-get update -qq && apt-get install -y -qq make)' 2>/dev/null; "
+                 "docker exec cicy-code-dev bash -c 'which go 2>/dev/null || (curl -fsSL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz -o /tmp/go.tar.gz && tar -C /usr/local -xzf /tmp/go.tar.gz && ln -sf /usr/local/go/bin/go /usr/local/bin/go)' 2>/dev/null; true", timeout=120)
     # always: ensure cicy-mihomo wrapper is built, mihomo binary exists, gen-config if missing
     ssh_cicy(ip, "[ -x ~/.local/bin/cicy-hosttools ] || { cd ~/projects/cicy-code/skills 2>/dev/null && "
                  "/usr/local/go/bin/go build -o ~/.local/bin/cicy-hosttools ./cmd/cicy-hosttools 2>/dev/null; } || true; "
