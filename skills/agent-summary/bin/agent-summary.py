@@ -626,19 +626,25 @@ def resolve_source(arg: str):
 
     # agent-id branch: gateway flag decides which source is authoritative.
     gw, atype = lookup_gateway(arg)
+    atype_norm = (atype or "").lower()
     canonical = WORKERS_DIR / arg / ".cicy" / "history" / "current.json"
+
+    # Gateway only applies to codex / opencode / claude (cicy-claude). Other
+    # agent types (kiro-cli, hermes, etc.) don't go through the local gateway,
+    # so skip the gateway-source check entirely for them.
+    gateway_eligible = atype_norm in ("codex", "opencode", "claude", "cicy-claude")
 
     # Gateway on (or unknown agent but current.json present): use the
     # gateway snapshot — it's the only source kept fresh by the proxy.
-    if gw == 1 or (gw is None and canonical.exists()):
+    if gateway_eligible and (gw == 1 or (gw is None and canonical.exists())):
         if not canonical.exists():
             raise FileNotFoundError(
                 f"Gateway is ON for {arg} but no snapshot yet at {canonical}"
             )
         return load_snapshot(canonical), "current", canonical
 
-    # Gateway off: pick loader by agent_type.
-    atype = (atype or "").lower()
+    # Gateway off (or non-gateway agent): pick loader by agent_type.
+    atype = atype_norm
     if atype == "codex":
         data = load_codex_as_snapshot(arg)
         return data, "codex", Path(data["_jsonl_path"])
@@ -990,66 +996,111 @@ def print_stats(stats: dict):
 
 
 def generate_structured_text(messages: list) -> str:
-    """Generate structured text for AI summary input."""
-    lines = []
-    user_requests = []
-    assistant_actions = []
+    """Generate structured text — chronological turns, deduplicated tools.
 
+    Output format:
+        ## Turn N
+        USER: <message>
+        AI:   <reply text>
+              tool: read /path/to/file
+              tool: run npm test (x3)
+              ...
+
+    Filters:
+      - <system-reminder> blocks
+      - "[OpenClaw heartbeat poll]" noise
+      - exact-duplicate consecutive tool calls (collapsed with xN suffix)
+      - empty text blocks
+    """
+    NOISE_PREFIXES = ('<system-reminder>', '<', '[OpenClaw heartbeat poll]')
+
+    def _clean_text(s: str, limit: int = 600) -> str:
+        s = s.strip()
+        if not s:
+            return ""
+        if any(s.startswith(p) for p in NOISE_PREFIXES):
+            return ""
+        if len(s) > limit:
+            s = s[:limit].rstrip() + " …"
+        return s
+
+    # Group messages into turns: each user msg starts a turn, followed by
+    # assistant messages until the next user msg.
+    turns = []
+    current = None  # {"user": [str], "ai_text": [str], "tools": [str]}
     for msg in messages:
         role = msg.get('role', '')
-        msg_id = msg.get('id', '')
-
         if role not in ('user', 'assistant'):
             continue
 
+        if role == 'user':
+            # Pull out user text(s)
+            user_texts = []
+            for block in (msg.get('content') or []):
+                if not isinstance(block, dict):
+                    continue
+                if block.get('type') == 'text':
+                    cleaned = _clean_text(block.get('text', ''))
+                    if cleaned:
+                        user_texts.append(cleaned)
+                # tool_result is a "user role" message in anthropic format —
+                # we drop it here, the assistant's tool call already shows intent
+            if not user_texts:
+                continue
+            current = {"user": user_texts, "ai_text": [], "tools": []}
+            turns.append(current)
+            continue
+
+        # role == 'assistant'
+        if current is None:
+            current = {"user": [], "ai_text": [], "tools": []}
+            turns.append(current)
         for block in (msg.get('content') or []):
             if not isinstance(block, dict):
                 continue
-
             btype = block.get('type')
-
             if btype == 'text':
-                text = block.get('text', '').strip()
-                if not text or text.startswith('<system-reminder>') or text.startswith('<'):
-                    continue
-                # Truncate long text
-                if len(text) > 500:
-                    text = text[:500] + '...'
-
-                if role == 'user':
-                    user_requests.append(f"[{msg_id}] {text}")
-                else:
-                    assistant_actions.append(f"[{msg_id}] reply: {text}")
-
+                cleaned = _clean_text(block.get('text', ''))
+                if cleaned:
+                    current["ai_text"].append(cleaned)
             elif btype == 'tool_use':
                 name = block.get('name', '')
                 inp = block.get('input', {})
                 if isinstance(inp, str):
                     try:
                         inp = json.loads(inp)
-                    except:
+                    except Exception:
                         inp = {}
-
                 action = format_tool_action(name, inp)
                 if action:
-                    assistant_actions.append(f"[{msg_id}] {action}")
+                    current["tools"].append(action)
 
-    # Build structured text
-    lines.append("=" * 60)
-    lines.append("User Messages & Requests")
-    lines.append("=" * 60)
-    for req in user_requests:
-        lines.append(req)
+    # Dedupe consecutive identical tool calls within a turn
+    def _collapse(items):
+        out = []
+        for item in items:
+            if out and out[-1][0] == item:
+                out[-1][1] += 1
+            else:
+                out.append([item, 1])
+        return [(s if c == 1 else f"{s} (x{c})") for s, c in out]
+
+    # Render
+    lines = []
+    turn_no = 0
+    for t in turns:
+        if not (t["user"] or t["ai_text"] or t["tools"]):
+            continue
+        turn_no += 1
+        lines.append(f"## Turn {turn_no}")
+        for u in t["user"]:
+            lines.append(f"USER: {u}")
+        for txt in t["ai_text"]:
+            lines.append(f"AI:   {txt}")
+        for tool in _collapse(t["tools"]):
+            lines.append(f"      • {tool}")
         lines.append("")
-
-    lines.append("")
-    lines.append("=" * 60)
-    lines.append("AI Actions & Tool Use")
-    lines.append("=" * 60)
-    for action in assistant_actions:
-        lines.append(action)
-
-    return '\n'.join(lines)
+    return '\n'.join(lines).rstrip() + '\n'
 
 
 def format_tool_action(name: str, inp: dict) -> str:
