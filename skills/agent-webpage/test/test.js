@@ -13,7 +13,9 @@ assert('--help has output', help.stdout.length > 0);
 const bad = runSkill(D, ['badcmd']);
 assert('unknown subcommand exits non-0', bad.status !== 0);
 
-const ping = runSkill(D, ['ping', '--json']);
-assert('ping without server exits non-0', ping.status !== 0);
+// ping with a definitely-bogus client_id should always fail, regardless of
+// whether other clients happen to be connected in the test environment.
+const ping = runSkill(D, ['ping', '__no_such_client__', '--json']);
+assert('ping with bogus client_id exits non-0', ping.status !== 0);
 
 finish();

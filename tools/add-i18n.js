@@ -9,7 +9,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
 const TRANSLATIONS = {
   'agent-chrome': {
     title: 'Agent Chrome',
-    description: '通过 cicy-desktop 控制本机 Chrome，支持多 Profile 独立代理。使用 CDP + ~/Private/chrome.json。',
+    description: '通过 cicy-desktop 控制本机 Chrome，支持多 Profile 独立代理。使用 CDP + ~/cicy-ai/db/chrome.json。',
   },
   'agent-code-server': {
     title: 'Agent Code Server',

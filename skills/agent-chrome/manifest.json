@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-chrome",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "title": "Agent Chrome",
-  "description": "Control system Chrome on a connected cicy-desktop host with per-profile proxy support. CDP + ~/Private/chrome.json multi-profile via desktop_event RPC.",
+  "description": "Control system Chrome on a connected cicy-desktop host with per-profile proxy support. CDP + ~/cicy-ai/db/chrome.json multi-profile via desktop_event RPC.",
   "category": "dev",
   "tags": [
     "chrome",
@@ -43,7 +43,7 @@
   "i18n": {
     "zh-CN": {
       "title": "Agent Chrome",
-      "description": "通过 cicy-desktop 控制本机 Chrome，支持多 Profile 独立代理。使用 CDP + ~/Private/chrome.json。"
+      "description": "\u901a\u8fc7 cicy-desktop \u63a7\u5236\u672c\u673a Chrome\uff0c\u652f\u6301\u591a Profile \u72ec\u7acb\u4ee3\u7406\u3002\u4f7f\u7528 CDP + ~/cicy-ai/db/chrome.json\u3002"
     }
   },
   "tools": [

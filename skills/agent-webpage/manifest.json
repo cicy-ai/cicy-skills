@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-webpage",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "title": "Agent Webpage",
   "description": "Talk to the live webpage client for an agent on this host. Run JS, ping, send custom events and await the real reply over the chat WebSocket.",
   "category": "dev",
@@ -42,7 +42,7 @@
   "i18n": {
     "zh-CN": {
       "title": "Agent Webpage",
-      "description": "通过聊天 WebSocket 与 agent 当前页面客户端通信，执行 JS、ping、发送自定义事件并等待实际响应。"
+      "description": "\u901a\u8fc7\u804a\u5929 WebSocket \u4e0e agent \u5f53\u524d\u9875\u9762\u5ba2\u6237\u7aef\u901a\u4fe1\uff0c\u6267\u884c JS\u3001ping\u3001\u53d1\u9001\u81ea\u5b9a\u4e49\u4e8b\u4ef6\u5e76\u7b49\u5f85\u5b9e\u9645\u54cd\u5e94\u3002"
     }
   },
   "tools": [

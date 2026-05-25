@@ -113,32 +113,45 @@ async function api(method, path, payload) {
 
 async function chatClients() {
   const data = await api('GET', '/api/chat/clients');
-  return data?.clients || data?.data?.clients || data?.data || data || {};
+  // Server returns an array: [{ client_id, isElectron, platform, ... }, ...].
+  // Tolerate the legacy nested { agentID: { clientID: info } } shape too.
+  // Routing is by client_id alone — agent_id fields are display-only metadata.
+  let raw = data?.clients || data?.data?.clients || data?.data || data || [];
+  if (!Array.isArray(raw)) {
+    const flat = [];
+    for (const [, m] of Object.entries(raw)) {
+      for (const [cid, info] of Object.entries(m || {})) {
+        flat.push({ client_id: cid, ...info });
+      }
+    }
+    raw = flat;
+  }
+  return raw.filter((c) => c?.client_id);
 }
 
+// Resolve a target client by client_id alone — agent_id never enters routing.
+// If no client_id is given, auto-pick a single non-electron, non-code-ext page client.
 async function resolveTarget(clientID) {
   const clients = await chatClients();
   if (clientID) {
-    for (const [agentID, m] of Object.entries(clients)) {
-      if (m && Object.prototype.hasOwnProperty.call(m, clientID)) {
-        return { agentID, clientID };
-      }
-    }
-    throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+    const hit = clients.find((c) => c?.client_id === clientID);
+    if (!hit) throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+    return { clientID };
   }
-  const agentID = currentAgentID();
-  const cmap = clients[agentID] || {};
-  const ids = Object.keys(cmap).filter((id) => !id.endsWith(':code-ext'));
-  if (ids.length === 0) throw Object.assign(new Error(`current agent ${agentID} has no connected webpage client`), { exitCode: 3 });
-  if (ids.length > 1)  throw Object.assign(new Error(`current agent ${agentID} has multiple webpage clients; pass client_id explicitly`), { exitCode: 2 });
-  return { agentID, clientID: ids[0] };
+  const pages = clients.filter((c) =>
+    c?.client_id && !c.client_id.endsWith(':code-ext') && !c.isElectron
+  );
+  if (pages.length === 0) throw Object.assign(new Error('no webpage client connected; pass client_id'), { exitCode: 3 });
+  if (pages.length > 1)  throw Object.assign(new Error(`multiple webpage clients connected; pass client_id explicitly (${pages.map((c) => c.client_id).join(', ')})`), { exitCode: 2 });
+  return { clientID: pages[0].client_id };
 }
 
-// Open WebSocket for the agent and resolve when a message matches.
+// Legacy WS-await — kept only for any caller that still wants raw WS matching.
+// New code paths should use wait_ack via api('POST', '/api/chat/push', {...}).
 function awaitMatch(agentID, match, timeoutMs = DEFAULT_TIMEOUT) {
   return new Promise((resolve, reject) => {
     const token = loadToken();
-    const url = `${WS_BASE}/api/chat/ws?agent_id=${encodeURIComponent(agentID)}&token=${encodeURIComponent(token)}`;
+    const url = `${WS_BASE}/api/chat/ws?master_agent_id=${encodeURIComponent(agentID)}&token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
     const timer = setTimeout(() => { try { ws.close(); } catch {} reject(Object.assign(new Error('timeout waiting for response'), { exitCode: 4 })); }, timeoutMs);
     ws.addEventListener('error', (e) => { clearTimeout(timer); reject(Object.assign(new Error(`websocket error: ${e.message || e.type}`), { exitCode: 4 })); });
@@ -160,34 +173,22 @@ function awaitMatch(agentID, match, timeoutMs = DEFAULT_TIMEOUT) {
   });
 }
 
-// Convenience: open WS, wait for open, push event, then await match.
-async function rpc({ agentID, clientID, type, data, expectType, expectRequestId, timeoutMs = DEFAULT_TIMEOUT }) {
-  const token = loadToken();
-  const url = `${WS_BASE}/api/chat/ws?agent_id=${encodeURIComponent(agentID)}&token=${encodeURIComponent(token)}`;
-  const ws = new WebSocket(url);
-  const opened = new Promise((res, rej) => {
-    ws.addEventListener('open', () => res());
-    ws.addEventListener('error', (e) => rej(Object.assign(new Error(`websocket error: ${e.message || e.type}`), { exitCode: 4 })));
+// rpc: HTTP push with wait_ack=true. Server keys solely on client_id, injects
+// its own requestId, registers a waiter, and returns the client's reply as
+// the HTTP response — { success, mode:"sync", type, data }. No WebSocket,
+// no agent_id, no race conditions.
+async function rpc({ clientID, type, data, expectType, timeoutMs = DEFAULT_TIMEOUT }) {
+  const resp = await api('POST', '/api/chat/push', {
+    client_id: clientID,
+    type,
+    data: data || {},
+    wait_ack: true,
+    timeout_ms: timeoutMs,
   });
-  const matchedMsg = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { try { ws.close(); } catch {} reject(Object.assign(new Error('timeout waiting for response'), { exitCode: 4 })); }, timeoutMs);
-    ws.addEventListener('message', (ev) => {
-      let msg;
-      try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()); } catch { return; }
-      const t = msg?.type;
-      const rid = msg?.data?.requestId ?? msg?.requestId;
-      const matches = (!expectType || t === expectType) && (!expectRequestId || rid === expectRequestId);
-      if (matches) {
-        clearTimeout(timer);
-        try { ws.close(); } catch {}
-        resolve(msg);
-      }
-    });
-    ws.addEventListener('close', () => { /* let timer fire */ });
-  });
-  await opened;
-  await api('POST', '/api/chat/push', { agent_id: agentID, client_id: clientID, type, data });
-  return matchedMsg;
+  if (expectType && resp?.type && resp.type !== expectType) {
+    throw Object.assign(new Error(`expected ${expectType} got ${resp.type}`), { exitCode: 4 });
+  }
+  return resp;
 }
 
 // ── clients ─────────────────────────────────────────────────────────────
@@ -202,16 +203,15 @@ async function cmdClients() {
 
 async function cmdPing(args, ipc) {
   const target = await resolveTarget(args[0]);
-  const rid = randomID(ipc ? 'ipc-ping' : 'webpage-ping');
   const sendType = ipc ? 'ipc_ping' : 'webpage_ping';
   const recvType = ipc ? 'ipc_pong' : 'webpage_pong';
   const msg = await rpc({
-    agentID: target.agentID, clientID: target.clientID,
-    type: sendType, data: { requestId: rid },
-    expectType: recvType, expectRequestId: rid,
+    clientID: target.clientID,
+    type: sendType, data: {},
+    expectType: recvType,
   });
   const version = msg?.data?.version || 'unknown';
-  if (json) return ok({ connected: true, version, client_id: target.clientID, agent_id: target.agentID, ipc });
+  if (json) return ok({ connected: true, version, client_id: target.clientID, ipc });
   console.log(`✅ ${recvType} from ${target.clientID} (v${version})`);
 }
 
@@ -220,11 +220,10 @@ async function cmdPing(args, ipc) {
 async function cmdExecJS(args) {
   if (args.length < 1) throw Object.assign(new Error("Usage: agent-webpage exec-js '<js>' [client_id]"), { exitCode: 2 });
   const target = await resolveTarget(args[1]);
-  const rid = randomID('exec');
   const msg = await rpc({
-    agentID: target.agentID, clientID: target.clientID,
-    type: 'exec_js', data: { code: args[0], requestId: rid },
-    expectType: 'exec_js_result', expectRequestId: rid,
+    clientID: target.clientID,
+    type: 'exec_js', data: { code: args[0] },
+    expectType: 'exec_js_result',
   });
   const data = msg?.data || {};
   if (data.error) {
@@ -259,12 +258,10 @@ async function cmdSend(args) {
   const clientID = args[2] || '';
   const expectType = args[3] || '';
   const target = await resolveTarget(clientID);
-  const rid = data?.requestId || randomID('send');
-  if (!data.requestId) data.requestId = rid;
   const msg = await rpc({
-    agentID: target.agentID, clientID: target.clientID,
+    clientID: target.clientID,
     type: sendType, data,
-    expectType: expectType || undefined, expectRequestId: rid,
+    expectType: expectType || undefined,
   });
   if (json) return ok(msg);
   console.log(JSON.stringify(msg, null, 2));
