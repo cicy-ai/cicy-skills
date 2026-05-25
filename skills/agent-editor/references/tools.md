@@ -1,4 +1,4 @@
-# agent-code-server — tools
+# agent-editor — tools
 
 ## Subcommand → wire protocol
 

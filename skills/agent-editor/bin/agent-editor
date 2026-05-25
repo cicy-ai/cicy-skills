@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// agent-code-server — bridge to the page-bound :code-ext extension on this host.
+// agent-editor — bridge to the page-bound :code-ext extension on this host.
 // Talks to cicy-code via POST /api/chat/push with wait_ack:true (sync RPC).
 // Subcommands: ping / list / open / active / tabs.
 
@@ -34,7 +34,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'active-file':
       case 'current':          await cmdActive(rest);   break;
       case 'tabs':             await cmdTabs(rest);     break;
-      default: bail(`unknown command: ${cmd}. Try agent-code-server --help.`, 2);
+      default: bail(`unknown command: ${cmd}. Try agent-editor --help.`, 2);
     }
   } catch (e) {
     bail(e.message, e.exitCode || 1);
@@ -45,7 +45,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
 
 function bail(msg, code = 1) {
   if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
-  else process.stderr.write(`agent-code-server: ${msg}\n`);
+  else process.stderr.write(`agent-editor: ${msg}\n`);
   process.exit(code);
 }
 
@@ -58,11 +58,11 @@ function printHelp() {
     process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
   } catch {
     process.stdout.write(`Usage:
-  agent-code-server ping [page_client_id]
-  agent-code-server list
-  agent-code-server open <path> [page_client_id]
-  agent-code-server active [page_client_id]
-  agent-code-server tabs [page_client_id]
+  agent-editor ping [page_client_id]
+  agent-editor list
+  agent-editor open <path> [page_client_id]
+  agent-editor active [page_client_id]
+  agent-editor tabs [page_client_id]
 `);
   }
 }
@@ -71,7 +71,7 @@ function printTools() {
   try {
     process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8'));
   } catch {
-    process.stdout.write('# agent-code-server tools\n\n- ping / list / open / active / tabs\n');
+    process.stdout.write('# agent-editor tools\n\n- ping / list / open / active / tabs\n');
   }
 }
 
@@ -168,7 +168,7 @@ async function push(payload) {
 }
 
 function notConnectedHint() {
-  return 'code-server extension not connected (no `:code-ext` WS) — open the code-server panel in cicy-code UI and try again';
+  return 'editor extension not connected (no `:code-ext` WS) — open the Files panel in cicy-code UI and try again';
 }
 
 // ── ping ────────────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ async function cmdPing(args) {
   }
   const version = resp?.data?.version || 'unknown';
   if (json) ok({ connected: true, version, page_client_id: target.pageClientID, code_client_id: target.codeClientID });
-  else console.log(`✅ code.pong! code-server online (v${version})`);
+  else console.log(`✅ code.pong! editor online (v${version})`);
 }
 
 // ── list ────────────────────────────────────────────────────────────────
@@ -223,7 +223,7 @@ async function cmdList(_args) {
 // ── open ────────────────────────────────────────────────────────────────
 
 async function cmdOpen(args) {
-  if (args.length < 1) throw Object.assign(new Error('Usage: agent-code-server open <path> [page_client_id]'), { exitCode: 2 });
+  if (args.length < 1) throw Object.assign(new Error('Usage: agent-editor open <path> [page_client_id]'), { exitCode: 2 });
   const target = await resolveTarget(args[1]);
   const path = normalizeOpenPath(args[0]);
 

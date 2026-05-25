@@ -1,15 +1,15 @@
-# agent-code-server — help
+# agent-editor — help
 
 ## Commands
 
 ```
-agent-code-server ping [page_client_id] [--json]
-agent-code-server list / clients [--json]
-agent-code-server open <path> [page_client_id] [--json]
-agent-code-server active [page_client_id] [--json]
-agent-code-server tabs [page_client_id] [--json]
-agent-code-server --help / -h / help
-agent-code-server tools
+agent-editor ping [page_client_id] [--json]
+agent-editor list / clients [--json]
+agent-editor open <path> [page_client_id] [--json]
+agent-editor active [page_client_id] [--json]
+agent-editor tabs [page_client_id] [--json]
+agent-editor --help / -h / help
+agent-editor tools
 ```
 
 ## `open` path syntax
