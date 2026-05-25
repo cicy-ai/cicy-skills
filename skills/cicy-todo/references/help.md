@@ -61,7 +61,15 @@ cicy-todo --pane w-10025 done t-1779
 
 - `X_AGENT_SHORT_ID` — caller's pane id (set by the cicy-code tmux boot
   script). Drives both the request header and the master/worker decision.
+  **Required**; the CLI exits 2 if neither this nor `CICY_PANE_ID` is set.
 - `CICY_PANE_ID`     — fallback when `X_AGENT_SHORT_ID` is unset.
 - `CICY_API_PORT`    — local cicy-code port (default 8008).
 - `CICY_API_TOKEN`   — overrides reading from `~/cicy-ai/global.json`.
 - `CICY_GLOBAL_JSON` — overrides `~/cicy-ai/global.json` path.
+
+## Security model
+
+The per-worker isolation is **honor-system, not a security boundary**. All
+panes share the same `api_token`, so any caller with the token can spoof
+`X-Agent-Show-Id` and impersonate the master pane. Treat the worker scope
+as a UX guard rail, not a privilege boundary.

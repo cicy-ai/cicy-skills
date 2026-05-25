@@ -15,6 +15,13 @@ assert('no args exits non-0', noArgs.status !== 0);
 const bad = runSkill(D, ['badcmd']);
 assert('unknown subcommand exits non-0', bad.status !== 0);
 
+// missing X_AGENT_SHORT_ID and CICY_PANE_ID → exit 2
+// Wipe both env vars explicitly (the runner may inherit them).
+const noEnv = runSkill(D, ['list', '--json'], { X_AGENT_SHORT_ID: '', CICY_PANE_ID: '' });
+assert('no identity env vars exits 2', noEnv.status === 2);
+assert('no env error mentions X_AGENT_SHORT_ID',
+  noEnv.stderr.includes('X_AGENT_SHORT_ID') || noEnv.stdout.includes('X_AGENT_SHORT_ID'));
+
 // worker pane using --pane flag → exit 2 (rejected client-side)
 const workerPane = runSkill(D, ['list', '--pane', 'w-10025'], { X_AGENT_SHORT_ID: 'w-10025' });
 assert('worker using --pane exits 2', workerPane.status === 2);

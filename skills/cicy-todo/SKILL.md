@@ -62,8 +62,18 @@ conversations and be visible in the Workspace UI tab.
    worker. Without it, master sees / acts on all workers.
 4. Status set is fixed: `todo | doing | done | dropped`. Do not invent new
    states.
-5. The CLI requires the local cicy-code server on `$CICY_API_PORT`
+5. The CLI requires `X_AGENT_SHORT_ID` (or `CICY_PANE_ID`) and exits with
+   code 2 when neither is set — there is no default. cicy-code's tmux boot
+   script sets the variable in every pane.
+6. The CLI requires the local cicy-code server on `$CICY_API_PORT`
    (default 8008) and reads `api_token` from `~/cicy-ai/global.json`.
+
+## Security model
+
+The per-worker isolation is **honor-system, not a security boundary**. All
+panes share the same `api_token`, so a malicious caller with the token can
+trivially set `X-Agent-Show-Id: w-10001` and impersonate the master. Treat
+the worker scope as a UI/UX guard rail, not a privilege boundary.
 
 ## References
 
