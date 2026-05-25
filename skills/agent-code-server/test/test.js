@@ -1,0 +1,19 @@
+#!/usr/bin/env node
+import { runSkill, assert, finish } from '../../../tools/test-helper.js';
+const D = new URL('..', import.meta.url).pathname;
+
+const noArgs = runSkill(D, []);
+assert('no args exits 0 (help)', noArgs.status === 0);
+assert('no args prints help', noArgs.stdout.includes('agent-code-server') || noArgs.stdout.includes('open'));
+
+const help = runSkill(D, ['--help']);
+assert('--help exits 0', help.status === 0);
+assert('--help has output', help.stdout.length > 0);
+
+const bad = runSkill(D, ['badcmd']);
+assert('unknown subcommand exits non-0', bad.status !== 0);
+
+const open = runSkill(D, ['open']);
+assert('open without path exits non-0', open.status !== 0);
+
+finish();
