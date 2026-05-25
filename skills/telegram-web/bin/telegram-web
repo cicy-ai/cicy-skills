@@ -1,0 +1,477 @@
+#!/usr/bin/env node
+// telegram-web — drive Telegram Web A inside a cicy-desktop BrowserWindow.
+// Login by syncing localStorage from a system-Chrome profile; query/dispatch
+// via webpack-extracted typify() to read GlobalState and fire actions.
+// Requires Node 22+.
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+let clientID = '';
+let winIdArg = null;
+const args = [];
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--client' || argv[i] === '-c') { clientID = argv[++i] || ''; continue; }
+  if (argv[i] === '--win') { winIdArg = intArg(argv[++i], '--win'); continue; }
+  args.push(argv[i]);
+}
+
+const json = args.includes('--json');
+const cmd = args[0];
+const rest = args.slice(1).filter((a) => a !== '--json');
+
+const GLOBAL_JSON  = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const SESSION_JSON = process.env.CICY_TELEGRAM_WEB_SESSION || join(homedir(), 'cicy-ai', 'db', 'telegram-web.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+const HTTP_BASE = `http://127.0.0.1:${API_PORT}`;
+const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 90000);
+
+const DEFAULT_URL = 'https://web.telegram.org/a/';
+const DEFAULT_TO_ACCOUNT = 99;
+const DEFAULT_PROXY = 'socks5://127.0.0.1:9001';
+
+(async () => {
+  try {
+    switch (cmd) {
+      case 'tools':    printHelp(); return;
+      case 'login':    await cmdLogin(rest); return;
+      case 'status':   await cmdStatus(rest); return;
+      case 'patch':    await cmdPatch(rest); return;
+      case 'account':  await cmdAccount(rest); return;
+      case 'chats':    await cmdChats(rest); return;
+      case 'dialogs':  await cmdDialogs(rest); return;
+      case 'users':    await cmdUsers(rest); return;
+      case 'messages': await cmdMessages(rest); return;
+      case 'open':     await cmdOpen(rest); return;
+      case 'send':     await cmdSend(rest); return;
+      case 'eval':     await cmdEval(rest); return;
+      case 'close':    await cmdClose(rest); return;
+      default: bail(`unknown command: ${cmd}. Try telegram-web --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── boilerplate ─────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`telegram-web: ${msg}\n`);
+  process.exit(code);
+}
+function emit(result) {
+  if (json) console.log(JSON.stringify({ ok: true, data: result }));
+  else if (typeof result === 'string') console.log(result);
+  else console.log(JSON.stringify(result, null, 2));
+}
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('Usage: telegram-web <login|status|account|chats|dialogs|users|messages|open|send|eval|close> [...]\n'); }
+}
+function intArg(s, name) {
+  const n = parseInt(s, 10);
+  if (Number.isNaN(n)) throw Object.assign(new Error(`${name} must be a number, got: ${s}`), { exitCode: 2 });
+  return n;
+}
+function loadToken() {
+  if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
+  if (!existsSync(GLOBAL_JSON)) throw Object.assign(new Error(`api_token not found: set CICY_API_TOKEN or create ${GLOBAL_JSON}`), { exitCode: 3 });
+  const cfg = JSON.parse(readFileSync(GLOBAL_JSON, 'utf8'));
+  if (!cfg.api_token) throw Object.assign(new Error(`api_token missing in ${GLOBAL_JSON}`), { exitCode: 3 });
+  return cfg.api_token;
+}
+function randomID(prefix) { return `${prefix}-${Date.now()}-${randomBytes(4).toString('hex')}`; }
+
+async function api(method, path, payload) {
+  const headers = { 'Authorization': `Bearer ${loadToken()}` };
+  const init = { method, headers };
+  if (payload !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(payload); }
+  let res;
+  try { res = await fetch(HTTP_BASE + path, init); }
+  catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${HTTP_BASE} (${e.message})`), { exitCode: 3 }); }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error(`auth failed (${res.status})`), { exitCode: 3 });
+  if (res.status >= 400) {
+    let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
+    throw Object.assign(new Error(`api error (${res.status}): ${body?.error || body?.message || text}`), { exitCode: 4 });
+  }
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function chatClients() {
+  const data = await api('GET', '/api/chat/clients');
+  let raw = data?.data || data || [];
+  if (!Array.isArray(raw)) raw = [];
+  return raw.filter((c) => c?.client_id);
+}
+
+async function resolveDesktop() {
+  const clients = await chatClients();
+  if (clientID) {
+    const c = clients.find((x) => x.client_id === clientID);
+    if (!c) throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+    return { clientID: c.client_id };
+  }
+  const matches = clients.filter((c) => {
+    const ua = String(c.user_agent || '').toLowerCase();
+    return c.isElectron === true || ua.includes('cicydesktop') || ua.includes('electronmcp');
+  });
+  if (matches.length === 0) throw Object.assign(new Error('no cicy-desktop client connected'), { exitCode: 3 });
+  if (matches.length > 1)  throw Object.assign(new Error('multiple cicy-desktop clients connected; pass --client <id>'), { exitCode: 2 });
+  return { clientID: matches[0].client_id };
+}
+
+async function rpc(tool, toolArgs, target) {
+  target = target || await resolveDesktop();
+  const rid = randomID('twrpc');
+  const resp = await api('POST', '/api/chat/push', {
+    client_id: target.clientID,
+    type: 'desktop_event',
+    wait_ack: true,
+    timeout_ms: RPC_TIMEOUT_MS,
+    data: { type: 'rpc_call', tool, args: toolArgs ?? {}, requestId: rid },
+  });
+  const data = resp?.data || {};
+  if (data.error) throw Object.assign(new Error(String(data.error)), { exitCode: 4 });
+  return data.result;
+}
+
+// cicy-desktop electronRPC tools return MCP-style `{content:[{type:"text",text:"..."}]}`,
+// which the server may flatten to the `text` string. Land on a structured value either way.
+function unwrapCdp(result) {
+  if (typeof result === 'string') {
+    try { return JSON.parse(result); } catch { return result; }
+  }
+  if (result && typeof result === 'object' && Array.isArray(result.content)) {
+    const txt = result.content[0]?.text;
+    if (typeof txt === 'string') { try { return JSON.parse(txt); } catch { return txt; } }
+    return result.content[0];
+  }
+  return result;
+}
+
+async function cdpEval(winId, expression, opts = {}) {
+  const params = { win_id: winId, method: 'Runtime.evaluate', params: { expression, returnByValue: true, ...opts } };
+  const r = unwrapCdp(await rpc('cdp_sendcmd', params));
+  if (r && r.exceptionDetails) throw Object.assign(new Error('cdp eval threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))), { exitCode: 5 });
+  return r?.result?.value;
+}
+
+// ── session persistence ─────────────────────────────────────────────────
+
+function loadSession() {
+  if (!existsSync(SESSION_JSON)) return null;
+  try { return JSON.parse(readFileSync(SESSION_JSON, 'utf8')); } catch { return null; }
+}
+function saveSession(sess) {
+  mkdirSync(dirname(SESSION_JSON), { recursive: true });
+  writeFileSync(SESSION_JSON, JSON.stringify(sess, null, 2));
+}
+async function resolveWindow() {
+  if (winIdArg != null) {
+    if (!clientID) {
+      const sess = loadSession();
+      if (sess?.session?.clientId) clientID = sess.session.clientId;
+    }
+    return { winId: winIdArg };
+  }
+  const sess = loadSession();
+  if (!sess?.session?.winId) throw Object.assign(new Error(`no active session — run 'telegram-web login' first (or pass --win <id>)`), { exitCode: 3 });
+  if (!clientID && sess.session.clientId) clientID = sess.session.clientId;
+  return { winId: sess.session.winId };
+}
+
+// ── webpack typify hack ─────────────────────────────────────────────────
+
+const WEBPACK_PATCH = `(() => {
+  if (window.__tt && typeof window.__getGlobal === 'function') {
+    try {
+      const g = window.__getGlobal();
+      if (g && typeof g === 'object') return { ok: true, alreadyPatched: true, currentUserId: g.currentUserId, isInited: g.isInited };
+    } catch (e) {}
+  }
+  if (!Array.isArray(window.webpackChunktelegram_t)) {
+    return { ok: false, err: 'webpackChunktelegram_t not present — is this Telegram Web A?' };
+  }
+  let req;
+  const P = '__tw_patch_' + Date.now();
+  try {
+    window.webpackChunktelegram_t.push([[P], { [P]: (m,e,r) => { req = r; } }, (r) => r(P)]);
+  } catch (e) { return { ok: false, err: 'webpack push failed: ' + e.message }; }
+  if (!req) return { ok: false, err: 'webpack require not captured' };
+
+  // Feature-detect typify: 0-arg function whose return value has
+  // getGlobal+setGlobal+getActions as function keys. Specific enough that
+  // false positives are unlikely.
+  const ids = Object.keys(req.m || {});
+  let typify = null, foundIn = null;
+  for (const id of ids) {
+    let m;
+    try { m = req(id); } catch (e) { continue; }
+    if (!m || typeof m !== 'object') continue;
+    for (const k of Object.keys(m)) {
+      let v;
+      try { v = m[k]; } catch (e) { continue; }
+      if (typeof v !== 'function' || v.length !== 0) continue;
+      let src;
+      try { src = v.toString(); } catch { continue; }
+      if (src.length < 30 || src.length > 600) continue;
+      // typify returns object literal with these keys — check source first to
+      // avoid calling unrelated 0-arg factories with side effects.
+      if (!/getGlobal\\b/.test(src) || !/setGlobal\\b/.test(src) || !/getActions\\b/.test(src)) continue;
+      let out;
+      try { out = v(); } catch { continue; }
+      if (out && typeof out === 'object'
+          && typeof out.getGlobal === 'function'
+          && typeof out.setGlobal === 'function'
+          && typeof out.getActions === 'function') {
+        typify = v;
+        foundIn = { moduleId: id, exportKey: k };
+        break;
+      }
+    }
+    if (typify) break;
+  }
+  if (!typify) return { ok: false, err: 'typify not found among ' + ids.length + ' modules' };
+
+  const typed = typify();
+  window.__tt = typed;
+  window.__getGlobal = typed.getGlobal;
+  window.__setGlobal = typed.setGlobal;
+  window.__getActions = typed.getActions;
+  let userId = null, inited = null;
+  try { const g = typed.getGlobal(); userId = g.currentUserId; inited = g.isInited; } catch {}
+  return { ok: true, foundIn, currentUserId: userId, isInited: inited, modulesScanned: ids.length };
+})()`;
+
+async function ensurePatched(winId) {
+  const r = await cdpEval(winId, WEBPACK_PATCH);
+  if (!r?.ok) throw Object.assign(new Error('webpack patch failed: ' + (r?.err || 'unknown')), { exitCode: 5 });
+  return r;
+}
+
+async function readGlobal(winId, pathExpr) {
+  await ensurePatched(winId);
+  const expr = `(() => { try { const g = window.__getGlobal(); const v = (${pathExpr}); return { ok: true, v }; } catch (e) { return { ok: false, err: String(e) }; } })()`;
+  const r = await cdpEval(winId, expr);
+  if (!r?.ok) throw Object.assign(new Error('readGlobal failed: ' + r?.err), { exitCode: 5 });
+  return r.v;
+}
+
+async function dispatchAction(winId, actionName, payload) {
+  await ensurePatched(winId);
+  const expr = `(() => { try { window.__getActions()[${JSON.stringify(actionName)}](${JSON.stringify(payload || {})}); return { ok: true }; } catch (e) { return { ok: false, err: String(e) }; } })()`;
+  const r = await cdpEval(winId, expr);
+  if (!r?.ok) throw Object.assign(new Error('dispatch failed: ' + r?.err), { exitCode: 5 });
+  return r;
+}
+
+// ── commands ────────────────────────────────────────────────────────────
+
+async function cmdLogin(args) {
+  const opts = { fromProfile: 0, toAccount: DEFAULT_TO_ACCOUNT, proxy: DEFAULT_PROXY, url: DEFAULT_URL, fromClient: null };
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--from-profile') { opts.fromProfile = intArg(args[++i], '--from-profile'); continue; }
+    if (args[i] === '--to-account')   { opts.toAccount = intArg(args[++i], '--to-account'); continue; }
+    if (args[i] === '--proxy')        { opts.proxy = args[++i]; continue; }
+    if (args[i] === '--no-proxy')     { opts.proxy = ''; continue; }
+    if (args[i] === '--url')          { opts.url = args[++i]; continue; }
+    if (args[i] === '--from-client')  { opts.fromClient = args[++i]; continue; }
+  }
+
+  const desktop = await resolveDesktop();
+
+  // 1. Read localStorage from source Chrome profile via agent-chrome's RPC.
+  //    chrome_cdp_call dispatches CDP to the named profile's debugger port.
+  const fromClientArg = opts.fromClient ? { clientID: opts.fromClient } : desktop;
+  const dump = await rpc('chrome_cdp_call', {
+    accountIdx: opts.fromProfile,
+    method: 'Runtime.evaluate',
+    params: {
+      expression: 'JSON.stringify(Object.fromEntries(Object.keys(localStorage).map(k => [k, localStorage.getItem(k)])))',
+      returnByValue: true,
+    },
+  }, fromClientArg);
+  // chrome_cdp_call wraps result differently from cdp_sendcmd — unwrap both shapes
+  const dumpStr = typeof dump === 'string' ? JSON.parse(dump).result?.result?.value
+                : dump?.result?.result?.value
+                ?? unwrapCdp(dump)?.result?.value;
+  if (!dumpStr) throw Object.assign(new Error('failed to read profile localStorage'), { exitCode: 5 });
+  const ls = JSON.parse(dumpStr);
+  if (!ls.user_auth && !ls.account1) {
+    throw Object.assign(new Error(`profile ${opts.fromProfile} not logged into Telegram (no user_auth/account1 in localStorage)`), { exitCode: 4 });
+  }
+
+  // 2. Configure proxy on the target electron account partition.
+  if (opts.proxy) await rpc('set_account_proxy', { accountIdx: opts.toAccount, proxy: opts.proxy });
+
+  // 3. Open BrowserWindow at telegram URL.
+  const open = unwrapCdp(await rpc('open_window', { url: opts.url, accountIdx: opts.toAccount, reuseWindow: false }));
+  // open_window returns a text string like "Opened window with ID: 4"
+  const openTxt = typeof open === 'string' ? open : open?.text || JSON.stringify(open);
+  const winMatch = /ID:?\s*(\d+)/.exec(openTxt);
+  if (!winMatch) throw Object.assign(new Error('could not parse new window id from: ' + openTxt), { exitCode: 5 });
+  const winId = parseInt(winMatch[1], 10);
+
+  // 4. Wait dom-ready (poll get_window_info).
+  let ready = false;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const info = unwrapCdp(await rpc('get_window_info', { win_id: winId }));
+    if (info?.isDomReady && !info?.isLoading) { ready = true; break; }
+  }
+  if (!ready) throw Object.assign(new Error(`window ${winId} did not reach dom-ready after 45s — check proxy: ${opts.proxy}`), { exitCode: 5 });
+
+  // 5. Inject localStorage from dump.
+  const b64 = Buffer.from(JSON.stringify(ls), 'utf8').toString('base64');
+  const injectExpr = `(() => { const data = JSON.parse(atob(${JSON.stringify(b64)})); localStorage.clear(); for (const [k,v] of Object.entries(data)) localStorage.setItem(k,v); return { keys: Object.keys(data).length, user_auth: localStorage.getItem('user_auth') }; })()`;
+  const injected = await cdpEval(winId, injectExpr);
+  if (!injected?.keys) throw Object.assign(new Error('localStorage inject reported no keys'), { exitCode: 5 });
+
+  // 6. Reload so Telegram boots with the auth.
+  await rpc('cdp_sendcmd', { win_id: winId, method: 'Page.reload', params: {} });
+
+  // 7. Poll for logged-in DOM signal (.chat-list) up to 60s.
+  let userId = null;
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const r = await cdpEval(winId, `(() => { const ua = JSON.parse(localStorage.getItem('user_auth') || 'null'); return { logged: !!document.querySelector('.chat-list'), userId: ua?.id, dcID: ua?.dcID }; })()`);
+      if (r?.logged) { userId = r.userId; break; }
+    } catch {}
+  }
+  if (!userId) throw Object.assign(new Error('reload completed but .chat-list never appeared — auth may be stale'), { exitCode: 5 });
+
+  // 8. Patch webpack so subsequent commands have window.__tt.
+  const patched = await ensurePatched(winId);
+
+  // 9. Persist session.
+  const sess = { session: {
+    clientId: desktop.clientID,
+    winId,
+    accountIdx: opts.toAccount,
+    fromProfile: opts.fromProfile,
+    proxy: opts.proxy,
+    url: opts.url,
+    currentUserId: userId,
+    patchedModuleId: patched.foundIn?.moduleId,
+    createdAt: new Date().toISOString(),
+  }};
+  saveSession(sess);
+
+  emit({ ok: true, winId, currentUserId: userId, accountIdx: opts.toAccount, fromProfile: opts.fromProfile, sessionFile: SESSION_JSON, patchedFrom: patched.foundIn });
+}
+
+async function cmdStatus(_args) {
+  const sess = loadSession();
+  if (!sess?.session) { emit({ ok: true, hasSession: false }); return; }
+  let live = null;
+  try {
+    if (!clientID) clientID = sess.session.clientId;
+    const info = unwrapCdp(await rpc('get_window_info', { win_id: sess.session.winId }));
+    live = { url: info?.url, title: info?.title, isDomReady: info?.isDomReady, isDestroyed: info?.isDestroyed };
+    try {
+      const r = await cdpEval(sess.session.winId, `(() => { try { const g = window.__getGlobal?.(); return { hasGlobal: !!g, userId: g?.currentUserId, chatCount: g?.chats?.listIds?.active?.length ?? null }; } catch { return { hasGlobal: false }; } })()`);
+      live.global = r;
+    } catch (e) { live.global = { err: e.message }; }
+  } catch (e) { live = { err: e.message }; }
+  emit({ ok: true, hasSession: true, session: sess.session, live });
+}
+
+async function cmdPatch(_args) {
+  const { winId } = await resolveWindow();
+  emit(await ensurePatched(winId));
+}
+
+async function cmdAccount(_args) {
+  const { winId } = await resolveWindow();
+  const r = await readGlobal(winId, `(() => { const me = g.users.byId[g.currentUserId]; return me && { id: g.currentUserId, dcID: g.config?.thisDc, firstName: me.firstName, lastName: me.lastName, usernames: me.usernames?.map(u => u.username), phoneNumber: me.phoneNumber, isPremium: me.isPremium }; })()`);
+  emit(r);
+}
+
+async function cmdChats(_args) {
+  const { winId } = await resolveWindow();
+  const r = await readGlobal(winId, `Object.fromEntries(Object.entries(g.chats.byId).map(([id, c]) => [id, { id, title: c.title, type: c.type, isVerified: c.isVerified, membersCount: c.membersCount, unreadCount: c.unreadCount }]))`);
+  emit(r);
+}
+
+async function cmdDialogs(args) {
+  let limit = 50, folder = 'active';
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--limit')  { limit = intArg(args[++i], '--limit'); continue; }
+    if (args[i] === '--folder') { folder = args[++i]; continue; }
+  }
+  const { winId } = await resolveWindow();
+  const expr = `(() => { const ids = g.chats.listIds?.[${JSON.stringify(folder)}] || []; return ids.slice(0, ${limit}).map(id => { const c = g.chats.byId[id]; const u = g.users.byId[id]; const title = c?.title || (u ? [u.firstName, u.lastName].filter(Boolean).join(' ') : id); return { id, title, type: c?.type || (u ? 'private' : 'unknown'), unreadCount: c?.unreadCount || 0, lastReadInboxMessageId: c?.lastReadInboxMessageId }; }); })()`;
+  emit(await readGlobal(winId, expr));
+}
+
+async function cmdUsers(_args) {
+  const { winId } = await resolveWindow();
+  const r = await readGlobal(winId, `Object.fromEntries(Object.entries(g.users.byId).map(([id, u]) => [id, { id, firstName: u.firstName, lastName: u.lastName, username: u.usernames?.[0]?.username, isPremium: u.isPremium, isContact: u.isContact, isBot: !!u.isBot }]))`);
+  emit(r);
+}
+
+async function cmdMessages(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: telegram-web messages <chatId> [--limit N]'), { exitCode: 2 });
+  const chatId = args[0];
+  let limit = 30;
+  for (let i = 1; i < args.length; i++) if (args[i] === '--limit') limit = intArg(args[++i], '--limit');
+  const { winId } = await resolveWindow();
+  const expr = `(() => { const bucket = g.messages.byChatId[${JSON.stringify(chatId)}]; if (!bucket || !bucket.byId) return []; const ids = Object.keys(bucket.byId).map(Number).sort((a,b) => b-a).slice(0, ${limit}); return ids.map(id => { const m = bucket.byId[id]; return { id, date: m.date, senderId: m.senderId, isOutgoing: m.isOutgoing, content: m.content?.text?.text || (m.content && Object.keys(m.content)[0]) || null, replyToMessageId: m.replyToMessageId }; }); })()`;
+  emit(await readGlobal(winId, expr));
+}
+
+async function cmdOpen(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: telegram-web open <chatId>'), { exitCode: 2 });
+  const chatId = args[0];
+  const { winId } = await resolveWindow();
+  emit(await dispatchAction(winId, 'openChat', { id: chatId }));
+}
+
+async function cmdSend(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: telegram-web send <chatId> <text>'), { exitCode: 2 });
+  const chatId = args[0];
+  const text = args.slice(1).join(' ');
+  const { winId } = await resolveWindow();
+  // sendMessage in telegram-tt dispatches against the currently-open chat,
+  // so we focus chat first, then send. Open is fire-and-forget — give it a
+  // moment to set currentChatId before sending.
+  await dispatchAction(winId, 'openChat', { id: chatId });
+  await new Promise((r) => setTimeout(r, 400));
+  await dispatchAction(winId, 'sendMessage', { text });
+  emit({ ok: true, chatId, text });
+}
+
+async function cmdEval(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: telegram-web eval <jsExpression>'), { exitCode: 2 });
+  const { winId } = await resolveWindow();
+  await ensurePatched(winId);
+  // expose `g`, `actions`, `tt` shortcuts for ergonomics
+  const expr = `(() => { try { const g = window.__getGlobal(); const actions = window.__getActions(); const tt = window.__tt; const __r = (${args.join(' ')}); return { ok: true, v: __r }; } catch (e) { return { ok: false, err: String(e), stack: e.stack }; } })()`;
+  const r = await cdpEval(winId, expr);
+  if (!r?.ok) throw Object.assign(new Error('eval threw: ' + r?.err), { exitCode: 5 });
+  emit(r.v);
+}
+
+async function cmdClose(_args) {
+  const { winId } = await resolveWindow();
+  await rpc('close_window', { win_id: winId });
+  if (existsSync(SESSION_JSON)) {
+    const sess = loadSession();
+    if (sess?.session?.winId === winId) {
+      try { writeFileSync(SESSION_JSON, JSON.stringify({}, null, 2)); } catch {}
+    }
+  }
+  emit({ ok: true, closedWinId: winId });
+}

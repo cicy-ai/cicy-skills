@@ -1,0 +1,70 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "telegram-web",
+  "version": "1.0.0",
+  "title": "Telegram Web",
+  "description": "Drive Telegram Web A inside a cicy-desktop BrowserWindow. Login by syncing localStorage from a system-Chrome profile; query/dispatch via webpack-extracted typify() to read GlobalState and fire actions — no inject file required.",
+  "category": "productivity",
+  "tags": [
+    "telegram",
+    "automation",
+    "cicy-desktop",
+    "webpack-extract",
+    "agent-bridge"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/telegram-web",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=22"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/telegram-web",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": [
+      "api_token"
+    ]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Telegram Web",
+      "description": "在 cicy-desktop BrowserWindow 里跑 Telegram Web A。从 system Chrome profile 复制 localStorage 完成登录，通过 webpack 提取 typify() 直接读 GlobalState、派发 actions。"
+    }
+  },
+  "tools": [
+    {
+      "name": "login",
+      "example": "telegram-web login --from-profile 0",
+      "description": "Sync localStorage from a logged-in Chrome profile into an Electron BrowserWindow"
+    },
+    {
+      "name": "dialogs",
+      "example": "telegram-web dialogs --limit 20",
+      "description": "List recent chat dialogs (sorted by listIds.active order)"
+    },
+    {
+      "name": "messages",
+      "example": "telegram-web messages 7943234085 --limit 30",
+      "description": "Read messages from a specific chat by id"
+    },
+    {
+      "name": "send",
+      "example": "telegram-web send 7943234085 'hello from agent'",
+      "description": "Send a text message to a chat — dispatches openChat then sendMessage"
+    }
+  ]
+}
