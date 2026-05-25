@@ -23,12 +23,19 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h') || args[
 
 // ── identity + flag parsing ─────────────────────────────────────────────
 // Self pane (X-Agent-Show-Id) comes from the env var the tmux boot script
-// sets. Falls back to CICY_PANE_ID then to MASTER_PANE.
-const SELF_PANE = (
-  process.env.X_AGENT_SHORT_ID ||
-  process.env.CICY_PANE_ID ||
-  MASTER_PANE
-).trim();
+// sets. We refuse to run without an explicit identity — defaulting to the
+// master pane would silently grant master-level visibility to any shell
+// that happens to lack the env var (cron, ad-hoc terminals, scripts).
+const SELF_PANE_RAW = (process.env.X_AGENT_SHORT_ID || process.env.CICY_PANE_ID || '').trim();
+if (!SELF_PANE_RAW) {
+  process.stderr.write(
+    'cicy-todo: X_AGENT_SHORT_ID (or CICY_PANE_ID) env var is required.\n' +
+    '  Inside a cicy-code pane this is set automatically by the tmux boot script.\n' +
+    '  To run as the master pane explicitly: CICY_PANE_ID=w-10001 cicy-todo ...\n',
+  );
+  process.exit(2);
+}
+const SELF_PANE = SELF_PANE_RAW;
 
 const json = args.includes('--json');
 const isMaster = SELF_PANE === MASTER_PANE;
