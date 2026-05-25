@@ -1,5 +1,18 @@
 # frp-client — help
 
+## Install frpc binary
+
+```bash
+# First-time install (downloads frpc + writes config + sets up service):
+curl -fsSL https://install.cicy-ai.com/frp | bash -s -- --server <HOST> --token <TOKEN>
+
+# With env vars:
+FRP_SERVER=1.2.3.4 FRP_TOKEN=xxxx curl -fsSL https://install.cicy-ai.com/frp | bash
+
+# Re-run with no args to reuse existing config and hot-reload:
+curl -fsSL https://install.cicy-ai.com/frp | bash
+```
+
 ## Commands
 
 ```
