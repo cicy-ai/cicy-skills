@@ -4,7 +4,7 @@ const D = new URL('..', import.meta.url).pathname;
 
 const noArgs = runSkill(D, []);
 assert('no args exits 0 (help)', noArgs.status === 0);
-assert('no args prints help', noArgs.stdout.includes('agent-code-server') || noArgs.stdout.includes('open'));
+assert('no args prints help', noArgs.stdout.includes('agent-editor') || noArgs.stdout.includes('open'));
 
 const help = runSkill(D, ['--help']);
 assert('--help exits 0', help.status === 0);

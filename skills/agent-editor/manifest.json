@@ -1,25 +1,28 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
-  "name": "agent-code-server",
-  "version": "1.0.3",
-  "title": "Agent Code Server",
-  "description": "Open files in the page-bound code-server on this host. Bridges to the live :code-ext extension via cicy-code's chat push channel.",
+  "name": "agent-editor",
+  "version": "2.0.0",
+  "title": "Agent Editor",
+  "description": "Open files in the page-bound native editor on this host. Bridges to the live :code-ext extension via cicy-code's chat push channel.",
   "category": "dev",
   "tags": [
-    "code-server",
-    "vscode",
+    "editor",
+    "files",
     "agent-bridge",
     "rpc"
   ],
   "author": "cicy-ai",
-  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-code-server",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-editor",
   "license": "MIT",
   "runtime": {
     "node": ">=18"
   },
   "system_requirements": [],
   "npm_dependencies": false,
-  "entry": "bin/agent-code-server",
+  "entry": "bin/agent-editor",
+  "bin_aliases": [
+    "agent-code-server"
+  ],
   "permissions": [
     "network",
     "filesystem:home"
@@ -41,20 +44,20 @@
   },
   "i18n": {
     "zh-CN": {
-      "title": "Agent Code Server",
+      "title": "Agent Editor",
       "description": "通过 cicy-code 聊天推送通道向页面绑定的 :code-ext 扩展发送打开文件等指令。"
     }
   },
   "tools": [
     {
       "name": "open",
-      "example": "agent-code-server open /path/to/file",
-      "description": "Open a file in the code-server editor"
+      "example": "agent-editor open /path/to/file",
+      "description": "Open a file in the editor"
     },
     {
       "name": "ping",
-      "example": "agent-code-server ping",
-      "description": "Check if code-server extension is alive"
+      "example": "agent-editor ping",
+      "description": "Check if the editor extension is alive"
     }
   ]
 }
