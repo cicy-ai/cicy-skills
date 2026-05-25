@@ -12,12 +12,29 @@ machines via `ssh <host> 'frp-client ...'`).
 
 Use this skill when the task involves:
 
+- installing `frpc` and setting it up as a background service
 - starting `frpc` as a background service
 - checking whether the FRP client is running
 - checking current proxy status / connections
 - reloading or restarting the FRP client after config changes
 - stopping the FRP client cleanly
 - managing a remote FRP client machine over `ssh`
+
+## Quick start
+
+```bash
+# First-time install (downloads frpc, writes config, installs service):
+frp-client install --server <HOST> --token <TOKEN>
+
+# Service management:
+frp-client service status
+frp-client service install   # re-install service unit only
+
+# Day-to-day:
+frp-client status
+frp-client reload
+frp-client logs -f
+```
 
 ## Rules
 

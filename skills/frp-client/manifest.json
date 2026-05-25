@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "frp-client",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "title": "FRP Client",
   "description": "Manage a local frpc process on this host with background start, status, proxy connections, hot reload, and stop/start controls. Remote machines via ssh.",
   "category": "network",
