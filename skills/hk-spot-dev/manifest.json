@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "hk-spot-dev",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Hk Spot Dev",
   "description": "Provision an HK (Hong Kong) Aliyun spot ECS dev box with a persistent ESSD data disk. Use when the user asks to spin up, rebuild, or destroy the HK spot dev environment.",
   "category": "cloud",

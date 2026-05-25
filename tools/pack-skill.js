@@ -104,10 +104,16 @@ out = sys.argv[3]
 exclude_dirs = set(${JSON.stringify(excludeRel)})
 exclude_globs = ['*.zip', '*.log', '.env', '.env.*']
 src = os.path.join(parent, entry)
+dirs_written = set()
 with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as zf:
     for root, dirs, files in os.walk(src):
         # prune excluded dirs in place
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        # add directory entries so GitHub-served sha256 matches local
+        arc_dir = os.path.relpath(root, parent) + "/"
+        if arc_dir not in dirs_written:
+            zf.writestr(zipfile.ZipInfo(arc_dir), "")
+            dirs_written.add(arc_dir)
         for f in files:
             if any(fnmatch.fnmatch(f, g) for g in exclude_globs):
                 continue
