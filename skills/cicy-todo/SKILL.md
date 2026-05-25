@@ -5,41 +5,45 @@ description: Per-workspace todo list (todo/doing/done/dropped) backed by /api/to
 
 # Cicy Todo
 
-A minimal todo list that lives **inside each agent's workspace** and is shared
-between the `cicy-todo` CLI and the cicy-code Workspace "Todo" tab — both go
-through `/api/todo/*` so there is one source of truth per worker.
+A minimal todo list shared between every cicy-code agent / pane and the
+Workspace "Todo" tab. There is **one** store, located in the master pane
+(`w-10001`) workspace at `<master-ws>/.cicy/todos.yaml`.
 
-Storage: `<workspace>/.cicy/todos.yaml`
+Each todo carries a `pane_id` recording which worker owns it. The server
+enforces:
+
+- A worker pane only sees / modifies todos with `pane_id == self`.
+- The master pane (`w-10001`) sees every todo and may filter via `--pane`.
 
 ## Quick start
 
 ```sh
-cicy-todo                              # list OWN active todos
+# In any worker pane — own todos only.
+cicy-todo                              # list active
 cicy-todo add "Ship the cicy-todo skill"
 cicy-todo start <id-prefix>            # → doing
 cicy-todo done  <id-prefix>            # → done
 cicy-todo drop  <id-prefix>            # → dropped
 cicy-todo back  <id-prefix>            # → todo
 cicy-todo edit  <id-prefix> "<new title>"
-cicy-todo rm    <id-prefix>            # delete
+cicy-todo rm    <id-prefix>
 
-# View / modify ANOTHER agent's todos: prepend the pane id (w-xxxxx).
-cicy-todo w-10001                      # list w-10001's active todos
-cicy-todo w-10001 add "ship it"
-cicy-todo w-10001 done t-1779
+# In the master pane (w-10001) — sees every worker's todos.
+cicy-todo                              # all workers' active todos (PANE col)
+cicy-todo --pane w-10025               # filter to one worker
+cicy-todo --pane w-10025 add "ship it" # create on behalf of w-10025
+cicy-todo --pane w-10025 done t-1779
 ```
 
-`<id-prefix>` accepts the leading 4–8 chars of an id when unique. The leading
-pane id (`w-xxxxx`) is optional — without it the command targets
-`$CICY_PANE_ID` (else `w-10001`). Internally every request carries
-`X-Agent-Show-Id: <pane>` so the backend knows whose todos to act on.
+`<id-prefix>` accepts the leading 4–8 chars when unique. The CLI sends
+`X-Agent-Show-Id: $X_AGENT_SHORT_ID` so the server knows who is asking.
 
 ## Scope
 
 Use this skill when:
 
-- the user wants to record / view / change the status of todos for the current
-  worker OR another worker
+- the user wants to record / view / change the status of todos for the
+  current worker (or, from master, any worker)
 - the user asks "what am I working on", "what's left", "mark X done"
 - you need to leave a durable note for the next session about pending work
 
@@ -49,16 +53,17 @@ conversations and be visible in the Workspace UI tab.
 
 ## Rules
 
-1. Data is **per pane**: each `w-xxxxx` worker has its own `todos.yaml`. The
-   CLI sends `X-Agent-Show-Id` based on the leading positional pane arg (or
-   `$CICY_PANE_ID` / `w-10001` when no arg given).
-2. CLI is a thin wrapper over the cicy-code REST API; it requires the local
-   cicy-code server on `$PORT` (default 8008) and reads `api_token` from
-   `~/cicy-ai/global.json`.
-3. Status set is fixed: `todo | doing | done | dropped`. Do not invent new
+1. Storage is centralised: every operation goes through the master pane's
+   `todos.yaml`. Never write to that file directly — always go through the
+   CLI / `/api/todo/*`.
+2. Workers cannot see or change other workers' todos. The server returns
+   403 if they try.
+3. From the master pane, `--pane <w-xxxxx>` restricts a command to one
+   worker. Without it, master sees / acts on all workers.
+4. Status set is fixed: `todo | doing | done | dropped`. Do not invent new
    states.
-4. The CLI mutates `todos.yaml` only via the API — never write to that file
-   directly.
+5. The CLI requires the local cicy-code server on `$CICY_API_PORT`
+   (default 8008) and reads `api_token` from `~/cicy-ai/global.json`.
 
 ## References
 
