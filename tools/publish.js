@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 // tools/publish.js
 //
-// Register a skill version with the cicy-skills registry Worker.
+// Publish a skill to the cicy-skills registry.
 //
-// IMPORTANT: This script does NOT upload the zip itself. The zip is expected
-// to already be a published GitHub Releases asset at:
-//   https://github.com/<repo>/releases/download/<tag>/<name>-<version>.zip
+// Flow:
+//   1. Read manifest.json from skill dir
+//   2. Ensure the local zip exists (from pack-skill.js)
+//   3. Create GitHub Release (if not exists) and upload the zip asset via `gh`
+//   4. Download the asset from GitHub to get the REAL bytes users will receive
+//   5. Compute sha256 on the downloaded bytes
+//   6. POST to registry with the real sha256
 //
-// This script:
-//   1. Reads manifest.json + the local zip (<name>-<version>.zip)
-//   2. Computes sha256 + size
-//   3. Optionally HEADs the GitHub Releases URL to confirm reachability
-//   4. POSTs the (manifest, verify) tuple to <registry>/v1/admin/publish
+// This guarantees the sha256 in the registry always matches what users download.
 //
 // Usage:
 //   ADMIN_TOKEN=... node tools/publish.js skills/cping
@@ -19,11 +19,6 @@
 //     --registry https://skills.cicy-ai.com \
 //     --repo cicy-ai/cicy-skills \
 //     --zip dist/cping-1.0.0.zip
-//
-// Defaults:
-//   --registry  https://skills.cicy-ai.com
-//   --repo      cicy-ai/cicy-skills
-//   --zip       dist/<name>-<version>.zip
 //
 // Exit codes:
 //   0 — published
@@ -33,8 +28,9 @@
 //   4 — auth missing
 
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 // ── arg parsing ────────────────────────────────────────────────────────────
 
@@ -89,19 +85,65 @@ if (!existsSync(zipPath)) {
   process.exit(3);
 }
 
-// ── compute sha256 + size ──────────────────────────────────────────────────
-
-const buf = readFileSync(zipPath);
-const sha256 = createHash('sha256').update(buf).digest('hex');
-const size = statSync(zipPath).size;
-
-// ── derive download_url and source ─────────────────────────────────────────
+// ── derive tag / asset / download_url ──────────────────────────────────────
 
 const tag = `${name}-v${version}`;
 const asset = `${name}-${version}.zip`;
 const downloadUrl = `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
 
-// inject publish fields into manifest
+// ── step 1: gh release create + upload ─────────────────────────────────────
+
+process.stderr.write(`▸ uploading ${asset} to ${REPO} release ${tag}...\n`);
+
+// Create release (ignore error if already exists)
+try {
+  execFileSync('gh', [
+    'release', 'create', tag,
+    '--repo', REPO,
+    '--title', `${name} v${version}`,
+    '--notes', `Skill release: ${name}@${version}`,
+  ], { stdio: ['ignore', 'ignore', 'ignore'] });
+} catch {
+  // release already exists — fine
+}
+
+// Upload asset (--clobber overwrites if re-publishing same version)
+try {
+  execFileSync('gh', [
+    'release', 'upload', tag, zipPath,
+    '--repo', REPO,
+    '--clobber',
+  ], { stdio: ['ignore', 'inherit', 'inherit'] });
+} catch (e) {
+  process.stderr.write(`✗ gh release upload failed: ${e.message}\n`);
+  process.exit(3);
+}
+
+// ── step 2: download the asset from GitHub to compute real sha256 ──────────
+
+process.stderr.write(`▸ downloading ${downloadUrl} to verify sha256...\n`);
+
+let realBuf;
+try {
+  const res = await fetch(downloadUrl, { redirect: 'follow' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  }
+  realBuf = Buffer.from(await res.arrayBuffer());
+} catch (e) {
+  process.stderr.write(`✗ download failed: ${e.message}\n`);
+  process.stderr.write('hint: the asset may not be available yet; retry in a few seconds\n');
+  process.exit(3);
+}
+
+const sha256 = createHash('sha256').update(realBuf).digest('hex');
+const size = realBuf.length;
+
+process.stderr.write(`  sha256: ${sha256}\n`);
+process.stderr.write(`  size:   ${size} bytes\n`);
+
+// ── inject publish fields into manifest ────────────────────────────────────
+
 manifest.publish = {
   ...(manifest.publish || {}),
   published_at: new Date().toISOString(),
@@ -132,38 +174,11 @@ for (const [key, rel] of Object.entries(fileMap)) {
   }
 }
 
-// ── HEAD the download_url to confirm asset exists ─────────────────────────
-
-if (!argv.includes('--skip-head')) {
-  try {
-    const res = await fetch(downloadUrl, { method: 'HEAD', redirect: 'follow' });
-    if (!res.ok) {
-      process.stderr.write(
-        `download_url unreachable: ${res.status} ${res.statusText}\n`,
-      );
-      process.stderr.write(`url: ${downloadUrl}\n`);
-      process.stderr.write(
-        'hint: create the GitHub Release first (or pass --skip-head to bypass)\n',
-      );
-      process.exit(2);
-    }
-    const remoteSize = Number(res.headers.get('content-length') || 0);
-    if (remoteSize > 0 && remoteSize !== size) {
-      process.stderr.write(
-        `size mismatch: local=${size} remote=${remoteSize}\n`,
-      );
-      process.exit(2);
-    }
-  } catch (e) {
-    process.stderr.write(`HEAD failed: ${e.message}\n`);
-    process.exit(2);
-  }
-}
-
 // ── POST to registry ───────────────────────────────────────────────────────
 
-const skipHead = argv.includes('--skip-head');
-const url = `${REGISTRY.replace(/\/$/, '')}/v1/admin/publish${skipHead ? '?skip_head=1' : ''}`;
+process.stderr.write(`▸ registering ${name}@${version} with registry...\n`);
+
+const url = `${REGISTRY.replace(/\/$/, '')}/v1/admin/publish`;
 let response;
 try {
   response = await fetch(url, {
@@ -211,8 +226,8 @@ if (json) {
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
 } else {
   process.stdout.write(`✓ published ${name}@${version}\n`);
-  process.stdout.write(`  download:    ${downloadUrl}\n`);
-  process.stdout.write(`  sha256:      ${sha256}\n`);
-  process.stdout.write(`  size:        ${size} bytes\n`);
-  process.stdout.write(`  manifest_url:${REGISTRY}/v1/skills/${name}/${version}\n`);
+  process.stdout.write(`  download: ${downloadUrl}\n`);
+  process.stdout.write(`  sha256:   ${sha256}\n`);
+  process.stdout.write(`  size:     ${size} bytes\n`);
+  process.stdout.write(`  registry: ${REGISTRY}/v1/skills/${name}/${version}\n`);
 }

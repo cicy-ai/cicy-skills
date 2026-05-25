@@ -112,85 +112,79 @@ async function api(method, path, payload) {
 
 async function chatClients() {
   const data = await api('GET', '/api/chat/clients');
-  return data?.clients || data?.data?.clients || data?.data || data || {};
+  // Server returns an array of client records: { client_id, master_agent_id,
+  // active_agent_id, isElectron, platform, user_agent, ... }. Older payloads
+  // returned a nested { agentID: { clientID: info } } shape — flatten that
+  // into the array form so the rest of the code treats one shape only.
+  let raw = data?.clients || data?.data?.clients || data?.data || data || [];
+  if (!Array.isArray(raw)) {
+    const flat = [];
+    for (const [agentID, m] of Object.entries(raw)) {
+      for (const [cid, info] of Object.entries(m || {})) {
+        flat.push({ client_id: cid, master_agent_id: agentID, ...info });
+      }
+    }
+    raw = flat;
+  }
+  return raw.filter(
+    (c) => c?.client_id && !['master_agent_id', 'active_agent_id', 'client_id'].includes(c.client_id)
+  );
 }
 
 // auto-select the single ElectronMCP client; explicit --client wins
 async function resolveDesktop() {
   const clients = await chatClients();
   if (clientID) {
-    for (const [agentID, m] of Object.entries(clients)) {
-      if (m && Object.prototype.hasOwnProperty.call(m, clientID)) return { agentID, clientID };
-    }
-    throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+    const c = clients.find((x) => x?.client_id === clientID);
+    if (!c) throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+    return { clientID: c.client_id };
   }
-  const matches = [];
-  for (const [agentID, m] of Object.entries(clients)) {
-    for (const [cid, info] of Object.entries(m || {})) {
-      const ua = String(info?.user_agent || '').toLowerCase();
-      if (ua.includes('electronmcp')) matches.push({ agentID, clientID: cid });
-    }
-  }
+  const matches = clients.filter((c) => {
+    const ua = String(c?.user_agent || '').toLowerCase();
+    return c?.isElectron === true || ua.includes('electronmcp') || ua.includes('cicydesktop');
+  });
   if (matches.length === 0) throw Object.assign(new Error('no cicy-desktop client connected'), { exitCode: 3 });
   if (matches.length > 1)  throw Object.assign(new Error('multiple cicy-desktop clients connected; pass --client <id>'), { exitCode: 2 });
-  return matches[0];
+  return { clientID: matches[0].client_id };
 }
 
-// rpc: open WS, on open push desktop_event, await rpc_result with matching requestId
+// rpc: HTTP push with wait_ack=true; the server's sync mode keys solely on
+// client_id and returns the rpc_result as the HTTP response.
 async function rpc(tool, toolArgs) {
   const target = await resolveDesktop();
-  const token = loadToken();
-  const url = `${WS_BASE}/api/chat/ws?agent_id=${encodeURIComponent(target.agentID)}&token=${encodeURIComponent(token)}`;
-  const ws = new WebSocket(url);
-  const opened = new Promise((res, rej) => {
-    ws.addEventListener('open', () => res());
-    ws.addEventListener('error', (e) => rej(Object.assign(new Error(`websocket error: ${e.message || e.type}`), { exitCode: 4 })));
-  });
   const rid = randomID('drpc');
-  const matchedMsg = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { try { ws.close(); } catch {} reject(Object.assign(new Error('timeout waiting for rpc_result'), { exitCode: 4 })); }, RPC_TIMEOUT_MS);
-    ws.addEventListener('message', (ev) => {
-      let msg;
-      try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()); } catch { return; }
-      if (msg?.type === 'rpc_result' && msg?.data?.requestId === rid) {
-        clearTimeout(timer);
-        try { ws.close(); } catch {}
-        const data = msg.data || {};
-        if (data.error) reject(Object.assign(new Error(data.error), { exitCode: 4 }));
-        else resolve(data.result);
-      }
-    });
-  });
-  await opened;
-  await api('POST', '/api/chat/push', {
-    agent_id: target.agentID, client_id: target.clientID,
+  const resp = await api('POST', '/api/chat/push', {
+    client_id: target.clientID,
     type: 'desktop_event',
+    wait_ack: true,
+    timeout_ms: RPC_TIMEOUT_MS,
     data: { type: 'rpc_call', tool, args: toolArgs ?? {}, requestId: rid },
   });
-  return { result: await matchedMsg, target };
+  const data = resp?.data || {};
+  if (data.error) throw Object.assign(new Error(String(data.error)), { exitCode: 4 });
+  return { result: data.result, target };
 }
 
 // ── commands ────────────────────────────────────────────────────────────
 
 async function cmdClients() {
   const clients = await chatClients();
-  const rows = [];
-  for (const [agentID, m] of Object.entries(clients)) {
-    for (const [cid, info] of Object.entries(m || {})) {
-      const ua = String(info?.user_agent || '');
-      rows.push({
-        client_id: cid, agent_id: agentID,
-        platform: info?.platform || '',
-        user_agent: ua,
-        is_cicy_desktop: ua.toLowerCase().includes('electronmcp'),
-      });
-    }
-  }
+  const rows = clients.map((c) => {
+    const ua = String(c?.user_agent || '');
+    return {
+      client_id: c.client_id,
+      master_agent_id: c?.master_agent_id || '',
+      active_agent_id: c?.active_agent_id || '',
+      platform: c?.platform || '',
+      user_agent: ua,
+      is_cicy_desktop: c?.isElectron === true || ua.toLowerCase().includes('electronmcp') || ua.toLowerCase().includes('cicydesktop'),
+    };
+  });
   if (json) return ok(rows);
   if (rows.length === 0) { console.log('no clients connected'); return; }
   for (const r of rows) {
     const tag = r.is_cicy_desktop ? 'cicy-desktop' : 'browser';
-    console.log(`[${tag}] ${r.client_id} (agent=${r.agent_id} platform=${r.platform})`);
+    console.log(`[${tag}] ${r.client_id} (master=${r.master_agent_id} active=${r.active_agent_id} platform=${r.platform})`);
   }
 }
 
