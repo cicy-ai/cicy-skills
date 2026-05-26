@@ -1,6 +1,6 @@
 ---
 name: telegram-web
-description: Drive Telegram Web A inside a cicy-desktop BrowserWindow. Login by syncing localStorage from a system-Chrome profile; query/dispatch via webpack-extracted typify() to read GlobalState and fire actions — no inject file required.
+description: Drive Telegram Web A inside a cicy-desktop BrowserWindow. Sync localStorage from system Chrome to login, then read/dispatch via webpack-extracted typify() — no inject file required.
 ---
 
 # Telegram Web

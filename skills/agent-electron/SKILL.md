@@ -1,6 +1,6 @@
 ---
 name: agent-electron
-description: Drive cicy-desktop Electron BrowserWindows and per-account sessions via desktop_event RPC. Each accountIdx is a `session.fromPartition('persist:sandbox-<N>')` with its own proxy; windows in that session inherit it. The Electron analog of agent-chrome.
+description: Drive cicy-desktop Electron BrowserWindows and per-account sandbox sessions via desktop_event RPC. Each accountIdx = its own session.fromPartition() with proxy. Electron analog of agent-chrome.
 ---
 
 # Agent Electron
