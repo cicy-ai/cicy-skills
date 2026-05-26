@@ -1,0 +1,150 @@
+#!/usr/bin/env node
+// cicy-team — team-builder for the cicy-code AI org.
+//
+// The master/architect (w-10001, Opus) uses this to staff a project with
+// one-shot, gateway-routed worker agents drawn from the bundled role library
+// (roles/<role>/SKILL.md). For each worker it:
+//   1) POST /api/panes/create  (use_custom_gateway=true, bound to master)
+//   2) writes the new worker's <workspace>/CLAUDE.md (claude) or AGENTS.md
+//      (codex/opencode) = base preamble + the role's charter
+//   3) optionally dispatches a task via `cicy-agent msg <new> --callback`
+//
+// Zero npm dependencies. Pure ESM. Node 18+ (global fetch).
+
+import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+const SKILL_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROLES_DIR = process.env.CICY_ROLES_DIR || join(SKILL_DIR, 'roles');
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+const API = `http://127.0.0.1:${API_PORT}`;
+const MASTER_DEFAULT = (process.env.X_AGENT_SHORT_ID || 'w-10001').trim() || 'w-10001';
+
+function die(msg, code = 1) { process.stderr.write(`cicy-team: ${msg}\n`); process.exit(code); }
+
+function token() {
+  if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
+  try { return JSON.parse(readFileSync(GLOBAL_JSON, 'utf8')).api_token || ''; } catch { return ''; }
+}
+
+// frontmatter (between first two ---) as flat key:value; body = rest.
+function parseRoleFile(role) {
+  const p = join(ROLES_DIR, role, 'SKILL.md');
+  if (!existsSync(p)) die(`unknown role "${role}" (see: cicy-team roles)`, 2);
+  const text = readFileSync(p, 'utf8');
+  const m = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!m) die(`role ${role} SKILL.md missing frontmatter`);
+  const fm = {};
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) fm[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return { fm, body: m[2].trim() };
+}
+
+function listRoles() {
+  for (const name of readdirSync(ROLES_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory()).map((d) => d.name).sort()) {
+    if (!existsSync(join(ROLES_DIR, name, 'SKILL.md'))) continue;
+    const { fm } = parseRoleFile(name);
+    process.stdout.write(`${name.padEnd(12)} agent_type=${fm.agent_type || '?'} model=${fm.model || '<default>'}\n`);
+  }
+}
+
+function composeWorkerFile({ session, ws, master, role, body }) {
+  const baseRaw = readFileSync(join(ROLES_DIR, '_base.md'), 'utf8');
+  const filled = baseRaw
+    .split('\n').filter((l) => !l.startsWith('<!--')).join('\n')
+    .replaceAll('{{AGENT_ID}}', session)
+    .replaceAll('{{WORKSPACE}}', ws)
+    .replaceAll('{{MASTER}}', master)
+    .replaceAll('{{ROLE}}', role);
+  const top = filled.split('{{ROLE_CHARTER}}')[0];
+  return `${top}${body}\n`;
+}
+
+async function createPane({ agentType, model, master, title }) {
+  const tok = token();
+  if (!tok) die('no api_token (set CICY_API_TOKEN or ~/cicy-ai/global.json)', 3);
+  let resp;
+  try {
+    resp = await fetch(`${API}/api/panes/create`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent_type: agentType, default_model: model, role: 'worker',
+        use_custom_gateway: true, master_pane_id: master, title,
+      }),
+    });
+  } catch (e) { die(`create request failed: ${e.message}`, 4); }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.success === false) die(`create failed: ${data.error || resp.status}`, 4);
+  const session = String(data.session || data.pane_id || '').split(':')[0];
+  if (!session) die(`create returned no session: ${JSON.stringify(data)}`, 4);
+  return session;
+}
+
+async function spawnRole(argv) {
+  const role = argv[0];
+  if (!role || role.startsWith('--')) die('usage: cicy-team spawn-role <role> [--model M] [--title T] [--master w-x] [--task "..."] [--no-callback]', 2);
+  let model = '', title = '', master = MASTER_DEFAULT, task = '', callback = true;
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--model') model = argv[++i];
+    else if (a === '--title') title = argv[++i];
+    else if (a === '--master') master = argv[++i];
+    else if (a === '--task') task = argv[++i];
+    else if (a === '--no-callback') callback = false;
+    else die(`unknown flag: ${a}`, 2);
+  }
+  const { fm, body } = parseRoleFile(role);
+  const agentType = fm.agent_type || die(`role ${role} missing agent_type`, 2);
+  if (!model) model = fm.model || '';
+  if (!title) title = role;
+
+  const session = await createPane({ agentType, model, master, title });
+  const ws = join(homedir(), 'cicy-ai', 'workers', session);
+  const fname = (agentType === 'claude' || agentType === 'cicy-claude') ? 'CLAUDE.md' : 'AGENTS.md';
+  mkdirSync(ws, { recursive: true });
+  writeFileSync(join(ws, fname), composeWorkerFile({ session, ws, master, role, body }));
+  process.stdout.write(`spawned ${session}  role=${role}  agent_type=${agentType}  model=${model || '<default>'}  file=${join(ws, fname)}\n`);
+
+  if (task) {
+    const a = ['msg', session, task]; if (callback) a.push('--callback');
+    try { execFileSync('cicy-agent', a, { stdio: 'inherit' }); }
+    catch (e) { die(`dispatch failed (need cicy-agent on PATH): ${e.message}`, 1); }
+    process.stdout.write(`dispatched task -> ${session}${callback ? ' (callback)' : ''}\n`);
+  }
+}
+
+function printHelp() {
+  process.stdout.write(`cicy-team — team-builder for the cicy-code AI org
+
+USAGE
+  cicy-team roles                          list available roles (from the bundled library)
+  cicy-team spawn-role <role> [opts]       create a one-shot gateway worker for <role> and (optionally) dispatch a task
+
+spawn-role options
+  --model M        gateway model (default: role's frontmatter model)
+  --title T        pane title (default: role name)
+  --master w-x     master pane to bind under (default: $X_AGENT_SHORT_ID or w-10001)
+  --task "..."     dispatch this task to the new worker via cicy-agent (self-contained: context + task + acceptance criteria)
+  --no-callback    dispatch without --callback
+
+roles: ${ROLES_DIR}
+Each spawned worker runs through the local gateway (auditable) and gets its
+CLAUDE.md/AGENTS.md composed from base preamble + the role charter.
+`);
+}
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+if (!cmd) { printHelp(); process.exit(2); }
+if (cmd === 'help' || cmd === '--help' || cmd === '-h') { printHelp(); process.exit(0); }
+if (cmd === 'roles') { listRoles(); process.exit(0); }
+if (cmd === 'spawn-role') { await spawnRole(args.slice(1)); process.exit(0); }
+die(`unknown subcommand: ${cmd}`, 2);
