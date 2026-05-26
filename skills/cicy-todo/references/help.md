@@ -31,8 +31,17 @@ All todos live in a single store under the **master pane** workspace
 | `edit`     | `cicy-todo edit <id> "<new title>"`                                    |
 | `rm`       | `cicy-todo rm <id>`                                                    |
 
-`<id-prefix>` accepts the leading 4–8 chars when unique. Ambiguous prefixes
-exit with code 4 and print candidates to stderr.
+## Referencing todos
+
+Two forms work for `<id>` in `show / start / done / drop / back / edit / rm`:
+
+| form              | meaning                                                                 |
+|-------------------|-------------------------------------------------------------------------|
+| `#N` or `N`       | the N-th row in the **active view** (status `todo` or `doing`), as printed by `cicy-todo list` (sorted by `created_at` ascending). `#1` = oldest open todo. |
+| `<uuid-prefix>`   | leading 4–8 chars of the UUID; useful for done/dropped todos not in the active view, or when status will shift. Ambiguous prefix exits 4. |
+
+Indices shift when the active set changes (add / done / drop). Re-run
+`cicy-todo` before referring to `#N` if state may have changed.
 
 `--pane` is master-only. From a worker pane it exits with code 2.
 
@@ -40,21 +49,22 @@ exit with code 4 and print candidates to stderr.
 
 ```bash
 # From any worker (e.g. w-10025) — sees only own todos.
-cicy-todo                         # list own active todos
+cicy-todo                         # list own active todos (rows numbered #1, #2, ...)
 cicy-todo --json                  # JSON output
-cicy-todo list --all              # include done/dropped
+cicy-todo list --all              # include done/dropped (non-active rows show short UUID)
 cicy-todo list --status=done
 cicy-todo list -q "release"       # title contains "release"
 
 cicy-todo add "Migrate cf-tunnel skill"
-cicy-todo start abcd1234
-cicy-todo done abcd
+cicy-todo start #1                # by positional ref
+cicy-todo done 1                  # `#` is optional
+cicy-todo done abcd               # by UUID prefix (works for any status)
 
 # From master pane (w-10001).
 cicy-todo                          # every worker's active todos (PANE col shown)
 cicy-todo --pane w-10025           # scope to one worker
 cicy-todo --pane w-10025 add "Coordinate handoff"
-cicy-todo --pane w-10025 done t-1779
+cicy-todo --pane w-10025 done #2
 ```
 
 ## Environment
