@@ -1,0 +1,34 @@
+#!/usr/bin/env node
+// pubip — fetch real public IP via ifconfig.me, bypassing any proxy.
+import { spawnSync } from 'node:child_process';
+
+const argv = process.argv.slice(2);
+
+if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
+  process.stdout.write(
+    'Usage: pubip [--json]\n' +
+    'Prints your real public IP by curl-ing https://ifconfig.me with proxy disabled.\n'
+  );
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+
+// Strip every common proxy env var so curl truly hits the wire directly.
+const env = { ...process.env };
+for (const k of ['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','NO_PROXY','http_proxy','https_proxy','all_proxy','no_proxy']) {
+  delete env[k];
+}
+
+const r = spawnSync('curl', ['--noproxy', '*', '-fsS', '-m', '10', 'https://ifconfig.me'], { env, encoding: 'utf8' });
+
+if (r.error || r.status !== 0) {
+  const msg = (r.error?.message || r.stderr || 'curl failed').trim();
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { message: msg } }) + '\n');
+  else process.stderr.write(`pubip: ${msg}\n`);
+  process.exit(r.status || 1);
+}
+
+const ip = r.stdout.trim();
+if (json) console.log(JSON.stringify({ ok: true, data: { ip } }));
+else console.log(ip);
