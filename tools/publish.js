@@ -123,17 +123,25 @@ try {
 
 process.stderr.write(`▸ downloading ${downloadUrl} to verify sha256...\n`);
 
+// GitHub release assets take a few seconds to propagate to the public
+// download CDN after upload (404 "blob does not exist" until then). Retry
+// with backoff instead of failing — the asset was uploaded above this run.
 let realBuf;
-try {
-  const res = await fetch(downloadUrl, { redirect: 'follow' });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+const ATTEMPTS = 8;
+for (let i = 1; i <= ATTEMPTS; i++) {
+  try {
+    const res = await fetch(downloadUrl, { redirect: 'follow' });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    realBuf = Buffer.from(await res.arrayBuffer());
+    break;
+  } catch (e) {
+    if (i === ATTEMPTS) {
+      process.stderr.write(`✗ download failed after ${ATTEMPTS} attempts: ${e.message}\n`);
+      process.exit(3);
+    }
+    process.stderr.write(`  asset not ready (${e.message}); retry ${i}/${ATTEMPTS} in 10s...\n`);
+    await new Promise((r) => setTimeout(r, 10000));
   }
-  realBuf = Buffer.from(await res.arrayBuffer());
-} catch (e) {
-  process.stderr.write(`✗ download failed: ${e.message}\n`);
-  process.stderr.write('hint: the asset may not be available yet; retry in a few seconds\n');
-  process.exit(3);
 }
 
 const sha256 = createHash('sha256').update(realBuf).digest('hex');
