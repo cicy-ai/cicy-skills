@@ -1,0 +1,48 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "pubip",
+  "version": "1.0.0",
+  "title": "Public IP",
+  "description": "Print the host's real public IP by curl-ing https://ifconfig.me with all proxies disabled.",
+  "category": "network",
+  "tags": [
+    "ip",
+    "network",
+    "diagnostic"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/pubip",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "curl"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/pubip",
+  "permissions": [
+    "network"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "公网 IP",
+      "description": "通过 curl --noproxy 直连 ifconfig.me 获取本机真实公网 IP，绕过所有代理。"
+    }
+  },
+  "tools": [
+    {
+      "name": "pubip",
+      "example": "pubip",
+      "description": "Print the host's real public IP, ignoring any HTTP/SOCKS proxy"
+    }
+  ]
+}
