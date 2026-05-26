@@ -56,22 +56,26 @@ if (paneFilter && !isMaster) {
 const cmd = rest.find((a) => !a.startsWith('--')) || 'list';
 const cmdArgs = rest.filter((a) => !a.startsWith('--') && a !== cmd);
 
-try {
-  switch (cmd) {
-    case 'list': case 'ls':  await cmdList(rest); break;
-    case 'add':              await cmdAdd(rest); break;
-    case 'show':             await cmdShow(cmdArgs); break;
-    case 'start':            await cmdSetStatus('doing', cmdArgs); break;
-    case 'done':             await cmdSetStatus('done', cmdArgs); break;
-    case 'drop':             await cmdSetStatus('dropped', cmdArgs); break;
-    case 'back':             await cmdSetStatus('todo', cmdArgs); break;
-    case 'edit':             await cmdEdit(cmdArgs); break;
-    case 'rm': case 'remove': case 'delete': await cmdRm(cmdArgs); break;
-    default: bail(`unknown command: ${cmd}. Try cicy-todo --help.`, 2);
+// IIFE so module-level `const` declarations below (GLYPH, helpers) are out
+// of the temporal dead zone by the time the dispatch runs.
+(async () => {
+  try {
+    switch (cmd) {
+      case 'list': case 'ls':  await cmdList(rest); break;
+      case 'add':              await cmdAdd(rest); break;
+      case 'show':             await cmdShow(cmdArgs); break;
+      case 'start':            await cmdSetStatus('doing', cmdArgs); break;
+      case 'done':             await cmdSetStatus('done', cmdArgs); break;
+      case 'drop':             await cmdSetStatus('dropped', cmdArgs); break;
+      case 'back':             await cmdSetStatus('todo', cmdArgs); break;
+      case 'edit':             await cmdEdit(cmdArgs); break;
+      case 'rm': case 'remove': case 'delete': await cmdRm(cmdArgs); break;
+      default: bail(`unknown command: ${cmd}. Try cicy-todo --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
   }
-} catch (e) {
-  bail(e.message, e.exitCode || 1);
-}
+})();
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -138,8 +142,40 @@ async function api(method, path, body) {
 }
 
 // ── id resolution ───────────────────────────────────────────────────────
+// Two forms are accepted:
+//   • #N or N — positional index into the *default active view* (status
+//     todo|doing), sorted by created_at ascending. This is the same order
+//     `cicy-todo list` prints, so #1/#2/... map directly to the rows the
+//     user just saw. Indices shift when the active set changes (add, done,
+//     drop, etc.), as is standard for sequential todo refs.
+//   • <uuid-prefix> — first-N chars of the UUID, for done/dropped todos
+//     that aren't in the active view, or when stability across status
+//     transitions matters.
+
+async function fetchActiveTodos() {
+  const params = [];
+  if (paneFilter) params.push(`pane_id=${encodeURIComponent(paneFilter)}`);
+  if (isMaster && !paneFilter) params.push('all_agents=true');
+  const qs = params.length ? '?' + params.join('&') : '';
+  const resp = await api('GET', '/list' + qs);
+  return (resp.todos || [])
+    .filter((t) => t.status === 'todo' || t.status === 'doing')
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+}
 
 async function resolveId(prefix) {
+  // Inlined to avoid TDZ — this function may be called synchronously from
+  // the dispatch IIFE before module-top const declarations resolve.
+  const seq = /^#?(\d+)$/.exec(prefix);
+  if (seq) {
+    const n = parseInt(seq[1], 10);
+    const active = await fetchActiveTodos();
+    if (n < 1 || n > active.length) {
+      throw Object.assign(new Error(`#${n} out of range (1..${active.length}); run 'cicy-todo' to see current numbering`), { exitCode: 2 });
+    }
+    return active[n - 1];
+  }
+
   const params = [];
   if (paneFilter) params.push(`pane_id=${encodeURIComponent(paneFilter)}`);
   if (isMaster && !paneFilter) params.push('all_agents=true');
@@ -176,17 +212,28 @@ function humanTime(iso) {
 
 function shortId(id) { return id.slice(0, 10); }
 
+// Active rows (status todo|doing) get a positional `#N` that mirrors what
+// `resolveId('#N')` will resolve to. Rows in other statuses get the short
+// UUID instead — they're outside the active set, so #N would be ambiguous.
 function printTable(todos, { withPane = false } = {}) {
   if (todos.length === 0) {
     console.log('(no todos)');
     return;
   }
+  const sorted = [...todos].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  let seq = 0;
+  const rows = sorted.map((t) => {
+    const isActive = t.status === 'todo' || t.status === 'doing';
+    const ref = isActive ? `#${++seq}` : shortId(t.id);
+    return { t, ref };
+  });
+  const refWidth = Math.max(4, ...rows.map((r) => r.ref.length));
   const paneCol = withPane ? ` ${'PANE'.padEnd(8)}` : '';
-  console.log(`     ${'ID'.padEnd(12)} ${'STATUS'.padEnd(7)} ${'UPDATED'.padEnd(10)}${paneCol} TITLE`);
-  for (const t of todos) {
+  console.log(`     ${'REF'.padEnd(refWidth)} ${'STATUS'.padEnd(7)} ${'UPDATED'.padEnd(10)}${paneCol} TITLE`);
+  for (const { t, ref } of rows) {
     const g = GLYPH[t.status] || '?';
     const paneCell = withPane ? ` ${(t.pane_id || '-').padEnd(8)}` : '';
-    console.log(`  ${g}  ${shortId(t.id).padEnd(12)} ${(t.status || '').padEnd(7)} ${humanTime(t.updated_at).padEnd(10)}${paneCell} ${t.title}`);
+    console.log(`  ${g}  ${ref.padEnd(refWidth)} ${(t.status || '').padEnd(7)} ${humanTime(t.updated_at).padEnd(10)}${paneCell} ${t.title}`);
   }
 }
 
@@ -245,7 +292,18 @@ async function cmdShow(args) {
   const t = await resolveId(id);
   if (json) console.log(JSON.stringify({ ok: true, data: t }));
   else {
-    console.log(`id:         ${t.id}`);
+    // Show the active-view `#N` alongside the UUID when this todo is
+    // currently in the active set — saves the user another `cicy-todo`
+    // call to look up its positional ref.
+    let ref = '';
+    if (t.status === 'todo' || t.status === 'doing') {
+      try {
+        const active = await fetchActiveTodos();
+        const idx = active.findIndex((x) => x.id === t.id);
+        if (idx >= 0) ref = ` (#${idx + 1})`;
+      } catch {}
+    }
+    console.log(`id:         ${t.id}${ref}`);
     console.log(`pane:       ${t.pane_id || '-'}`);
     console.log(`status:     ${t.status}`);
     console.log(`created:    ${t.created_at}`);
