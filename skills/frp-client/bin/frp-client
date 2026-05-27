@@ -179,10 +179,19 @@ function webServerURL() {
   const h = readConfigHints();
   const addr = h['webServer.addr'] || '127.0.0.1';
   const port = h['webServer.port'] || '7400';
+  return `http://${addr}:${port}`;
+}
+
+// Node's fetch() rejects credentials embedded in the URL ("Request cannot be
+// constructed from a URL that includes credentials"), so frpc admin API calls
+// must send basic auth via the Authorization header, not http://user:pass@host.
+function webServerFetch(path, timeoutMs) {
+  const h = readConfigHints();
+  const headers = {};
   const user = h['webServer.user'] || '';
   const pass = h['webServer.password'] || '';
-  const auth = (user || pass) ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : '';
-  return `http://${auth}${addr}:${port}`;
+  if (user || pass) headers['Authorization'] = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+  return fetch(webServerURL() + path, { headers, signal: AbortSignal.timeout(timeoutMs) });
 }
 
 // ── commands ────────────────────────────────────────────────────────────
@@ -263,7 +272,7 @@ async function cmdStatus() {
     const u = webServerURL();
     out.web_dashboard = u;
     try {
-      const r = await fetch(u + '/api/status', { signal: AbortSignal.timeout(2000) });
+      const r = await webServerFetch('/api/status', 2000);
       if (r.ok) out.serverinfo = await r.json();
     } catch (e) { out.api_error = e.message; }
   }
@@ -307,7 +316,7 @@ function cmdLogs(args) {
 async function cmdConnections() {
   if (runningPid() === 0) bail('not running', 4);
   const u = webServerURL();
-  let r; try { r = await fetch(u + '/api/status', { signal: AbortSignal.timeout(3000) }); } catch (e) { bail(`web api unreachable at ${u}: ${e.message}`, 4); }
+  let r; try { r = await webServerFetch('/api/status', 3000); } catch (e) { bail(`web api unreachable at ${u}: ${e.message}`, 4); }
   if (!r.ok) bail(`web api error (${r.status})`, 4);
   const data = await r.json();
   if (json) return ok(data);
