@@ -23,15 +23,18 @@ node tools/validate-skill.js skills/<name>
 # 4. 测试（发布前必须通过）
 node tools/test-skill.js skills/<name>
 
-# 5. 一键发布（改完版本号后直接跑）
+# 5. 发布：提交 + 推 tag。推 tag 触发 GitHub Action (.github/workflows/publish.yml)，
+#    它在 runner 上一次性 pack → 建/更新 Release → 注册 registry，三者用同一份
+#    产物，保证 GitHub asset 的 sha256 与 registry 记录一致。
 name=<name>
 version=$(jq -r .version skills/$name/manifest.json)
-ADMIN_TOKEN=$(jq -r .admin_token ~/cicy-ai/db/skills-registry-admin.json)
-
-node tools/pack-skill.js skills/$name
 git add skills/$name && git commit -m "bump $name to $version" && git push origin main
 git tag $name-v$version && git push origin $name-v$version
-ADMIN_TOKEN=$ADMIN_TOKEN node tools/publish.js skills/$name
+
+# ⚠️ 不要再手动跑 `node tools/publish.js`！你本机 pack 的 zip 与 runner 的字节不同
+#    （zip 版本差异），手动注册会让 registry 的 sha256 与 Action 上传的 asset 冲突，
+#    安装时报 "sha256 mismatch"。发布唯一入口 = 推 tag。
+#    重跑某个已 tag 的版本：  gh workflow run publish.yml -f tag=$name-v$version
 ```
 
 ### 各步骤说明
@@ -41,9 +44,13 @@ ADMIN_TOKEN=$ADMIN_TOKEN node tools/publish.js skills/$name
 | `validate-skill.js` | 校验 manifest.json 结构、必需文件是否存在 |
 | `test-skill.js` | **运行 test case，发布前必须通过** |
 | `pack-skill.js` | 打包成 `dist/<name>-<version>.zip` |
-| `publish.js` | 上传 zip 到 GitHub Release → 下载真实 asset 计算 sha256 → 注册到 registry |
+| `publish.js` | **由 Action 调用（不要手动跑）**：上传 zip → 下载真实 asset 算 sha256 → 注册 registry |
 
-> `publish.js` 会自动执行 `gh release create` + `gh release upload`，然后从 GitHub 下载 asset 计算真实 sha256 注册到 registry，确保用户下载的 hash 与 registry 记录一致。
+> 发布全部由 GitHub Action 完成（pack + Release + registry 都用 runner 上同一份产物，
+> 所以 GitHub asset 的 sha256 一定等于 registry 记录）。**前提**：repo 配置了 secret
+> `SKILLS_REGISTRY_ADMIN_TOKEN`（= registry 的 admin token），否则 Register 步骤会跳过、
+> registry 不更新。**切勿在本机手动 `publish.js`**——本机 zip 与 runner 字节不同会造成
+> registry/asset 的 sha256 冲突（安装报 mismatch）。
 
 ---
 
