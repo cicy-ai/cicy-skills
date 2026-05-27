@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "frp-server",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "title": "FRP Server",
   "description": "Manage a local frps process on this host with background start, status, connections, hot reload, and stop/start controls.",
   "category": "network",
