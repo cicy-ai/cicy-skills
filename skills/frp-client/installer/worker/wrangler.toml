@@ -1,0 +1,24 @@
+# install.cicy-ai.com — CiCy FRP installer worker.
+# Serves the frpc install script with User-Agent content negotiation:
+#   bash UA       -> SHELL_SCRIPT_URL
+#   PowerShell UA -> POWERSHELL_SCRIPT_URL
+# It just proxies+caches those two scripts; the real installer source lives
+# alongside this file (../install-frpc-client.sh / .ps1) and is published to
+# raw.githubusercontent.com via the cicy-skills repo (this skill).
+#
+# index.js here is the deployed bundle pulled from Cloudflare
+# (account workers/scripts/install-cicy-ai). Edit + redeploy with:
+#   wrangler deploy
+name = "install-cicy-ai"
+main = "index.js"
+compatibility_date = "2025-05-08"
+workers_dev = false
+
+routes = [
+  { pattern = "install.cicy-ai.com/*", zone_name = "cicy-ai.com" },
+]
+
+[vars]
+CACHE_MAX_AGE = "300"
+SHELL_SCRIPT_URL = "https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/skills/frp-client/installer/install-frpc-client.sh"
+POWERSHELL_SCRIPT_URL = "https://raw.githubusercontent.com/cicy-ai/cicy-skills/main/skills/frp-client/installer/install-frpc-client.ps1"
