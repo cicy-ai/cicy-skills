@@ -81,11 +81,13 @@ listeners:
   #   listen: 127.0.0.1
 
 proxies:
-  # default_proxy is the default egress node — a built-in 'reject' proxy, so by
-  # default all routed traffic is rejected (fail-closed: no egress until set up).
-  # To open egress, replace this with a real node (ss/vmess/...) keeping the name
-  # 'default_proxy', or add nodes below and point default_proxy_group at them.
-  - { name: default_proxy, type: reject }
+  # default_proxy is the default egress node — a 'direct' proxy, so out of the
+  # box all routed traffic exits DIRECT (the box's own public IP). Fail-open:
+  # nothing breaks before a real upstream is configured (so MITM-on agents like
+  # codex/claude work on first install even with global egress already enabled).
+  # To change the exit IP, replace this with a real node (ss/vmess/socks5/...)
+  # keeping the name 'default_proxy' — every rule routes through it, no flag flip.
+  - { name: default_proxy, type: direct }
   # - { name: 'node-1', type: ss, server: 1.2.3.4, port: 8388, cipher: aes-256-gcm, password: '...' }
 
 proxy-groups:
@@ -188,19 +190,29 @@ async function cmdInstall() {
   ensureDir(dirname(BINARY_PATH));
   const tmp = `/tmp/cicy-mihomo-${process.pid}`;
   ensureDir(tmp);
-  const archive = join(tmp, url.endsWith('.gz') ? 'mihomo.gz' : 'mihomo.tgz');
+  // Classify the asset by URL suffix. cicy-ai/cicy-mihomo ships a RAW binary
+  // (mihomo-<os>-<arch>, no compression), while upstream MetaCubeX ships .gz /
+  // .tar.gz. Handle all three — the old code assumed a tarball for anything not
+  // ending in .gz and ran `tar -xzf` on the raw binary ("not in gzip format" →
+  // install always failed against our own releases).
+  const isTarball = /\.(tar\.gz|tgz)$/i.test(url);
+  const isGz = !isTarball && /\.gz$/i.test(url);
+  const archive = join(tmp, isTarball ? 'mihomo.tgz' : (isGz ? 'mihomo.gz' : 'mihomo.bin'));
   execFileSync('curl', ['-fsSL', '-o', archive, url], { stdio: 'inherit' });
-  if (archive.endsWith('.gz') && !archive.endsWith('.tar.gz') && !archive.endsWith('.tgz')) {
-    // single-file gzip: gunzip in place
-    execFileSync('gunzip', ['-f', archive], { stdio: 'inherit' });
-    const extracted = archive.replace(/\.gz$/, '');
-    writeFileSync(BINARY_PATH, readFileSync(extracted), { mode: 0o755 });
-  } else {
+  if (isTarball) {
     execFileSync('tar', ['-xzf', archive, '-C', tmp], { stdio: 'inherit' });
     // find the mihomo file inside tmp
     const out = execSync(`find "${tmp}" -type f -name 'mihomo*' -not -name '*.gz' -not -name '*.tgz' -not -name '*.tar*' | head -1`, { encoding: 'utf8' }).trim();
     if (!out) throw Object.assign(new Error('mihomo binary not found in archive'), { exitCode: 4 });
     writeFileSync(BINARY_PATH, readFileSync(out), { mode: 0o755 });
+  } else if (isGz) {
+    // single-file gzip: gunzip in place
+    execFileSync('gunzip', ['-f', archive], { stdio: 'inherit' });
+    const extracted = archive.replace(/\.gz$/i, '');
+    writeFileSync(BINARY_PATH, readFileSync(extracted), { mode: 0o755 });
+  } else {
+    // raw binary (cicy-ai/cicy-mihomo): install directly, no extraction
+    writeFileSync(BINARY_PATH, readFileSync(archive), { mode: 0o755 });
   }
   console.log(`✓ installed mihomo → ${BINARY_PATH}`);
 }
