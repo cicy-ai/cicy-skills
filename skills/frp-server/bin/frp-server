@@ -104,6 +104,57 @@ function saveState(s) {
   writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
 
+function shQuote(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+
+// Find a running frps/frpc that uses OUR config but isn't tracked in PID_FILE —
+// e.g. an orphan whose parent (a previous shell/session) died and got reparented
+// to init. Without this, start() can't see it and spawns a duplicate that
+// instantly dies on the already-bound port ("process died on launch"). Returns
+// pid or 0. Works on Linux and macOS (pgrep + ps, no /proc dependency).
+function findOrphanPid() {
+  let out = '';
+  try { out = execSync(`pgrep -f ${shQuote(CONFIG_PATH)} 2>/dev/null || true`, { encoding: 'utf8' }); }
+  catch { return 0; }
+  for (const tok of out.split(/\s+/)) {
+    const pid = parseInt(tok, 10);
+    if (!pid || pid === process.pid) continue;
+    let comm = '';
+    try { comm = execSync(`ps -p ${pid} -o comm= 2>/dev/null || true`, { encoding: 'utf8' }).trim(); }
+    catch { continue; }
+    if (comm === BINARY_NAME || comm.endsWith('/' + BINARY_NAME)) return pid;
+  }
+  return 0;
+}
+
+// Authoritative running-pid check: prefer the tracked PID file, else adopt an
+// orphan frps on our config (and persist it to PID_FILE so it's managed from
+// now on). This is what makes start/stop/restart/status agree with reality.
+function runningPid() {
+  const tracked = readPID();
+  if (tracked > 0) return tracked;
+  const orphan = findOrphanPid();
+  if (orphan > 0) {
+    try { ensureDir(STATE_DIR); writeFileSync(PID_FILE, String(orphan)); } catch {}
+    return orphan;
+  }
+  return 0;
+}
+
+// Pull the most relevant line out of the tail of the log so a failed launch
+// reports WHY (e.g. "address already in use") instead of a bare "died".
+function lastLogError() {
+  let txt = '';
+  try { txt = readFileSync(DEFAULT_LOG, 'utf8'); } catch { return ''; }
+  const lines = txt.split('\n')
+    .map((l) => l.replace(/\x1b\[[0-9;]*m/g, '').trim()) // strip ANSI colour codes
+    .filter(Boolean)
+    .slice(-25);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/address already in use|bind:|listen tcp|\berror\b|fail|panic/i.test(lines[i])) return lines[i];
+  }
+  return lines[lines.length - 1] || '';
+}
+
 // crude TOML key reader for `webServer.{addr,port,user,password}` and
 // `bindAddr / bindPort` — frps native config syntax. Top-level only.
 function readConfigHints() {
@@ -131,7 +182,14 @@ function webServerURL() {
 // ── commands ────────────────────────────────────────────────────────────
 
 async function cmdStart(args) {
-  if (readPID() > 0) bail(`already running (pid=${readPID()})`, 4);
+  const existing = runningPid();
+  if (existing > 0) {
+    // Idempotent: already running (incl. an adopted orphan) is success, not an
+    // error — so the UI shows "running" instead of a scary failure.
+    if (json) return ok({ pid: existing, already_running: true });
+    console.log(`already running (pid=${existing})`);
+    return;
+  }
   const bin = findBinary();
   if (!bin) bail(`${BINARY_NAME} binary not found. Install it and put on PATH or set ${BIN_ENV}.`, 3);
   if (!existsSync(CONFIG_PATH)) bail(`config missing: ${CONFIG_PATH}`, 3);
@@ -148,9 +206,12 @@ async function cmdStart(args) {
   const child = spawn(bin, finalArgs, { detached: true, stdio: ['ignore', fd, fd] });
   child.unref();
   closeSync(fd);
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 500));
   try { process.kill(child.pid, 0); }
-  catch { bail(`process died on launch — see ${DEFAULT_LOG}`, 4); }
+  catch {
+    const reason = lastLogError();
+    bail(`process died on launch${reason ? `: ${reason}` : ''} — see ${DEFAULT_LOG}`, 4);
+  }
   writeFileSync(PID_FILE, String(child.pid));
   saveState({ pid: child.pid, binary: bin, config: CONFIG_PATH, log: DEFAULT_LOG, started_at: new Date().toISOString(), extra_args: extra });
   if (json) return ok({ pid: child.pid, binary: bin, config: CONFIG_PATH, log: DEFAULT_LOG });
@@ -161,7 +222,7 @@ async function cmdStart(args) {
 }
 
 function cmdStop() {
-  const pid = readPID();
+  const pid = runningPid();
   if (!pid) bail('not running', 4);
   try { process.kill(pid, 'SIGTERM'); } catch (e) { bail(`kill failed: ${e.message}`, 4); }
   const deadline = Date.now() + 5000;
@@ -177,12 +238,12 @@ function cmdStop() {
 }
 
 async function cmdRestart(args) {
-  if (readPID() > 0) cmdStop();
+  if (runningPid() > 0) cmdStop();
   await cmdStart(args);
 }
 
 async function cmdStatus() {
-  const pid = readPID();
+  const pid = runningPid();
   const bin = findBinary();
   const out = {
     role: ROLE_LABEL, pid, running: pid > 0,
@@ -211,7 +272,7 @@ async function cmdStatus() {
 }
 
 async function cmdReload() {
-  const pid = readPID();
+  const pid = runningPid();
   if (!pid) bail('not running', 4);
   // frps does NOT support reload via web api in all versions; use SIGHUP if frps supports it
   // (since frp v0.50 hot-reload by sending SIGHUP works)
@@ -237,7 +298,7 @@ function cmdLogs(args) {
 }
 
 async function cmdConnections() {
-  if (readPID() === 0) bail('not running', 4);
+  if (runningPid() === 0) bail('not running', 4);
   const u = webServerURL();
   let r; try { r = await fetch(u + '/api/proxy/all', { signal: AbortSignal.timeout(3000) }); } catch (e) { bail(`web api unreachable at ${u}: ${e.message}`, 4); }
   if (!r.ok) bail(`web api error (${r.status})`, 4);
@@ -247,7 +308,7 @@ async function cmdConnections() {
 }
 
 async function cmdClients() {
-  if (readPID() === 0) bail('not running', 4);
+  if (runningPid() === 0) bail('not running', 4);
   const u = webServerURL();
   let r; try { r = await fetch(u + '/api/client', { signal: AbortSignal.timeout(3000) }); } catch (e) { bail(`web api unreachable at ${u}: ${e.message}`, 4); }
   if (!r.ok) bail(`web api error (${r.status})`, 4);
