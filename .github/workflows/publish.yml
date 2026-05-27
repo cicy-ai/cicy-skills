@@ -112,6 +112,7 @@ jobs:
       - name: Register with skills.cicy-ai.com
         env:
           ADMIN_TOKEN: ${{ secrets.SKILLS_REGISTRY_ADMIN_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # publish.js re-uploads the asset, so it needs gh auth too
         shell: bash
         run: |
           set -euo pipefail
