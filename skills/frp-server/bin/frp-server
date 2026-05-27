@@ -263,6 +263,7 @@ async function cmdStatus() {
   }
   if (json) return ok(out);
   console.log(`role:    ${out.role}`);
+  console.log(`state:   ${out.running ? 'running' : 'stopped'}`);
   console.log(`pid:     ${out.pid || '(not running)'}`);
   console.log(`binary:  ${out.binary}`);
   console.log(`config:  ${out.config} ${out.config_exists ? '✓' : '(missing)'}`);
