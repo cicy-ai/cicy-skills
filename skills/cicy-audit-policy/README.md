@@ -22,10 +22,10 @@ in the conversation asks.
 ## Command surface
 
 ```
-cicy-policy show | summary
-cicy-policy patch '<json>' | set <key.path> <value> | unset <key.path>
-cicy-policy recent [--rule R] [--agent A] [--limit N]
-cicy-policy history
+cicy-audit-policy show | summary
+cicy-audit-policy patch '<json>' | set <key.path> <value> | unset <key.path>
+cicy-audit-policy recent [--rule R] [--agent A] [--limit N]
+cicy-audit-policy history
 ```
 
 See [references/tools.md](references/tools.md) for details and
