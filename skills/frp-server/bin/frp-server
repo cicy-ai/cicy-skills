@@ -320,11 +320,34 @@ async function cmdConnections() {
 async function cmdClients() {
   if (runningPid() === 0) bail('not running', 4);
   const u = webServerURL();
-  let r; try { r = await webServerFetch('/api/client', 3000); } catch (e) { bail(`web api unreachable at ${u}: ${e.message}`, 4); }
-  if (!r.ok) bail(`web api error (${r.status})`, 4);
-  const data = await r.json();
-  if (json) return ok(data);
-  console.log(JSON.stringify(data, null, 2));
+  // frps has no /api/client endpoint — derive one row per active proxy from
+  // /api/proxy/:type. frps does not report the frpc user/hostname/IP, so only
+  // the proxy name (key), its exposed endpoint, and online status are filled.
+  const types = ['tcp', 'udp', 'http', 'https', 'stcp', 'sudp', 'xtcp', 'tcpmux'];
+  const rows = [];
+  for (const t of types) {
+    let r;
+    try { r = await webServerFetch('/api/proxy/' + t, 3000); }
+    catch (e) { bail(`web api unreachable at ${u}: ${e.message}`, 4); }
+    if (!r.ok) continue;
+    let data; try { data = await r.json(); } catch { continue; }
+    for (const p of (data.proxies || [])) {
+      rows.push({
+        key: p.name || '',
+        type: t,
+        remote_port: p.conf?.remotePort ?? '',
+        version: p.clientVersion || '',
+        conns: p.curConns || 0,
+        online: p.status === 'online',
+      });
+    }
+  }
+  if (json) return ok({ clients: rows });
+  // TSV consumed by the cicy-code backend: key user clientID hostname clientIP online
+  for (const c of rows) {
+    const endpoint = c.type ? `${c.type}:${c.remote_port}` : '';
+    process.stdout.write([c.key, '', c.version, endpoint, '', c.online ? 'true' : 'false'].join('\t') + '\n');
+  }
 }
 
 async function cmdRaw(args) {
