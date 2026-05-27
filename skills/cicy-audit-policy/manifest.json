@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-audit-policy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Audit Policy Admin",
   "description": "Conversational admin for the cicy AI-traffic audit policy. Inspect, tighten, loosen or roll back rules in natural language, then write back via /api/audit/policy so the pipeline reloads live.",
   "category": "ai",
@@ -22,7 +22,7 @@
     "git"
   ],
   "npm_dependencies": false,
-  "entry": "bin/cicy-policy",
+  "entry": "bin/cicy-audit-policy",
   "permissions": [
     "network",
     "filesystem:home"
@@ -49,37 +49,37 @@
   "tools": [
     {
       "name": "show",
-      "example": "cicy-policy show",
+      "example": "cicy-audit-policy show",
       "description": "Print the full policy JSON"
     },
     {
       "name": "summary",
-      "example": "cicy-policy summary",
+      "example": "cicy-audit-policy summary",
       "description": "One-screen human view: enabled? fail-mode? overrides? allow-list? preventive?"
     },
     {
       "name": "patch",
-      "example": "cicy-policy patch '{\"preventive\":{\"enabled\":true}}'",
+      "example": "cicy-audit-policy patch '{\"preventive\":{\"enabled\":true}}'",
       "description": "Deep-merge a JSON object into the policy and write it back"
     },
     {
       "name": "set",
-      "example": "cicy-policy set fail_mode closed",
+      "example": "cicy-audit-policy set fail_mode closed",
       "description": "Set one field by dot-path (value parsed as JSON, else string)"
     },
     {
       "name": "unset",
-      "example": "cicy-policy unset preventive.enabled",
+      "example": "cicy-audit-policy unset preventive.enabled",
       "description": "Remove one field by dot-path"
     },
     {
       "name": "recent",
-      "example": "cicy-policy recent --rule secret.bearer_token --limit 5",
+      "example": "cicy-audit-policy recent --rule secret.bearer_token --limit 5",
       "description": "List recent matched audit events, optionally filtered by rule/agent"
     },
     {
       "name": "history",
-      "example": "cicy-policy history",
+      "example": "cicy-audit-policy history",
       "description": "Show the git log of ~/cicy-ai/audit (autonomy auto-commits; manual edits do not)"
     }
   ]

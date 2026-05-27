@@ -1,7 +1,7 @@
 # Intent → patch walkthroughs
 
 Each example shows the user's request, what you should print as a
-diff, and the resulting `cicy-policy` command.
+diff, and the resulting `cicy-audit-policy` command.
 
 ---
 
@@ -10,7 +10,7 @@ diff, and the resulting `cicy-policy` command.
 Read first:
 
 ```sh
-$ cicy-policy summary
+$ cicy-audit-policy summary
 enabled: true   fail_mode: open
 rules_override: (none)
 custom_rules:   (none)
@@ -30,14 +30,14 @@ Propose:
 Apply:
 
 ```sh
-cicy-policy patch '{"rules_override":[{"id":"secret.bearer_token","severity":"low","default_action":"log"}]}'
+cicy-audit-policy patch '{"rules_override":[{"id":"secret.bearer_token","severity":"low","default_action":"log"}]}'
 ```
 
 Verify:
 
 ```sh
-cicy-policy summary | grep bearer
-cicy-policy recent --rule secret.bearer_token --limit 3
+cicy-audit-policy summary | grep bearer
+cicy-audit-policy recent --rule secret.bearer_token --limit 3
 ```
 
 ---
@@ -86,7 +86,7 @@ Don't disable rules. Allow-list the agent:
 ```
 
 ```sh
-cicy-policy patch '{"allow_list":{"agents":["w-fixtures","w-test-*"]}}'
+cicy-audit-policy patch '{"allow_list":{"agents":["w-fixtures","w-test-*"]}}'
 ```
 
 ---
@@ -97,7 +97,7 @@ cicy-policy patch '{"allow_list":{"agents":["w-fixtures","w-test-*"]}}'
 git -C ~/cicy-ai/audit log --since=1.hour.ago --oneline
 ```
 
-The autonomy tick auto-commits. Manual `cicy-policy patch` does
+The autonomy tick auto-commits. Manual `cicy-audit-policy patch` does
 **not** auto-commit (intentional — humans drive their own VCS).
 If the user wants every manual edit committed too, tell them so and
 offer to wrap it.
@@ -120,7 +120,7 @@ git SHA, so the audit log preserves the full history.
 ### "I want incident emails for high/critical, cooldown 10 min, to secops"
 
 ```sh
-cicy-policy patch '{
+cicy-audit-policy patch '{
   "incident_response": {
     "enabled": true,
     "trigger_min_severity": "high",
@@ -150,5 +150,5 @@ Always run these mentally:
 2. **Does the user have one intent or two?** Don't bundle "quiet
    bearer-token" + "tighten bank-card" into one patch unless the user
    asked for both — they're independently revertable when split.
-3. **Did you verify with `cicy-policy show` after the write?** The
+3. **Did you verify with `cicy-audit-policy show` after the write?** The
    policy_hash should change. fsnotify-reload is async; allow ~1s.

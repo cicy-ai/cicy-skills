@@ -1,17 +1,17 @@
-# cicy-policy
+# cicy-audit-policy
 
 Thin client for the cicy audit-policy backend. Talks to cicy-code on
 `$PORT` (default 8008), authenticated with `~/cicy-ai/global.json#api_token`.
 Same backend the UI Audit dashboard uses.
 
 ```
-cicy-policy show                              # full policy JSON
-cicy-policy summary                           # one-screen human view
-cicy-policy patch '<json>'                    # deep-merge JSON into policy
-cicy-policy set <key.path> <value>            # set one field
-cicy-policy unset <key.path>                  # remove one field
-cicy-policy recent [--rule R] [--agent A] [--limit N]
-cicy-policy history                           # git log of ~/cicy-ai/audit
+cicy-audit-policy show                              # full policy JSON
+cicy-audit-policy summary                           # one-screen human view
+cicy-audit-policy patch '<json>'                    # deep-merge JSON into policy
+cicy-audit-policy set <key.path> <value>            # set one field
+cicy-audit-policy unset <key.path>                  # remove one field
+cicy-audit-policy recent [--rule R] [--agent A] [--limit N]
+cicy-audit-policy history                           # git log of ~/cicy-ai/audit
 ```
 
 ## Notes

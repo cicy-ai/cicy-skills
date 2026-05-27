@@ -18,8 +18,8 @@ run`). You only act when the human in this conversation tells you to.
    current policy:
 
    ```sh
-   cicy-policy show              # full policy JSON
-   cicy-policy summary           # human-readable: enabled? fail-mode? overrides? allow-list?
+   cicy-audit-policy show              # full policy JSON
+   cicy-audit-policy summary           # human-readable: enabled? fail-mode? overrides? allow-list?
    ```
 
 2. **Translate intent → patch.** Look up the right slot in
@@ -48,7 +48,7 @@ run`). You only act when the human in this conversation tells you to.
    noise tuning (severity ↓, action → log, allow-list addition), one
    "applying…" line is enough.
 
-5. **Write.** Use `cicy-policy patch` (it sends the merged JSON to
+5. **Write.** Use `cicy-audit-policy patch` (it sends the merged JSON to
    `POST /api/audit/policy`; backend validates and fsnotify-reloads).
    Then read back to confirm.
 
@@ -56,7 +56,7 @@ run`). You only act when the human in this conversation tells you to.
    actually fires (or stops firing):
 
    ```sh
-   cicy-policy recent --rule secret.bearer_token --limit 5
+   cicy-audit-policy recent --rule secret.bearer_token --limit 5
    ```
 
 ## Refuse / push back
@@ -73,7 +73,7 @@ run`). You only act when the human in this conversation tells you to.
 ## Safety rails
 
 - **Never** write to `~/cicy-ai/audit/policy.json` with your shell
-  directly. Always go through `cicy-policy patch` / `cicy-policy set`
+  directly. Always go through `cicy-audit-policy patch` / `cicy-audit-policy set`
   so the backend validates schema, recomputes hash, and the running
   pipeline reloads.
 - The `enable_preventive_block` action is currently in the autonomy

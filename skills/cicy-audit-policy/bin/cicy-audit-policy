@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-// cicy-policy — thin client for the audit-policy admin skill.
+// cicy-audit-policy — thin client for the audit-policy admin skill.
 //
 // Talks to cicy-code on $PORT (default 8008), authenticated with
 // ~/cicy-ai/global.json#api_token. Same backend the UI Audit dashboard
 // uses; this just gives the agent a stable command surface.
 //
 // Usage:
-//   cicy-policy show                             # full policy JSON
-//   cicy-policy summary                          # one-screen human view
-//   cicy-policy patch '<json>'                   # deep-merge JSON into policy
-//   cicy-policy set <key.path> <value>           # set one field
-//   cicy-policy unset <key.path>                 # remove one field
-//   cicy-policy recent [--rule R] [--agent A] [--limit N]
-//   cicy-policy history                          # git log of the audit dir
+//   cicy-audit-policy show                             # full policy JSON
+//   cicy-audit-policy summary                          # one-screen human view
+//   cicy-audit-policy patch '<json>'                   # deep-merge JSON into policy
+//   cicy-audit-policy set <key.path> <value>           # set one field
+//   cicy-audit-policy unset <key.path>                 # remove one field
+//   cicy-audit-policy recent [--rule R] [--agent A] [--limit N]
+//   cicy-audit-policy history                          # git log of the audit dir
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -198,7 +198,7 @@ function printHelp() {
   try {
     process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
   } catch {
-    process.stdout.write('Usage: cicy-policy <show|summary|patch|set|unset|recent|history>\n');
+    process.stdout.write('Usage: cicy-audit-policy <show|summary|patch|set|unset|recent|history>\n');
   }
 }
 
