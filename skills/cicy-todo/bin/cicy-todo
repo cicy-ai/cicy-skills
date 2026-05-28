@@ -26,11 +26,22 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h') || args[
 // sets. We refuse to run without an explicit identity — defaulting to the
 // master pane would silently grant master-level visibility to any shell
 // that happens to lack the env var (cron, ad-hoc terminals, scripts).
-const SELF_PANE_RAW = (process.env.X_AGENT_SHORT_ID || process.env.CICY_PANE_ID || '').trim();
+// Sub-agents spawned *inside* a pane (e.g. cicy-team workers, Task/Agent
+// sub-agents) may not inherit X_AGENT_SHORT_ID but still carry the full
+// X_AGENT_ID ("w-10029:main.0"). Derive the owning pane from its prefix so a
+// sub-agent sees the same todo scope as its pane instead of bailing on "no id".
+function derivePane() {
+  const direct = (process.env.X_AGENT_SHORT_ID || process.env.CICY_PANE_ID || '').trim();
+  if (direct) return direct;
+  const full = (process.env.X_AGENT_ID || '').trim();
+  if (full) return full.split(':')[0].trim();
+  return '';
+}
+const SELF_PANE_RAW = derivePane();
 if (!SELF_PANE_RAW) {
   process.stderr.write(
-    'cicy-todo: X_AGENT_SHORT_ID (or CICY_PANE_ID) env var is required.\n' +
-    '  Inside a cicy-code pane this is set automatically by the tmux boot script.\n' +
+    'cicy-todo: no agent identity found (X_AGENT_SHORT_ID / CICY_PANE_ID / X_AGENT_ID).\n' +
+    '  Inside a cicy-code pane these are set automatically by the tmux boot script.\n' +
     '  To run as the master pane explicitly: CICY_PANE_ID=w-10001 cicy-todo ...\n',
   );
   process.exit(2);

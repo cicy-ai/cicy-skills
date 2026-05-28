@@ -71,8 +71,11 @@ cicy-todo --pane w-10025 done #2
 
 - `X_AGENT_SHORT_ID` — caller's pane id (set by the cicy-code tmux boot
   script). Drives both the request header and the master/worker decision.
-  **Required**; the CLI exits 2 if neither this nor `CICY_PANE_ID` is set.
 - `CICY_PANE_ID`     — fallback when `X_AGENT_SHORT_ID` is unset.
+- `X_AGENT_ID`       — last-resort fallback (full form, e.g. `w-10029:main.0`);
+  the pane id is taken from the prefix before `:`. Lets sub-agents that only
+  inherit `X_AGENT_ID` still resolve their pane. The CLI exits 2 only if none
+  of the three is set.
 - `CICY_API_PORT`    — local cicy-code port (default 8008).
 - `CICY_API_TOKEN`   — overrides reading from `~/cicy-ai/global.json`.
 - `CICY_GLOBAL_JSON` — overrides `~/cicy-ai/global.json` path.
