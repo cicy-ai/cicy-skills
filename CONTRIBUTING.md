@@ -3,6 +3,10 @@
 Thanks for your interest! This repo is the canonical home of all
 **transparent, source-only skills** for the cicy-code ecosystem.
 
+> For the bigger picture — skill tiers (official / local / draft), local-over-registry
+> precedence, `skill eject`, and how to report bugs in published skills — see
+> [GOVERNANCE.md](./GOVERNANCE.md).
+
 ## Ground rules
 
 1. **Source is distribution.** No compiled artifacts in the repo.
