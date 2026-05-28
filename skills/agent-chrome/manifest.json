@@ -38,8 +38,7 @@
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
-    "readme": "README.md",
-    "proxy_md": "references/proxy.md"
+    "readme": "README.md"
   },
   "i18n": {
     "zh-CN": {
