@@ -1,25 +1,29 @@
 ---
 name: feishu-cli
-description: Install and configure the official Feishu/Lark CLI (@larksuite/cli) on this host. Bootstrap-only wrapper: install / config / auth / status. For real API calls use the native lark-cli.
+description: Install, configure and run the official Feishu/Lark CLI (@larksuite/cli): install/config/auth/status; `run` forwards any lark-cli command with the feishu.cn proxy bypass auto-handled.
 ---
 
 # Feishu CLI
 
-> **Two different commands. Pick the right one:**
->
-> - `feishu-cli` — **bootstrap wrapper only**. Four subcommands: `install` / `config` / `auth` / `status`. **Nothing else.**
-> - `lark-cli` — **the official Feishu/Lark CLI**. Use this for every real API call: Messenger, Docs, Base, Sheets, Calendar, Mail, Tasks, Meetings, …
->
-> If a task is "install / set up credentials / log in / check setup state" → use `feishu-cli`.
-> If a task is "do anything against the Feishu/Lark Open Platform" → use `lark-cli` directly.
-> **The wrapper does NOT proxy `lark-cli im ...` calls.** Do not try `feishu-cli im ...`.
+Wrapper around the official Feishu/Lark CLI — [`@larksuite/cli`](https://github.com/larksuite/cli)
+(binary `lark-cli`). It bootstraps the CLI **and** gives a single proxy-aware entry
+point so you never type the `env -u HTTP_PROXY ... lark-cli` dance.
 
-## Four jobs
+> **One rule of thumb:** drive everything through `feishu-cli`.
+> - bootstrap/inspect → `install` / `config` / `auth` / `status`
+> - any real API call → `feishu-cli run <lark-cli args…>` (proxy bypass auto-handled)
+>
+> You *can* still call `lark-cli` directly, but then you must add the proxy bypass
+> yourself (see "Proxy" below). `feishu-cli run` does it for you.
+
+## Commands
 
 1. `install` — install the official `lark-cli` binary via `npx @larksuite/cli@latest install`.
 2. `config`  — run `lark-cli config init` to set the app id/secret (interactive, one-time).
 3. `auth`    — run `lark-cli auth login --recommend`; prints an OAuth **authorization URL**.
 4. `status`  — report install state (+ version) and auth state.
+5. `run`     — forward any `lark-cli` command, with the proxy bypass applied. Exit code
+   and output pass through unchanged. Alias: `x`.
 
 ## Credentials: hard rules
 
@@ -37,16 +41,22 @@ description: Install and configure the official Feishu/Lark CLI (@larksuite/cli)
 `lark-cli` talks to `*.feishu.cn` (the `feishu` brand; the `lark` brand uses
 `*.larksuite.com`). On hosts whose HTTP(S) proxy exits **outside mainland China**
 (e.g. a HK mihomo exit), the feishu.cn endpoints reset the connection — you'll see
-`EOF` on `config init` / `auth login` and on real API calls. Strip the proxy so
-lark-cli uses the host's direct egress:
+`EOF` on `config init` / `auth login` and on real API calls.
+
+**`feishu-cli` handles this for you.** Every command it runs (`config`, `auth`,
+`status`, and `run`) strips the proxy env vars and adds the feishu/lark domains to
+`NO_PROXY`, so lark-cli uses the host's direct egress. Opt out with
+`FEISHU_CLI_KEEP_PROXY=1` (for a host that can only reach the internet via a proxy).
+
+Only if you bypass the wrapper and call `lark-cli` directly do you need the manual
+prefix:
 
 ```sh
 env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
   NO_PROXY="feishu.cn,larksuite.com" lark-cli ...
 ```
 
-This applies to `feishu-cli config` / `feishu-cli auth` as well. A persistent fix is a
-proxy rule routing `feishu.cn` DIRECT.
+A persistent host-level fix is a proxy rule routing `feishu.cn` DIRECT.
 
 ## Bootstrap
 
@@ -69,13 +79,19 @@ feishu-cli config -- --new        # → lark-cli config init --new
 feishu-cli auth   -- --no-wait    # → lark-cli auth login --no-wait
 ```
 
-## After setup — use the native lark-cli
+## After setup — run real commands via `feishu-cli run`
 
 ```sh
-lark-cli im +messages-send --chat-id oc_xxx --text "Hello"
-lark-cli calendar calendars list
-lark-cli api GET /open-apis/calendar/v4/calendars --format json
+feishu-cli run sheets +create --title "T" --headers '["A","B"]' --data '[["1","2"]]'
+feishu-cli run im +messages-send --chat-id oc_xxx --text "Hello"
+feishu-cli run calendar +agenda
+feishu-cli run api GET /open-apis/calendar/v4/calendars --format json
 ```
+
+Everything after `run` is passed verbatim to `lark-cli`, so the full surface (200+
+commands across im, calendar, docs, base, sheets, mail, task, wiki, vc, …) is
+available — just without the proxy/env friction. Use `--` before the lark args if any
+collide with `feishu-cli`'s own flags: `feishu-cli run -- status --json`.
 
 See `references/help.md` for the full command list and `references/tools.md` for the
 subcommand → lark-cli mapping.

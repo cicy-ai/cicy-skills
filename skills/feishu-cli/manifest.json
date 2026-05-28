@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "feishu-cli",
-  "version": "1.0.0",
-  "title": "Feishu CLI Bootstrap",
-  "description": "Install and configure the official Feishu/Lark CLI (@larksuite/cli) on this host. Bootstrap-only wrapper: install / config / auth / status. For real API calls use the native lark-cli.",
+  "version": "1.1.0",
+  "title": "Feishu CLI",
+  "description": "Install, configure and run the official Feishu/Lark CLI (@larksuite/cli): install/config/auth/status; `run` forwards any lark-cli command with the feishu.cn proxy bypass auto-handled.",
   "category": "productivity",
   "tags": [
     "feishu",
@@ -40,7 +40,7 @@
   "i18n": {
     "zh-CN": {
       "title": "飞书 CLI",
-      "description": "飞书/Lark 官方 CLI(@larksuite/cli)安装引导。仅四个子命令:install / config / auth / status。真正的 API 调用请直接用 lark-cli 命令。"
+      "description": "飞书/Lark 官方 CLI(@larksuite/cli)安装与运行封装:install/config/auth/status;`run` 转发任意 lark-cli 命令并自动处理 feishu.cn 代理绕过。"
     }
   },
   "tools": [
@@ -48,6 +48,11 @@
       "name": "feishu install",
       "example": "feishu-cli install",
       "description": "Install the official Feishu/Lark CLI (lark-cli)"
+    },
+    {
+      "name": "feishu run",
+      "example": "feishu-cli run calendar +agenda",
+      "description": "Run any lark-cli command with the feishu.cn proxy bypass auto-handled"
     },
     {
       "name": "feishu config",
