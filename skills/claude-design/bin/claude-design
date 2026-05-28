@@ -1,0 +1,537 @@
+#!/usr/bin/env node
+// claude-design — drive claude.ai/design through agent-chrome CDP.
+//   open       launch chrome profile + navigate to /design
+//   new        open a fresh /design (clears prior conversation state)
+//   prompt     inject text into the composer and send it (UTF-8 safe)
+//   download   trigger Share → Export and report the file path on Mac
+//   exec       raw Runtime.evaluate convenience (debugging)
+//   status     report whether design is loaded in the profile
+//
+// Global flags:
+//   --idx <n>      account index for the chrome profile (env CLAUDE_DESIGN_IDX)
+//   --client <id>  agent-chrome client (env CLAUDE_DESIGN_CLIENT). Omit for local.
+//
+// Zero npm deps. Pure ESM. Node 18+.
+// Bin dep: `agent-chrome` on PATH (skill: agent-chrome).
+
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+const ACH = 'agent-chrome';
+const DESIGN_URL = 'https://claude.ai/design';
+
+// ─── argv parse ───────────────────────────────────────────────────────────
+
+const RAW = process.argv.slice(2);
+const cmd = RAW[0];
+
+if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const FLAGS = extractFlags(RAW.slice(1), {
+  idx: { value: true, env: 'CLAUDE_DESIGN_IDX' },
+  client: { value: true, env: 'CLAUDE_DESIGN_CLIENT' },
+  url: { value: true },
+  file: { value: true },
+  type: { value: true },
+  out: { value: true },
+  timeout: { value: true },
+  mode: { value: true },
+  template: { value: true },
+  wait: { value: false },
+  json: { value: false },
+});
+const POS = FLAGS._;
+
+main().catch(e => bail(e.message, e.exitCode || 1));
+
+async function main() {
+  switch (cmd) {
+    case 'open':     return cmdOpen();
+    case 'new':      return cmdNew();
+    case 'create':   return cmdCreate();
+    case 'prompt':   return cmdPrompt();
+    case 'download': return cmdDownload();
+    case 'exec':     return cmdExec();
+    case 'status':   return cmdStatus();
+    default: bail(`unknown command: ${cmd}. Try \`claude-design --help\`.`, 2);
+  }
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  process.stderr.write(`claude-design: ${msg}\n`);
+  process.exit(code);
+}
+
+function printHelp() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write(`Usage:
+  claude-design open [--url <u>]                  Launch profile + open claude.ai/design
+  claude-design new                               Navigate to /design landing
+  claude-design create [name] [--mode wireframe|high-fidelity] [--template prototype|slide-deck|from-template|other]
+                                                  Click into a new project from landing
+  claude-design prompt <text|-> [--wait]          Inject + send a prompt (UTF-8 safe)
+  claude-design prompt --file <path> [--wait]     Same, read text from file
+  claude-design download [--type editable|standalone|zip] [--out <dir>]
+                                                  Export project, return file path on host
+  claude-design exec <js>                         Raw Runtime.evaluate (debug)
+  claude-design status [--json]                   Report profile + page state
+
+Global flags:
+  --idx <n>        Chrome account index (env CLAUDE_DESIGN_IDX, required)
+  --client <id>    agent-chrome client ID (env CLAUDE_DESIGN_CLIENT, omit for local)
+
+Examples:
+  CLAUDE_DESIGN_IDX=6 claude-design open
+  claude-design create "My landing page" --mode high-fidelity --template prototype
+  echo "Design me a dark hero section" | claude-design prompt - --wait
+  claude-design download --type editable --out ~/Downloads
+`);
+  }
+}
+
+// Tiny GNU-ish arg parser. Spec: name → { value:true|false, env:string|null }
+function extractFlags(args, spec) {
+  const out = { _: [] };
+  for (const k of Object.keys(spec)) {
+    const e = spec[k].env;
+    out[k] = e && process.env[e] !== undefined ? process.env[e] : (spec[k].value ? null : false);
+  }
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') { out._.push(...args.slice(i + 1)); break; }
+    if (a.startsWith('--')) {
+      const key = a.slice(2);
+      if (!(key in spec)) bail(`unknown flag: ${a}`, 2);
+      if (spec[key].value) {
+        if (i + 1 >= args.length) bail(`flag --${key} needs a value`, 2);
+        out[key] = args[++i];
+      } else {
+        out[key] = true;
+      }
+    } else {
+      out._.push(a);
+    }
+  }
+  return out;
+}
+
+function requireIdx() {
+  if (FLAGS.idx === null || FLAGS.idx === undefined || FLAGS.idx === '') {
+    bail('missing --idx <n> (or set CLAUDE_DESIGN_IDX)', 2);
+  }
+  return String(FLAGS.idx);
+}
+
+// Build the global flags that agent-chrome accepts BEFORE the subcommand.
+function clientFlags() {
+  return FLAGS.client ? ['--client', String(FLAGS.client)] : [];
+}
+
+// Spawn agent-chrome, return { code, stdout, stderr, json|null }.
+function runAch(subArgs, { json = true, timeout = 60_000, input } = {}) {
+  const args = [...clientFlags(), ...subArgs];
+  if (json && !args.includes('--json')) args.push('--json');
+  const r = spawnSync(ACH, args, {
+    encoding: 'utf8',
+    timeout,
+    input,
+  });
+  if (r.error) {
+    if (r.error.code === 'ENOENT') {
+      throw Object.assign(new Error(`\`${ACH}\` not found on PATH — install the agent-chrome skill first`), { exitCode: 3 });
+    }
+    throw r.error;
+  }
+  let parsed = null;
+  if (json) {
+    try { parsed = JSON.parse(r.stdout || '{}'); } catch { parsed = null; }
+  }
+  return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '', json: parsed };
+}
+
+// Runtime.evaluate convenience: returns the JS value or throws on CDP error.
+function cdp(expr, { awaitPromise = false, idx = null, timeout = 30_000 } = {}) {
+  const payload = { expression: expr, returnByValue: true };
+  if (awaitPromise) payload.awaitPromise = true;
+  const sub = ['cdp', 'Runtime.evaluate', JSON.stringify(payload), '--idx', String(idx ?? requireIdx())];
+  const r = runAch(sub, { timeout });
+  if (!r.json || r.json.ok !== true) {
+    const err = (r.json && r.json.error) || r.stderr || r.stdout || `exit ${r.code}`;
+    throw new Error(`CDP Runtime.evaluate failed: ${String(err).slice(0, 300)}`);
+  }
+  let data = r.json.data;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch { /* leave as string */ }
+  }
+  const result = data && data.result && data.result.result;
+  if (result && result.subtype === 'error') {
+    throw new Error(`page JS threw: ${result.description || result.value}`);
+  }
+  return result ? result.value : undefined;
+}
+
+// Base64-encode a UTF-8 string for embedding into a JS literal.
+function b64utf8(str) {
+  return Buffer.from(String(str), 'utf8').toString('base64');
+}
+
+// JS one-liner that decodes a UTF-8 base64 string back to a real String.
+// MUST go through TextDecoder('utf-8') — atob returns Latin-1 (mojibake on CJK).
+function decodeB64Expr(b64) {
+  return `new TextDecoder("utf-8").decode(Uint8Array.from(atob("${b64}"),c=>c.charCodeAt(0)))`;
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// Wait for a Runtime.evaluate expression to return a truthy/equal value, up to timeoutMs.
+async function waitFor(expr, predicate, { interval = 1000, timeout = 60_000, idx } = {}) {
+  const deadline = Date.now() + timeout;
+  let last;
+  while (Date.now() < deadline) {
+    last = cdp(expr, { idx });
+    if (predicate(last)) return last;
+    await sleep(interval);
+  }
+  throw new Error(`waitFor timed out (last=${JSON.stringify(last)})`);
+}
+
+// ─── commands ─────────────────────────────────────────────────────────────
+
+async function cmdOpen() {
+  const idx = requireIdx();
+  const url = FLAGS.url || DESIGN_URL;
+  const r = runAch(['launch', idx, '--url', url], { timeout: 90_000 });
+  if (r.code !== 0 || (r.json && r.json.ok === false)) {
+    bail(`launch failed: ${(r.json && r.json.error) || r.stderr || r.stdout}`, 1);
+  }
+  process.stdout.write(JSON.stringify({ ok: true, action: 'open', idx, url }) + '\n');
+}
+
+function cmdNew() {
+  const idx = requireIdx();
+  // Page.navigate is cleaner than evaluating window.location, because it works
+  // even if the current page hasn't fully loaded.
+  const r = runAch(['cdp', 'Page.navigate', JSON.stringify({ url: DESIGN_URL }), '--idx', idx], { timeout: 30_000 });
+  if (!r.json || r.json.ok !== true) {
+    bail(`Page.navigate failed: ${(r.json && r.json.error) || r.stderr}`, 1);
+  }
+  process.stdout.write(JSON.stringify({ ok: true, action: 'new', idx, url: DESIGN_URL }) + '\n');
+}
+
+// Create a new project from the /design landing page: pick mode + template,
+// fill the project name input, click "Create", wait for the URL to become
+// /design/p/<uuid>. Returns the project URL.
+async function cmdCreate() {
+  const idx = requireIdx();
+  const name = (POS.length ? POS.join(' ') : '').trim();
+  const mode = (FLAGS.mode || 'high-fidelity').toLowerCase();   // wireframe | high-fidelity (alias: hifi)
+  const template = (FLAGS.template || 'prototype').toLowerCase(); // prototype | slide-deck | from-template | other
+
+  // 1. Make sure we're on the landing page (or navigate there).
+  const url = cdp('location.href', { idx });
+  if (!/claude\.ai\/design\/?$/i.test(url || '')) {
+    runAch(['cdp', 'Page.navigate', JSON.stringify({ url: DESIGN_URL }), '--idx', idx], { timeout: 30_000 });
+  }
+  // Wait for the new-project panel to fully render. The template labels
+  // (Prototype / Slide deck / …) and the Create button all need to be in the
+  // DOM; the page renders the banner first and then hydrates the rest, so we
+  // check for both signals together.
+  await waitFor(
+    `(()=>{
+      const hasCreate = !!document.querySelector('[data-testid="create-project-button"]');
+      const hasTemplates = document.body && /Prototype|Slide deck|Wireframe|High fidelity/.test(document.body.innerText || '');
+      return hasCreate && hasTemplates ? "ready" : "wait";
+    })()`,
+    v => v === 'ready',
+    { interval: 1000, timeout: 30_000, idx },
+  );
+
+  // 2. Click mode + template tabs (text-based — no stable testids).
+  const modePats = mode === 'wireframe' ? ['wireframe', '线框'] : ['high fidelity', 'hifi', '高保真'];
+  const tplPats = {
+    'prototype':    ['prototype', '原型'],
+    'slide-deck':   ['slide deck', '幻灯片', 'slides'],
+    'from-template':['from template', '从模板'],
+    'other':        ['other', '其他'],
+  }[template] || ['prototype'];
+
+  // Click anything whose direct text matches one of `pats` (case-insensitive).
+  // Claude Design uses bare <div>s for the template tabs (no role, no testid),
+  // so we walk the leaf spans and click their nearest clickable ancestor
+  // (something with onclick, role=button, or just the parent div).
+  const clickByText = (pats) => `(()=>{
+    const pats = ${JSON.stringify(pats)};
+    const norm = s => (s||'').toLowerCase().trim();
+    // First try real buttons / role=button.
+    let hit = Array.from(document.querySelectorAll('button,[role="button"],[role="tab"]')).find(b => {
+      const t = norm(b.textContent);
+      return pats.some(p => t === p || t.includes(p));
+    });
+    // Fallback: a leaf span/div with exact text match, clicked at the parent level.
+    if (!hit) {
+      const leaf = Array.from(document.querySelectorAll('span,div'))
+        .find(el => el.children.length === 0 && pats.some(p => norm(el.textContent) === p));
+      if (leaf) hit = leaf.parentElement || leaf;
+    }
+    if (!hit) return {ok:false,reason:'no-match',pats};
+    hit.click();
+    return {ok:true,label:(hit.textContent||'').trim().slice(0,40)};
+  })()`;
+  let r = cdp(clickByText(tplPats), { idx });
+  if (!r.ok) bail(`could not pick template ${template}: ${JSON.stringify(r)}`, 1);
+  await sleep(300);
+  r = cdp(clickByText(modePats), { idx });
+  if (!r.ok) bail(`could not pick mode ${mode}: ${JSON.stringify(r)}`, 1);
+  await sleep(300);
+
+  // 3. Optionally fill the project name input.
+  if (name) {
+    const b64 = b64utf8(name);
+    const fill = `(()=>{
+      const inp = document.querySelector('input[placeholder*="roject name"], input[placeholder*="项目"]');
+      if (!inp) return {ok:false,reason:'no-name-input'};
+      const txt = ${decodeB64Expr(b64)};
+      inp.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(inp, txt);
+      inp.dispatchEvent(new Event('input', {bubbles:true}));
+      return {ok:true,val:inp.value};
+    })()`;
+    const filled = cdp(fill, { idx });
+    if (!filled.ok) bail(`could not fill project name: ${JSON.stringify(filled)}`, 1);
+  }
+
+  // 4. Click the Create button.
+  const clickCreate = `(()=>{
+    const btn = document.querySelector('[data-testid="create-project-button"]');
+    if (!btn) return {ok:false,reason:'no-create-button'};
+    if (btn.disabled) return {ok:false,reason:'create-disabled'};
+    btn.click();
+    return {ok:true};
+  })()`;
+  const created = cdp(clickCreate, { idx });
+  if (!created.ok) bail(`could not click Create: ${JSON.stringify(created)}`, 1);
+
+  // 5. Wait for redirect to /design/p/<uuid>.
+  await waitFor(
+    'location.href.match(/\\/design\\/p\\/[0-9a-f-]+/) ? location.href : "wait"',
+    v => v && v !== 'wait',
+    { interval: 1000, timeout: 60_000, idx },
+  );
+  const projectUrl = cdp('location.href', { idx });
+  process.stdout.write(JSON.stringify({ ok: true, action: 'create', idx, name, mode, template, url: projectUrl }) + '\n');
+}
+
+async function cmdPrompt() {
+  const idx = requireIdx();
+
+  // Source the text: positional, "-" → stdin, or --file.
+  let text;
+  if (FLAGS.file) {
+    text = readFileSync(FLAGS.file, 'utf8');
+  } else if (POS.length && POS[0] !== '-') {
+    text = POS.join(' ');
+  } else {
+    text = readFileSync(0, 'utf8');
+  }
+  text = String(text).replace(/\r\n/g, '\n');
+  if (!text.trim()) bail('empty prompt', 2);
+
+  const b64 = b64utf8(text);
+
+  // 1. Poll until composer + send button are present.
+  // If we're on the landing page (no project open), tell the caller to
+  // use `claude-design create` first — `prompt` only targets in-project composers.
+  await waitFor(
+    `(()=>{
+      if (document.querySelector('textarea[data-testid="chat-composer-input"]')) return "ready";
+      if (/claude\\.ai\\/design\\/?$/i.test(location.href)) return "on-landing";
+      return "wait";
+    })()`,
+    v => v === 'ready' || v === 'on-landing',
+    { interval: 1000, timeout: 60_000, idx },
+  ).then(v => {
+    if (v === 'on-landing') {
+      bail('on /design landing page (no project open). Run `claude-design create [name]` first, then `prompt`.', 1);
+    }
+  });
+
+  // 2. Inject text via the React-friendly setter (HTMLTextAreaElement prototype),
+  //    then dispatch an input event so React's state syncs.
+  const inject = `(()=>{
+    const t=document.querySelector('textarea[data-testid="chat-composer-input"]');
+    if(!t) return {ok:false,reason:"no-textarea"};
+    const txt=${decodeB64Expr(b64)};
+    t.focus();
+    const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value").set;
+    setter.call(t,txt);
+    t.dispatchEvent(new Event("input",{bubbles:true}));
+    return {ok:true,len:t.value.length,hasZh:/[\\u4e00-\\u9fff]/.test(t.value)};
+  })()`;
+  const injected = cdp(inject, { idx });
+  if (!injected || !injected.ok) {
+    bail(`inject failed: ${JSON.stringify(injected)}`, 1);
+  }
+
+  // 3. Wait briefly for React to enable the send button.
+  await waitFor(
+    '(()=>{const b=document.querySelector(\'[data-testid="chat-send-button"]\');return b&&!b.disabled?"ready":"wait";})()',
+    v => v === 'ready',
+    { interval: 500, timeout: 10_000, idx },
+  );
+
+  // 4. Click send.
+  const click = `(()=>{
+    const b=document.querySelector('[data-testid="chat-send-button"]');
+    if(!b) return "no-btn";
+    if(b.disabled) return "disabled";
+    b.click();
+    return "clicked";
+  })()`;
+  const sent = cdp(click, { idx });
+  if (sent !== 'clicked') {
+    bail(`send click failed: ${sent}`, 1);
+  }
+
+  const result = { ok: true, action: 'prompt', idx, len: injected.len, hasZh: injected.hasZh };
+
+  // 5. Optional --wait: poll until the send button is re-enabled (assistant done).
+  if (FLAGS.wait) {
+    const timeout = Number(FLAGS.timeout || 600_000);
+    // First, wait for send to become disabled (sending started).
+    await waitFor(
+      '(()=>{const b=document.querySelector(\'[data-testid="chat-send-button"]\');return b&&b.disabled?"sending":"idle";})()',
+      v => v === 'sending',
+      { interval: 500, timeout: 10_000, idx },
+    ).catch(() => {/* maybe sent too fast; ignore */});
+    // Then, wait for it to come back enabled.
+    await waitFor(
+      '(()=>{const b=document.querySelector(\'[data-testid="chat-send-button"]\');return b&&!b.disabled?"done":"running";})()',
+      v => v === 'done',
+      { interval: 2000, timeout, idx },
+    );
+    result.completed = true;
+  }
+
+  process.stdout.write(JSON.stringify(result) + '\n');
+}
+
+async function cmdDownload() {
+  const idx = requireIdx();
+  const type = (FLAGS.type || 'editable').toLowerCase();
+  if (!['editable', 'standalone', 'zip'].includes(type)) {
+    bail(`--type must be editable | standalone | zip (got ${type})`, 2);
+  }
+
+  // Map type → text patterns to match against menu item labels.
+  const patterns = {
+    editable:   ['editable', '可编辑'],
+    standalone: ['standalone', '独立', 'export as standalone'],
+    zip:        ['zip', '.zip', 'project as'],
+  };
+
+  // 1. Set Page download behavior so the file lands somewhere predictable.
+  //    --out (if given) is the Mac-side directory; default ~/Downloads.
+  const outDir = FLAGS.out || '~/Downloads';
+  // Resolve ~ in the BROWSER process — but Page.setDownloadBehavior expects a
+  // real absolute path. We have to expand on the agent-chrome side though, and
+  // we don't know the Mac's $HOME from here. Punt: expand only if absolute, else
+  // leave to default. (The user can pass an absolute path.)
+  if (outDir.startsWith('/')) {
+    runAch(
+      ['cdp', 'Page.setDownloadBehavior', JSON.stringify({ behavior: 'allow', downloadPath: outDir }), '--idx', idx],
+      { timeout: 10_000 },
+    );
+  }
+
+  // 2. Click the Share button (testid varies; fall back to text match).
+  const openShare = `(()=>{
+    const btn = document.querySelector('[data-testid="share-button"]')
+      || Array.from(document.querySelectorAll('button')).find(b => /share|分享|共有/i.test((b.textContent||"").trim()));
+    if (!btn) return "no-share";
+    btn.click();
+    return "clicked";
+  })()`;
+  const opened = cdp(openShare, { idx });
+  if (opened !== 'clicked') bail(`could not open Share menu: ${opened}`, 1);
+
+  // 3. Give the menu a beat to render, then click the matching item.
+  await sleep(800);
+  const pats = JSON.stringify(patterns[type]);
+  const clickItem = `(()=>{
+    const pats = ${pats};
+    const items = Array.from(document.querySelectorAll('[role="menuitem"], button, a'));
+    const hit = items.find(el => {
+      const t = (el.textContent || "").toLowerCase().trim();
+      return pats.some(p => t.includes(p));
+    });
+    if (!hit) return {ok:false,reason:"no-item",pats};
+    hit.click();
+    return {ok:true,label:(hit.textContent||"").trim().slice(0,80)};
+  })()`;
+  const clicked = cdp(clickItem, { idx });
+  if (!clicked || !clicked.ok) bail(`could not find menu item for type=${type}: ${JSON.stringify(clicked)}`, 1);
+
+  // 4. Wait for a download to complete. CDP Page download events would be the
+  //    proper signal, but since we only do one-shot Runtime.evaluate from here,
+  //    we just sleep proportionally to the file size: editable is fast (~2s),
+  //    standalone (~14 MB with fonts) needs ~30s for the LLM to bundle.
+  const waitMs = Number(FLAGS.timeout || (type === 'standalone' ? 90_000 : 15_000));
+  process.stdout.write(JSON.stringify({
+    ok: true, action: 'download', idx, type,
+    clicked_label: clicked.label,
+    mac_download_dir: outDir,
+    waited_ms: waitMs,
+    note: 'file appears in mac_download_dir on the agent-chrome host; pull it with `cicy-agent msg` + dd|base64 (see references/pull.md).',
+  }) + '\n');
+
+  await sleep(waitMs);
+}
+
+function cmdExec() {
+  if (!POS.length) bail('exec needs a JS expression', 2);
+  const expr = POS.join(' ');
+  const v = cdp(expr);
+  process.stdout.write(JSON.stringify({ ok: true, value: v }) + '\n');
+}
+
+function cmdStatus() {
+  const idx = requireIdx();
+  // Check if any targets exist for the idx (= chrome is running).
+  const t = runAch(['targets', '--idx', idx], { timeout: 10_000 });
+  const running = !!(t.json && t.json.ok);
+  let url = null, design = false, hasComposer = false;
+  if (running) {
+    try {
+      const status = cdp(`(()=>({
+        url: location.href,
+        design: /claude\\.ai\\/design/.test(location.href),
+        composer: !!document.querySelector('textarea[data-testid="chat-composer-input"]'),
+        sendReady: !!(() => {const b=document.querySelector('[data-testid="chat-send-button"]');return b&&!b.disabled;})()
+      }))()`, { idx, timeout: 10_000 });
+      if (status) { url = status.url; design = status.design; hasComposer = status.composer; }
+    } catch { /* page not loaded yet */ }
+  }
+  const out = { ok: true, idx, client: FLAGS.client || null, running, url, design, hasComposer };
+  if (FLAGS.json) {
+    process.stdout.write(JSON.stringify(out) + '\n');
+    return;
+  }
+  process.stdout.write(`claude-design status\n`);
+  process.stdout.write(`  idx:        ${idx}\n`);
+  process.stdout.write(`  client:     ${out.client || '(local)'}\n`);
+  process.stdout.write(`  chrome:     ${running ? 'running' : 'not running'}\n`);
+  if (running) {
+    process.stdout.write(`  url:        ${url || '(unknown)'}\n`);
+    process.stdout.write(`  on design:  ${design ? 'yes' : 'no'}\n`);
+    process.stdout.write(`  composer:   ${hasComposer ? 'ready' : 'absent'}\n`);
+  }
+}
