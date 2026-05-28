@@ -181,19 +181,23 @@ async function cmdReply(args, node) {
 }
 
 async function cmdMsg(args, node) {
-  let callback = false;
+  // Default ON: callback (reply routes back to the sender) + a [sender] prefix
+  // so the recipient knows who messaged. Disable callback with --no-callback.
+  let callback = true;
   const filtered = [];
   for (const a of args) {
     if (a === '--callback' || a === '-c') callback = true;
+    else if (a === '--no-callback' || a === '--no-cb') callback = false;
     else filtered.push(a);
   }
-  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--callback]'), { exitCode: 2 });
-  const payload = { pane_id: filtered[0], text: filtered.slice(1).join(' ') };
-  if (callback) {
-    const senderID = (process.env.X_AGENT_SHORT_ID || '').trim();
-    if (!senderID) throw Object.assign(new Error('--callback requires X_AGENT_SHORT_ID env var (only set inside cicy panes)'), { exitCode: 2 });
-    payload.callback_to = senderID;
-  }
+  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--no-callback]'), { exitCode: 2 });
+  const senderID = (process.env.X_AGENT_SHORT_ID || '').trim();
+  let text = filtered.slice(1).join(' ');
+  // Stamp the sender id (set inside cicy panes) so the receiver sees who sent it.
+  if (senderID && !text.startsWith(`[${senderID}]`)) text = `[${senderID}] ${text}`;
+  const payload = { pane_id: filtered[0], text };
+  // callback_to only works with a sender id; outside a pane (no env) it's skipped.
+  if (callback && senderID) payload.callback_to = senderID;
   const data = await api('POST', '/api/tmux/send', payload, node);
   if (json) return ok(data);
   console.log(typeof data === 'string' ? data : JSON.stringify(data));
