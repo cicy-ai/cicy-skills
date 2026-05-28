@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// feishu-cli — bootstrap wrapper for the official Feishu/Lark CLI.
+// feishu-cli — wrapper for the official Feishu/Lark CLI.
 //   npm package: @larksuite/cli   ·   binary: lark-cli
-// Four subcommands: install / config / auth / status. Nothing else.
-// For ANY real API work (im, calendar, docs, base, api ...) use the native
-// `lark-cli` binary directly — this wrapper does not proxy it.
+// Commands: install / config / auth / status / run.
+//   install/config/auth/status bootstrap & inspect the CLI.
+//   run forwards ANY lark-cli command through, with the *.feishu.cn proxy
+//   bypass handled automatically (see larkEnv) so callers never need the
+//   `env -u HTTP_PROXY ... lark-cli` dance.
 // Zero npm dependencies. Pure ESM. Node 18+.
 
 import { readFileSync } from 'node:fs';
@@ -13,9 +15,8 @@ const NPM_PKG = '@larksuite/cli';
 const BIN = 'lark-cli';
 
 const argv = process.argv.slice(2);
-const json = argv.includes('--json');
-const rest = argv.filter((a) => a !== '--json');
-const cmd = rest[0];
+const cmd = argv[0];
+const rest = argv.slice(1);
 
 if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
   printHelp();
@@ -24,10 +25,11 @@ if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
 
 try {
   switch (cmd) {
-    case 'install': cmdInstall(rest.slice(1)); break;
-    case 'config':  cmdPassthrough(['config', 'init'], [], rest.slice(1)); break;
-    case 'auth':    cmdPassthrough(['auth', 'login'], ['--recommend'], rest.slice(1)); break;
-    case 'status':  cmdStatus(); break;
+    case 'install': cmdInstall(rest); break;
+    case 'config':  cmdPassthrough(['config', 'init'], [], rest); break;
+    case 'auth':    cmdPassthrough(['auth', 'login'], ['--recommend'], rest); break;
+    case 'status':  cmdStatus(rest.includes('--json')); break;
+    case 'run': case 'x': cmdRun(rest); break;
     default: bail(`unknown command: ${cmd}. Try feishu-cli --help.`, 2);
   }
 } catch (e) {
@@ -46,27 +48,53 @@ function printHelp() {
     process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
   } catch {
     process.stdout.write(`Usage:
-  feishu-cli install [--force]   Install the official lark-cli via ${NPM_PKG}
-  feishu-cli config [-- ...]     Configure app credentials (lark-cli config init)
-  feishu-cli auth   [-- ...]     OAuth login, prints an authorization URL (lark-cli auth login)
-  feishu-cli status [--json]     Show install + auth state
-  feishu-cli --help / -h / help  Print this help
+  feishu-cli install [--force]    Install the official lark-cli via ${NPM_PKG}
+  feishu-cli config [-- ...]      Configure app credentials (lark-cli config init)
+  feishu-cli auth   [-- ...]      OAuth login, prints an authorization URL
+  feishu-cli status [--json]      Show install + auth state
+  feishu-cli run <lark args...>   Run any lark-cli command (proxy bypass auto-handled)
+  feishu-cli --help / -h / help   Print this help
 
-For real API calls use the native lark-cli directly, e.g.:
-  lark-cli im +messages-send --chat-id oc_xxx --text Hello
-  lark-cli api GET /open-apis/calendar/v4/calendars
+Examples:
+  feishu-cli run sheets +create --title "T" --headers '["A","B"]' --data '[["1","2"]]'
+  feishu-cli run im +messages-send --chat-id oc_xxx --text Hello
+  feishu-cli run calendar +agenda
 `);
   }
 }
 
+// Environment for invoking lark-cli. lark-cli only ever talks to *.feishu.cn /
+// *.larksuite.com; on hosts whose proxy exits outside mainland China those
+// endpoints reset the connection (EOF). So by default we strip the proxy env
+// vars and add the feishu/lark domains to NO_PROXY, forcing lark-cli onto the
+// host's direct egress. Set FEISHU_CLI_KEEP_PROXY=1 to opt out (e.g. a host
+// that can only reach the internet through a proxy).
+function larkEnv() {
+  if (process.env.FEISHU_CLI_KEEP_PROXY) return process.env;
+  const e = { ...process.env };
+  for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
+    delete e[k];
+  }
+  const extra = 'feishu.cn,larksuite.com,feishu.com,larkoffice.com';
+  e.NO_PROXY = e.NO_PROXY ? `${e.NO_PROXY},${extra}` : extra;
+  e.no_proxy = e.NO_PROXY;
+  return e;
+}
+
 // Return the lark-cli version string, or null if the binary is not on PATH.
 function larkVersion() {
-  const r = spawnSync(BIN, ['--version'], { encoding: 'utf8', timeout: 8000 });
+  const r = spawnSync(BIN, ['--version'], { encoding: 'utf8', timeout: 8000, env: larkEnv() });
   if (r.error) {
     if (r.error.code === 'ENOENT') return null;
     return '(unknown)';
   }
   return ((r.stdout || '') + (r.stderr || '')).trim() || '(unknown)';
+}
+
+function requireInstalled() {
+  if (larkVersion() === null) {
+    throw Object.assign(new Error('lark-cli not installed — run `feishu-cli install` first'), { exitCode: 3 });
+  }
 }
 
 // ── install ───────────────────────────────────────────────────────────────
@@ -79,11 +107,8 @@ function cmdInstall(extra) {
     console.log('  use --force to reinstall');
     return;
   }
-
-  // The official installer is the package's own `install` subcommand, run via
-  // npx. It downloads the platform-specific Go binary and puts `lark-cli` on
-  // PATH. We honour the documented command rather than reinventing the
-  // download so we track upstream packaging changes for free.
+  // npm registry + the feishu CDN binary download work fine through a proxy, so
+  // install keeps the ambient environment (unlike the feishu.cn API calls).
   console.log(`→ installing ${NPM_PKG} (downloads the lark-cli binary) ...`);
   const r = spawnSync('npx', ['-y', `${NPM_PKG}@latest`, 'install'], { stdio: 'inherit' });
   if (r.error) {
@@ -95,7 +120,6 @@ function cmdInstall(extra) {
   if (r.status !== 0) {
     throw Object.assign(new Error(`installer exited ${r.status}`), { exitCode: r.status || 1 });
   }
-
   const after = larkVersion();
   if (after !== null) {
     console.log(`✓ lark-cli installed (${after})`);
@@ -108,22 +132,16 @@ function cmdInstall(extra) {
 
 // ── config / auth (thin passthrough to lark-cli) ────────────────────────────
 
-// Both config and auth are interactive in the native CLI. We forward stdio so
-// the lark-cli guided setup / printed verification URL reach the terminal
-// verbatim. `base` is the always-present subcommand path (e.g. ['config','init']
-// or ['auth','login']) — it is NEVER dropped, because lark-cli requires that
-// positional subcommand. `defaultExtra` flags are used only when the caller
-// passes none; any caller-supplied flags (after an optional literal `--`)
-// append AFTER base instead. So `feishu-cli config -- --new` runs
-// `lark-cli config init --new`, not `lark-cli config --new`.
+// `base` is the always-present subcommand path (e.g. ['config','init'] or
+// ['auth','login']) — never dropped, since lark-cli requires that positional
+// subcommand. `defaultExtra` is used only when the caller passes none; any
+// caller-supplied flags (after an optional literal `--`) append AFTER base.
 function cmdPassthrough(base, defaultExtra, extra) {
-  if (larkVersion() === null) {
-    throw Object.assign(new Error('lark-cli not installed — run `feishu-cli install` first'), { exitCode: 3 });
-  }
+  requireInstalled();
   const passed = extra[0] === '--' ? extra.slice(1) : extra;
   const args = [...base, ...(passed.length ? passed : defaultExtra)];
   const label = base.join(' ');
-  const r = spawnSync(BIN, args, { stdio: 'inherit' });
+  const r = spawnSync(BIN, args, { stdio: 'inherit', env: larkEnv() });
   if (r.error) {
     throw Object.assign(new Error(`lark-cli ${label} failed: ${r.error.message}`), { exitCode: 1 });
   }
@@ -132,9 +150,29 @@ function cmdPassthrough(base, defaultExtra, extra) {
   }
 }
 
+// ── run (generic proxy-aware passthrough) ───────────────────────────────────
+
+// Forward an arbitrary lark-cli command line, with the proxy bypass applied so
+// callers (and novices) never type the env-var dance:
+//   feishu-cli run sheets +create --title ...
+//   feishu-cli run calendar +agenda
+// Exit code and stdio are passed through transparently.
+function cmdRun(extra) {
+  requireInstalled();
+  const args = extra[0] === '--' ? extra.slice(1) : extra;
+  if (args.length === 0) {
+    throw Object.assign(new Error('usage: feishu-cli run <lark-cli args...>  (e.g. feishu-cli run calendar +agenda)'), { exitCode: 2 });
+  }
+  const r = spawnSync(BIN, args, { stdio: 'inherit', env: larkEnv() });
+  if (r.error) {
+    throw Object.assign(new Error(`lark-cli failed: ${r.error.message}`), { exitCode: 1 });
+  }
+  process.exit(r.status == null ? 1 : r.status);
+}
+
 // ── status ──────────────────────────────────────────────────────────────────
 
-function cmdStatus() {
+function cmdStatus(json) {
   const version = larkVersion();
   const out = {
     npm_package: NPM_PKG,
@@ -146,7 +184,7 @@ function cmdStatus() {
   };
 
   if (out.installed) {
-    const r = spawnSync(BIN, ['auth', 'status'], { encoding: 'utf8', timeout: 10000 });
+    const r = spawnSync(BIN, ['auth', 'status'], { encoding: 'utf8', timeout: 10000, env: larkEnv() });
     if (!r.error) {
       out.authenticated = r.status === 0;
       out.auth_status = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 6).join('\n');

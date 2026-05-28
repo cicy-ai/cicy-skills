@@ -11,17 +11,24 @@
 | `auth`                 | `lark-cli auth login --recommend`     | prints OAuth URL; relay to user                    |
 | `auth -- <flags>`      | `lark-cli auth login <flags>`         | e.g. `--no-wait`, `--domain calendar,task`         |
 | `status`               | `lark-cli --version` + `lark-cli auth status` | report-only; safe when not installed       |
+| `run <args...>` / `x`  | `lark-cli <args...>`                   | generic passthrough; exit code + stdio transparent |
 
-## Forwarding rule
+## Proxy handling
 
-Anything after a literal `--` is passed straight through to the native CLI
-subcommand group (`config` or `auth`). Without extra args the wrapper uses the
-documented defaults (`config init`, `auth login --recommend`).
+Every lark-cli invocation (`config`, `auth`, `status`, `run`) runs with the proxy
+env vars stripped and `feishu.cn,larksuite.com,feishu.com,larkoffice.com` added to
+`NO_PROXY`, so calls use the host's direct egress (China-brand endpoints reset
+through an overseas proxy exit). `install` keeps the ambient env (npm/CDN work
+through a proxy). Override with `FEISHU_CLI_KEEP_PROXY=1`.
 
-## Not proxied
+## Forwarding rules
 
-The wrapper deliberately does **not** forward `im`, `calendar`, `docs`, `base`,
-`sheets`, `api`, etc. Those are real API calls — invoke `lark-cli` directly.
+- `config` / `auth`: anything after a literal `--` appends to the fixed subcommand
+  (`config init`, `auth login`). With no extra args, defaults apply (`auth login
+  --recommend`).
+- `run`: the entire remainder (minus an optional leading `--`) is passed verbatim to
+  `lark-cli`. This is the path for real API calls — `run sheets …`, `run im …`,
+  `run calendar …`, `run api …`, etc.
 
 ## status --json shape
 

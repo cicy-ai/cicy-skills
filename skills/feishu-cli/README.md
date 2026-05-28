@@ -3,9 +3,10 @@
 > Source-only Node.js. Read [`bin/feishu-cli`](./bin/feishu-cli).
 > Requires `npx` (Node.js) on PATH.
 
-Bootstrap wrapper for the **official Feishu/Lark CLI** — [`@larksuite/cli`](https://github.com/larksuite/cli) (binary `lark-cli`).
-It does **install / config / auth / status** only; for real API work you use the
-native `lark-cli` directly.
+Wrapper for the **official Feishu/Lark CLI** — [`@larksuite/cli`](https://github.com/larksuite/cli) (binary `lark-cli`).
+It bootstraps the CLI (**install / config / auth / status**) and adds **`run`** — a
+single proxy-aware entry point for every real API call, so you never type the
+`env -u HTTP_PROXY … lark-cli` dance.
 
 ## Install
 
@@ -22,12 +23,15 @@ feishu-cli config     # set app credentials  (lark-cli config init)
 feishu-cli auth       # OAuth login — prints an authorization URL to relay to the user
 ```
 
-Then everything else is the native CLI (200+ commands across im, calendar, docs,
-base, sheets, mail, tasks, meetings, …):
+Then run real commands through `feishu-cli run` (200+ commands across im, calendar,
+docs, base, sheets, mail, tasks, meetings, …) — everything after `run` is passed
+verbatim to `lark-cli`:
 
 ```bash
-lark-cli im +messages-send --chat-id oc_xxx --text "Hello"
-lark-cli api GET /open-apis/calendar/v4/calendars --format json
+feishu-cli run sheets +create --title "T" --headers '["A","B"]' --data '[["1","2"]]'
+feishu-cli run im +messages-send --chat-id oc_xxx --text "Hello"
+feishu-cli run calendar +agenda
+feishu-cli run api GET /open-apis/calendar/v4/calendars --format json
 ```
 
 ## Notes
@@ -36,8 +40,9 @@ lark-cli api GET /open-apis/calendar/v4/calendars --format json
   otherwise a local file (`~/.lark-cli/config.json`) on headless Linux. Nothing in
   `~/cicy-ai/db`; never print that file.
 - **Proxy:** `lark-cli` hits `*.feishu.cn`, which resets through a non-CN proxy exit
-  (`EOF`). Bypass the proxy for a direct route — see SKILL.md "Proxy".
+  (`EOF`). `feishu-cli` strips the proxy for every command it runs (incl. `run`), so
+  it's automatic; set `FEISHU_CLI_KEEP_PROXY=1` to opt out. Only raw `lark-cli` calls
+  need the manual bypass — see SKILL.md "Proxy".
 - `feishu-cli auth` prints an OAuth URL; relay it to the user for browser approval.
-- This wrapper does **not** proxy real API calls — call `lark-cli` directly.
 
 MIT. The official CLI is also MIT, by the larksuite team.

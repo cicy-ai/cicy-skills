@@ -15,6 +15,13 @@ const bad = runSkill(D, ['badcmd']);
 assert('unknown subcommand exits non-0', bad.status !== 0);
 assert('unknown subcommand exits 2', bad.status === 2);
 
+// run with no lark args → non-0 (exit 2 if lark-cli present, 3 if not — both non-0)
+const runEmpty = runSkill(D, ['run']);
+assert('run with no args exits non-0', runEmpty.status !== 0);
+
+// help advertises the run subcommand
+assert('help mentions run', noArgs.stdout.includes('run'));
+
 // status --json → valid JSON with ok:true, regardless of install state
 const status = runSkill(D, ['status', '--json']);
 assert('status --json exits 0', status.status === 0);
