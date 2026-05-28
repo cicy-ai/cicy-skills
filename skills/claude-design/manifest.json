@@ -1,0 +1,82 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "claude-design",
+  "version": "1.0.0",
+  "title": "Claude Design",
+  "description": "Drive claude.ai/design from the CLI via agent-chrome CDP: open a workspace, send prompts (UTF-8 safe), and trigger Share→Export downloads.",
+  "category": "ai",
+  "tags": [
+    "claude",
+    "design",
+    "agent-chrome",
+    "cdp",
+    "automation"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/claude-design",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "agent-chrome"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/claude-design",
+  "permissions": [
+    "network",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Claude Design",
+      "description": "通过 agent-chrome CDP 驱动 claude.ai/design:打开工作区、发送提示词(UTF-8 安全)、触发 Share→Export 下载。"
+    }
+  },
+  "tools": [
+    {
+      "name": "claude-design open",
+      "example": "claude-design open --idx 6",
+      "description": "Launch the chrome profile and navigate to claude.ai/design"
+    },
+    {
+      "name": "claude-design new",
+      "example": "claude-design new --idx 6",
+      "description": "Navigate to the /design landing (project list)"
+    },
+    {
+      "name": "claude-design create",
+      "example": "claude-design create 'My Landing' --mode hifi --idx 6",
+      "description": "Click into a new project from the /design landing page"
+    },
+    {
+      "name": "claude-design prompt",
+      "example": "echo \"设计一个深色科技风落地页\" | claude-design prompt - --idx 6 --wait",
+      "description": "Inject + send a prompt into the composer (UTF-8 safe)"
+    },
+    {
+      "name": "claude-design download",
+      "example": "claude-design download --type editable --out /Users/you/Downloads --idx 6",
+      "description": "Trigger Share → Export and report the file path on the host"
+    },
+    {
+      "name": "claude-design exec",
+      "example": "claude-design exec 'location.href' --idx 6",
+      "description": "Raw Runtime.evaluate convenience for debugging"
+    },
+    {
+      "name": "claude-design status",
+      "example": "claude-design status --idx 6 --json",
+      "description": "Report profile + page state"
+    }
+  ]
+}
