@@ -1,0 +1,68 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "feishu-cli",
+  "version": "1.0.0",
+  "title": "Feishu CLI Bootstrap",
+  "description": "Install and configure the official Feishu/Lark CLI (@larksuite/cli) on this host. Bootstrap-only wrapper: install / config / auth / status. For real API calls use the native lark-cli.",
+  "category": "productivity",
+  "tags": [
+    "feishu",
+    "lark",
+    "larksuite",
+    "cli",
+    "bootstrap"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/feishu-cli",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "npx"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/feishu-cli",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "飞书 CLI",
+      "description": "飞书/Lark 官方 CLI(@larksuite/cli)安装引导。仅四个子命令:install / config / auth / status。真正的 API 调用请直接用 lark-cli 命令。"
+    }
+  },
+  "tools": [
+    {
+      "name": "feishu install",
+      "example": "feishu-cli install",
+      "description": "Install the official Feishu/Lark CLI (lark-cli)"
+    },
+    {
+      "name": "feishu config",
+      "example": "feishu-cli config",
+      "description": "Configure Feishu app credentials (lark-cli config init)"
+    },
+    {
+      "name": "feishu auth",
+      "example": "feishu-cli auth",
+      "description": "OAuth login — prints an authorization URL (lark-cli auth login)"
+    },
+    {
+      "name": "feishu status",
+      "example": "feishu-cli status",
+      "description": "Check Feishu CLI install + auth status"
+    }
+  ]
+}
