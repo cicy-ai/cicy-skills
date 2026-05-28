@@ -1,0 +1,170 @@
+#!/usr/bin/env node
+// feishu-cli — bootstrap wrapper for the official Feishu/Lark CLI.
+//   npm package: @larksuite/cli   ·   binary: lark-cli
+// Four subcommands: install / config / auth / status. Nothing else.
+// For ANY real API work (im, calendar, docs, base, api ...) use the native
+// `lark-cli` binary directly — this wrapper does not proxy it.
+// Zero npm dependencies. Pure ESM. Node 18+.
+
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+const NPM_PKG = '@larksuite/cli';
+const BIN = 'lark-cli';
+
+const argv = process.argv.slice(2);
+const json = argv.includes('--json');
+const rest = argv.filter((a) => a !== '--json');
+const cmd = rest[0];
+
+if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+try {
+  switch (cmd) {
+    case 'install': cmdInstall(rest.slice(1)); break;
+    case 'config':  cmdPassthrough(['config', 'init'], [], rest.slice(1)); break;
+    case 'auth':    cmdPassthrough(['auth', 'login'], ['--recommend'], rest.slice(1)); break;
+    case 'status':  cmdStatus(); break;
+    default: bail(`unknown command: ${cmd}. Try feishu-cli --help.`, 2);
+  }
+} catch (e) {
+  bail(e.message, e.exitCode || 1);
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  process.stderr.write(`feishu-cli: ${msg}\n`);
+  process.exit(code);
+}
+
+function printHelp() {
+  try {
+    process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
+  } catch {
+    process.stdout.write(`Usage:
+  feishu-cli install [--force]   Install the official lark-cli via ${NPM_PKG}
+  feishu-cli config [-- ...]     Configure app credentials (lark-cli config init)
+  feishu-cli auth   [-- ...]     OAuth login, prints an authorization URL (lark-cli auth login)
+  feishu-cli status [--json]     Show install + auth state
+  feishu-cli --help / -h / help  Print this help
+
+For real API calls use the native lark-cli directly, e.g.:
+  lark-cli im +messages-send --chat-id oc_xxx --text Hello
+  lark-cli api GET /open-apis/calendar/v4/calendars
+`);
+  }
+}
+
+// Return the lark-cli version string, or null if the binary is not on PATH.
+function larkVersion() {
+  const r = spawnSync(BIN, ['--version'], { encoding: 'utf8', timeout: 8000 });
+  if (r.error) {
+    if (r.error.code === 'ENOENT') return null;
+    return '(unknown)';
+  }
+  return ((r.stdout || '') + (r.stderr || '')).trim() || '(unknown)';
+}
+
+// ── install ───────────────────────────────────────────────────────────────
+
+function cmdInstall(extra) {
+  const force = extra.includes('--force');
+  const before = larkVersion();
+  if (before !== null && !force) {
+    console.log(`✓ lark-cli already installed (${before})`);
+    console.log('  use --force to reinstall');
+    return;
+  }
+
+  // The official installer is the package's own `install` subcommand, run via
+  // npx. It downloads the platform-specific Go binary and puts `lark-cli` on
+  // PATH. We honour the documented command rather than reinventing the
+  // download so we track upstream packaging changes for free.
+  console.log(`→ installing ${NPM_PKG} (downloads the lark-cli binary) ...`);
+  const r = spawnSync('npx', ['-y', `${NPM_PKG}@latest`, 'install'], { stdio: 'inherit' });
+  if (r.error) {
+    if (r.error.code === 'ENOENT') {
+      throw Object.assign(new Error('npx not found — install Node.js (npm) first'), { exitCode: 4 });
+    }
+    throw Object.assign(new Error(`npx failed: ${r.error.message}`), { exitCode: 1 });
+  }
+  if (r.status !== 0) {
+    throw Object.assign(new Error(`installer exited ${r.status}`), { exitCode: r.status || 1 });
+  }
+
+  const after = larkVersion();
+  if (after !== null) {
+    console.log(`✓ lark-cli installed (${after})`);
+    console.log('  next: feishu-cli config   then   feishu-cli auth');
+  } else {
+    console.log('⚠ installer finished but `lark-cli` is not on PATH.');
+    console.log('  Open a new shell, or ensure the npm global bin dir is on PATH, then re-run `feishu-cli status`.');
+  }
+}
+
+// ── config / auth (thin passthrough to lark-cli) ────────────────────────────
+
+// Both config and auth are interactive in the native CLI. We forward stdio so
+// the lark-cli guided setup / printed verification URL reach the terminal
+// verbatim. `base` is the always-present subcommand path (e.g. ['config','init']
+// or ['auth','login']) — it is NEVER dropped, because lark-cli requires that
+// positional subcommand. `defaultExtra` flags are used only when the caller
+// passes none; any caller-supplied flags (after an optional literal `--`)
+// append AFTER base instead. So `feishu-cli config -- --new` runs
+// `lark-cli config init --new`, not `lark-cli config --new`.
+function cmdPassthrough(base, defaultExtra, extra) {
+  if (larkVersion() === null) {
+    throw Object.assign(new Error('lark-cli not installed — run `feishu-cli install` first'), { exitCode: 3 });
+  }
+  const passed = extra[0] === '--' ? extra.slice(1) : extra;
+  const args = [...base, ...(passed.length ? passed : defaultExtra)];
+  const label = base.join(' ');
+  const r = spawnSync(BIN, args, { stdio: 'inherit' });
+  if (r.error) {
+    throw Object.assign(new Error(`lark-cli ${label} failed: ${r.error.message}`), { exitCode: 1 });
+  }
+  if (r.status !== 0) {
+    throw Object.assign(new Error(`lark-cli ${label} exited ${r.status}`), { exitCode: r.status || 1 });
+  }
+}
+
+// ── status ──────────────────────────────────────────────────────────────────
+
+function cmdStatus() {
+  const version = larkVersion();
+  const out = {
+    npm_package: NPM_PKG,
+    binary: BIN,
+    installed: version !== null,
+    version: version || '',
+    authenticated: null,   // null = could not determine (not installed)
+    auth_status: '',
+  };
+
+  if (out.installed) {
+    const r = spawnSync(BIN, ['auth', 'status'], { encoding: 'utf8', timeout: 10000 });
+    if (!r.error) {
+      out.authenticated = r.status === 0;
+      out.auth_status = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 6).join('\n');
+    }
+  }
+
+  if (json) {
+    console.log(JSON.stringify({ ok: true, data: out }));
+    return;
+  }
+  console.log(`npm package:   ${out.npm_package}`);
+  console.log(`binary:        ${out.binary}`);
+  console.log(`installed:     ${out.installed}${out.version ? ' [' + out.version + ']' : ''}`);
+  if (!out.installed) {
+    console.log('               run `feishu-cli install`');
+    return;
+  }
+  console.log(`authenticated: ${out.authenticated === null ? '(unknown)' : out.authenticated}`);
+  if (out.auth_status) console.log(`auth status:\n${out.auth_status.split('\n').map((l) => '  ' + l).join('\n')}`);
+  if (!out.authenticated) console.log('               run `feishu-cli config` then `feishu-cli auth`');
+}
