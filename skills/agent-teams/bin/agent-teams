@@ -32,8 +32,20 @@ let _clientID = null;
       case 'list':    await cmdList(); break;
       case 'add':     await cmdAdd(rest); break;
       case 'remove':  await cmdRemove(rest); break;
-      case 'update':  await cmdUpdate(rest); break;
+      case 'update':
+        // Two distinct shapes for `update`:
+        //   agent-teams update                       → cicy-code self-update (sidecar.install)
+        //   agent-teams update <id> --token X ...    → patch a team's stored fields
+        // We disambiguate on whether the first positional looks like a team id
+        // (any non-flag arg). The CLI help describes both forms.
+        if (rest.length === 0 || rest[0].startsWith('--')) {
+          await cmdUpdateSidecar(rest);
+        } else {
+          await cmdUpdate(rest);
+        }
+        break;
       case 'upgrade': await cmdUpgrade(rest); break;
+      case 'check':   await cmdCheckSidecar(); break;
       case 'open':    await cmdOpen(rest); break;
       case 'tools':   printTools(); break;
       default:        bail(`unknown command: ${subcmd}. Try agent-teams --help`, 2);
@@ -68,8 +80,10 @@ function printHelp() {
       '                  [--path <install_path>] [--container <name>] [--image <ref>]',
       '                  [--json]',
       '  agent-teams update <id> [--name X] [--base-url X] [--token X] [--json]',
+      '  agent-teams update                       (no id → cicy-code self-update)',
+      '  agent-teams check                        (latest vs installed — no writes)',
       '  agent-teams remove <id> [--json]',
-      '  agent-teams upgrade <id> [--json]',
+      '  agent-teams upgrade <id> [--json]        (per-team: download + symlink + restart daemon)',
       '  agent-teams open <id> [--json]',
       '',
       'All commands round-trip through agent-webpage exec-js to the connected',
@@ -289,6 +303,46 @@ async function cmdUpgrade(args) {
   if (json) return ok(result);
   if (!result || result.ok === false) bail(result?.error || 'upgrade failed');
   console.log(`✔ upgraded ${id}${result.version ? `  → v${result.version}` : ''}`);
+}
+
+// ── sidecar (cicy-code binary itself) ──────────────────────────────────
+//
+// `agent-teams update` (no team id) → triggers cicy-desktop's installer to
+// fetch the latest cicy-code from GitHub releases, write it to
+// ~/.local/bin/cicy-code-<ver>, and atomic-relink ~/.local/bin/cicy-code.
+// Does NOT restart the running daemon — pair with `agent-teams upgrade <id>`
+// when a registered team should pick up the new bytes immediately.
+//
+// `agent-teams check` → reports {ok, latest, installedVersion, network}
+// without writing anything.
+
+async function cmdCheckSidecar() {
+  const result = await callPage(
+    `(async () => await window.cicy.sidecar.checkLatest())()`
+  );
+  if (json) return ok(result);
+  if (!result || result.ok === false) bail(result?.error || 'check failed');
+  const cur = result.installedVersion || '(none)';
+  const lat = result.latest || '(unknown)';
+  const ahead = result.latest && result.installedVersion && result.latest !== result.installedVersion;
+  console.log(`current: v${cur}`);
+  console.log(`latest:  v${lat}${ahead ? '  ← update available' : ''}`);
+  if (result.network)    console.log(`network: ${result.network}`);
+  if (result.sizeBytes)  console.log(`size:    ${(result.sizeBytes/1048576).toFixed(1)} MB`);
+}
+
+async function cmdUpdateSidecar(args) {
+  void args;
+  const result = await callPage(
+    `(async () => await window.cicy.sidecar.install())()`
+  );
+  if (json) return ok(result);
+  if (!result || result.phase === 'error') bail(result?.error || result?.message || 'update failed');
+  if (result.phase === 'cancelled') { console.log('cancelled'); return; }
+  console.log(`✔ ${result.message || `installed v${result.version || '?'}`}`);
+  if (result.network) console.log(`  via ${result.network}`);
+  console.log('\nTo restart the running daemon with the new bytes:');
+  console.log('  agent-teams upgrade <id>     # if you have a team registered');
 }
 
 async function cmdOpen(args) {
