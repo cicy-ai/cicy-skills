@@ -113,11 +113,39 @@ function parseFlags(args, schema) {
   return { positional, flags };
 }
 
-// Run `agent-webpage exec-js '<jsExpr>' --json`, returns whatever the page
-// returned (already unwrapped from the wire envelope).
-function callPage(jsExpr) {
+// Run `agent-webpage clients --json` once, pick a web-* page client. Unlike
+// agent-webpage's own resolveTarget (which excludes isElectron — wrong for
+// cicy-desktop's webview where the SPA happily handles exec_js), we accept
+// any non-`:code-ext` client whose id starts with `web-`. Memoised per
+// process so list/add/upgrade in one shell share the lookup.
+let _clientID = null;
+async function pickClient() {
+  if (_clientID) return _clientID;
+  const out = await new Promise((resolve, reject) => {
+    const child = spawn('agent-webpage', ['clients', '--json'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let buf = '', err = '';
+    child.stdout.on('data', (c) => { buf += c; });
+    child.stderr.on('data', (c) => { err += c; });
+    child.on('error', reject);
+    child.on('close', (code) => code === 0 ? resolve(buf) : reject(new Error(`agent-webpage clients exited ${code}: ${err.trim()}`)));
+  });
+  let parsed;
+  try { parsed = JSON.parse(out.trim()); } catch (e) { throw new Error(`agent-webpage clients produced non-JSON: ${out.trim().slice(0,200)}`); }
+  const list = parsed?.data || parsed?.clients || (Array.isArray(parsed) ? parsed : []);
+  const hit = list.find((c) =>
+    c?.client_id && c.client_id.startsWith('web-') && !c.client_id.endsWith(':code-ext')
+  );
+  if (!hit) throw Object.assign(new Error('no webpage client connected — open the Team Helper drawer in CiCy Desktop'), { exitCode: 3 });
+  _clientID = hit.client_id;
+  return _clientID;
+}
+
+// Run `agent-webpage exec-js '<jsExpr>' <client_id> --json`, returns
+// whatever the page returned (already unwrapped from the wire envelope).
+async function callPage(jsExpr) {
+  const clientID = await pickClient();
   return new Promise((resolve, reject) => {
-    const child = spawn('agent-webpage', ['exec-js', jsExpr, '--json'], {
+    const child = spawn('agent-webpage', ['exec-js', jsExpr, clientID, '--json'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
