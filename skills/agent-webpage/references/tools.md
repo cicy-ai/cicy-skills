@@ -17,6 +17,7 @@ Every RPC subcommand:
 | `current-master-agent-id`    | `exec_js`      | `exec_js_result`   |
 | `send <type> <data> [exp]`   | `<type>`       | `<exp>` or any with matching `requestId` |
 | `clients`                    | (none — GET `/api/chat/clients`) | — |
+| `helper-init`                | `exec_js` (auto-resolved web-* client; runs a single payload that returns `{lang, area, isElectron}` — silent, JSON to stdout) | `exec_js_result` |
 
 ## Auth + endpoints
 

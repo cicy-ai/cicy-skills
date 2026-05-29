@@ -10,6 +10,7 @@ agent-webpage exec-js '<js>' [client_id] [--json]
 agent-webpage current-active-agent-id [client_id] [--json]
 agent-webpage current-master-agent-id [client_id] [--json]
 agent-webpage send <type> '<data_json>' [client_id] [expect_type] [--json]
+agent-webpage helper-init [--json]
 agent-webpage --help / -h / help
 agent-webpage tools
 ```

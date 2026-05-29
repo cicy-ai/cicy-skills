@@ -41,6 +41,7 @@ const DEFAULT_TIMEOUT = Number(process.env.CICY_AGENT_TIMEOUT_MS || 15000);
       case 'current-active-agent-id':     await cmdReadField(rest, 'activeCliPaneId'); break;
       case 'current-master-agent-id':     await cmdReadField(rest, 'masterAgentId');   break;
       case 'send':                        await cmdSend(rest);             break;
+      case 'helper-init': case 'helper_init': await cmdHelperInit(rest);   break;
       default: bail(`unknown command: ${cmd}. Try agent-webpage --help.`, 2);
     }
   } catch (e) {
@@ -248,6 +249,58 @@ async function cmdReadField(args, field) {
 }
 
 // ── send ────────────────────────────────────────────────────────────────
+
+// ── helper-init ─────────────────────────────────────────────────────────
+//
+// One-shot bootstrap for the Team Helper opening protocol. Resolves the
+// first connected web-* client (Electron / non-Electron — unlike
+// resolveTarget which excludes Electron) and runs ONE exec_js round-trip
+// that returns { lang, area, isElectron } in a single payload. Replaces
+// the old "clients → exec-js navigator.language → ipinfo" chain which
+// Big Pickle Zen kept short-circuiting into a single ipinfo call.
+//
+// Output is JSON to stdout — the agent reads it programmatically and
+// never echoes it to the chat user.
+async function cmdHelperInit(args) {
+  void args;
+  const clients = await chatClients();
+  const target = clients.find((c) =>
+    c?.client_id?.startsWith('web-') && !c.client_id.endsWith(':code-ext')
+  );
+  if (!target) throw Object.assign(new Error('no webpage client connected'), { exitCode: 3 });
+  const code = `(async () => {
+    const lang = navigator.language || '';
+    const isElectron = !!(window.cicy || /Electron/i.test(navigator.userAgent || ''));
+    let area = '';
+    try {
+      const r = await fetch('https://ipinfo.io/json');
+      if (r.ok) {
+        const p = await r.json();
+        area = [p.country, p.region, p.city].filter(Boolean).join('/');
+      }
+    } catch (e) {}
+    return { lang, area, isElectron };
+  })()`;
+  const msg = await rpc({
+    clientID: target.client_id,
+    type: 'exec_js', data: { code },
+    expectType: 'exec_js_result',
+  });
+  const data = msg?.data || {};
+  if (data.error) {
+    if (json) return ok({ ok: false, error: data.error });
+    bail(`helper-init error: ${data.error}`, 4);
+  }
+  // SPA's exec_js handler returns the result in `data.result` as a string.
+  // For helper-init the page-side code returns an object that the handler
+  // JSON.stringifies, so we just re-parse here.
+  let value = {};
+  if (typeof data.result === 'string' && data.result.length > 0) {
+    try { value = JSON.parse(data.result); } catch { value = { raw: data.result }; }
+  }
+  if (json) return ok(value);
+  console.log(JSON.stringify(value));
+}
 
 async function cmdSend(args) {
   if (args.length < 2) throw Object.assign(new Error("Usage: agent-webpage send <type> '<data_json>' [client_id] [expect_type]"), { exitCode: 2 });
