@@ -180,9 +180,21 @@ async function cmdReply(args, node) {
   else console.log(data?.text || JSON.stringify(data, null, 2));
 }
 
+// Stamp the sender id (set inside cicy panes) so the receiver can skim who
+// messaged in a busy pane. Format: `📨 [w-10029] hello`.
+// Idempotent: leaves the text alone if it already carries either marker
+// (the receiver may forward the stamped text back to us).
+function stampSender(text) {
+  const senderID = (process.env.X_AGENT_SHORT_ID || '').trim();
+  if (!senderID) return { text, senderID: '' };
+  if (text.startsWith('📨 ') || text.startsWith(`[${senderID}]`)) return { text, senderID };
+  return { text: `📨 [${senderID}] ${text}`, senderID };
+}
+
 async function cmdMsg(args, node) {
-  // Default ON: callback (reply routes back to the sender) + a [sender] prefix
-  // so the recipient knows who messaged. Disable callback with --no-callback.
+  // Default ON: callback (reply routes back to the sender) + a 📨 [sender]
+  // prefix so the recipient knows who messaged. Disable callback with
+  // --no-callback.
   let callback = true;
   const filtered = [];
   for (const a of args) {
@@ -191,16 +203,7 @@ async function cmdMsg(args, node) {
     else filtered.push(a);
   }
   if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--no-callback]'), { exitCode: 2 });
-  const senderID = (process.env.X_AGENT_SHORT_ID || '').trim();
-  let text = filtered.slice(1).join(' ');
-  // Stamp the sender id (set inside cicy panes) so the receiver sees who sent it.
-  // Format: `📨 [w-10029] hello` — the envelope makes the line skim-readable
-  // in a busy tmux pane (vs. logs, webhooks, manual typing).
-  // Idempotent: skip stamping if the message already carries either marker
-  // (the receiver may forward the stamped text back to us).
-  if (senderID && !text.startsWith('📨 ') && !text.startsWith(`[${senderID}]`)) {
-    text = `📨 [${senderID}] ${text}`;
-  }
+  const { text, senderID } = stampSender(filtered.slice(1).join(' '));
   const payload = { pane_id: filtered[0], text };
   // callback_to only works with a sender id; outside a pane (no env) it's skipped.
   if (callback && senderID) payload.callback_to = senderID;
@@ -212,7 +215,9 @@ async function cmdMsg(args, node) {
 async function cmdMsgWait(args, node) {
   if (args.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg_wait <pane> <text> [timeout]'), { exitCode: 2 });
   const target = args[0];
-  const text = args[1];
+  // Same 📨 [sender] stamping as `msg` — msg_wait is a synchronous request
+  // but the receiver still benefits from knowing who's asking.
+  const { text } = stampSender(args[1]);
   const timeout = args[2] ? parseInt(args[2], 10) : 60;
   const data = await api('POST', '/api/tmux/send_wait', { target, text, timeout }, node);
   if (json) return ok(data);
