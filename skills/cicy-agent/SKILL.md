@@ -15,8 +15,9 @@ Use this skill for:
 - listing panes / windows / tree
 - capturing pane output
 - sending text or keys to a pane
-- sending a chat message (`msg`) to another pane
-- waiting for a recipient pane's reply (`msg_wait`)
+- sending a chat message (`msg`) to another pane (fire-and-forget; with
+  `--callback` the receiver's pane writes `[<them>] work done` back to you
+  when their next turn finishes)
 - restarting all panes / clearing one
 
 ## Rules
