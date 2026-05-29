@@ -138,10 +138,25 @@ async function pickClient() {
   let parsed;
   try { parsed = JSON.parse(out.trim()); } catch (e) { throw new Error(`agent-webpage clients produced non-JSON: ${out.trim().slice(0,200)}`); }
   const list = parsed?.data || parsed?.clients || (Array.isArray(parsed) ? parsed : []);
-  const hit = list.find((c) =>
+  const eligible = list.filter((c) =>
     c?.client_id && c.client_id.startsWith('web-') && !c.client_id.endsWith(':code-ext')
   );
-  if (!hit) throw Object.assign(new Error('no webpage client connected — open the Team Helper drawer in CiCy Desktop'), { exitCode: 3 });
+  if (eligible.length === 0) {
+    throw Object.assign(new Error('no webpage client connected — open the Team Helper drawer in CiCy Desktop'), { exitCode: 3 });
+  }
+  // Prefer the client tied to the current pane. CICY_PANE_ID is set by
+  // cicy-code's shell init for every pane (e.g. "w-6002:main.0" → take the
+  // short form "w-6002"). The chat hub stamps each connecting client with
+  // its master pane as non_routing_master_agent_id_display_only — picking
+  // by that avoids landing on an unrelated webview (e.g. a master 'Claude'
+  // tab whose SPA may be a different build that doesn't await Promises in
+  // exec_js, producing '[object Promise]').
+  const pane = String(process.env.CICY_PANE_ID || '').split(':')[0];
+  let hit = null;
+  if (pane) {
+    hit = eligible.find((c) => c?.non_routing_master_agent_id_display_only === pane);
+  }
+  if (!hit) hit = eligible[0]; // fall back to any web-* client
   _clientID = hit.client_id;
   return _clientID;
 }
