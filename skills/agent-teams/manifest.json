@@ -1,0 +1,61 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "agent-teams",
+  "version": "1.0.0",
+  "title": "Agent Teams",
+  "description": "Manage local cicy-code teams from the Team Helper pane. Subcommands wrap window.cicy.localTeams.* IPCs (list/add/remove/update/upgrade/open) so the agent doesn't hand-roll JS.",
+  "category": "agent",
+  "tags": [
+    "teams",
+    "team-helper",
+    "agent-bridge",
+    "cicy-desktop"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-teams",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=22"
+  },
+  "system_requirements": [
+    "agent-webpage"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/agent-teams",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "团队管理",
+      "description": "在团队小助手 (w-6002) opencode pane 中管理本机 cicy-code 团队：list / add / remove / update / upgrade / open，子命令包装 window.cicy.localTeams.* IPC。"
+    }
+  },
+  "tools": [
+    {
+      "name": "list",
+      "example": "agent-teams list",
+      "description": "List local teams with status + version"
+    },
+    {
+      "name": "add",
+      "example": "agent-teams add --name 本地团队 --base-url http://127.0.0.1:8008 --token cicy_xxx",
+      "description": "Register a new local team (dedupes by base_url — same URL upserts the token)"
+    },
+    {
+      "name": "upgrade",
+      "example": "agent-teams upgrade local-8008",
+      "description": "Download newest cicy-code binary, swap symlink, restart daemon"
+    }
+  ]
+}
