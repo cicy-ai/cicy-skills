@@ -9,8 +9,7 @@ cicy-agent tree                               Tree (JSON)
 cicy-agent windows                            Window list (JSON)
 cicy-agent capture <pane>                     Capture raw pane text
 cicy-agent reply <pane> [--full]              Last reply text from pane (parsed)
-cicy-agent msg <pane> <text> [--callback]     Send chat message
-cicy-agent msg_wait <pane> <text> [timeout]   Send and await turn completion
+cicy-agent msg <pane> <text> [--callback]     Send chat message (fire-and-forget)
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
 cicy-agent restart                            Restart all panes
 cicy-agent clear <pane>                       Clear pane

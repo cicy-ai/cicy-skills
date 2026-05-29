@@ -22,8 +22,7 @@ cicy-agent reply w-10001         # last reply (parsed)
 cicy-agent reply w-10001 --full  # include tool_use entries
 
 cicy-agent msg w-10002 'hello there'
-cicy-agent msg w-10002 'do this' --callback   # notify me when done
-cicy-agent msg_wait w-10002 'one-shot question' 60
+cicy-agent msg w-10002 'do this' --callback   # notify me when their next turn finishes
 
 cicy-agent send-keys w-10001 'ls -la' Enter
 cicy-agent clear w-10001

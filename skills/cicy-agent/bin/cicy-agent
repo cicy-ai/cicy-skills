@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
-// Subcommands: list / ls / tree / windows / capture / reply / msg / msg_wait /
+// Subcommands: list / ls / tree / windows / capture / reply / msg /
 //              send-keys / create / restart / clear
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -35,7 +35,6 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'capture':            await cmdCapture(r2, node); break;
       case 'reply':              await cmdReply(r2, node); break;
       case 'msg':                await cmdMsg(r2, node); break;
-      case 'msg_wait':           await cmdMsgWait(r2, node); break;
       case 'send-keys':          await cmdSendKeys(r2, node); break;
       case 'restart':            await cmdRestart(r2, node); break;
       case 'clear':               await cmdClear(r2, node); break;
@@ -57,7 +56,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msg_wait|send-keys|restart|clear> [args...] [--node NAME]\n'); }
+  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|send-keys|restart|clear> [args...] [--node NAME]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -210,18 +209,6 @@ async function cmdMsg(args, node) {
   const data = await api('POST', '/api/tmux/send', payload, node);
   if (json) return ok(data);
   console.log(typeof data === 'string' ? data : JSON.stringify(data));
-}
-
-async function cmdMsgWait(args, node) {
-  if (args.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg_wait <pane> <text> [timeout]'), { exitCode: 2 });
-  const target = args[0];
-  // Same 📨 [sender] stamping as `msg` — msg_wait is a synchronous request
-  // but the receiver still benefits from knowing who's asking.
-  const { text } = stampSender(args[1]);
-  const timeout = args[2] ? parseInt(args[2], 10) : 60;
-  const data = await api('POST', '/api/tmux/send_wait', { target, text, timeout }, node);
-  if (json) return ok(data);
-  console.log(typeof data === 'string' ? data : JSON.stringify(data, null, 2));
 }
 
 async function cmdSendKeys(args, node) {
