@@ -144,21 +144,34 @@ async function pickClient() {
   if (eligible.length === 0) {
     throw Object.assign(new Error('no webpage client connected — open the Team Helper drawer in CiCy Desktop'), { exitCode: 3 });
   }
-  // Prefer the client tied to the current pane. CICY_PANE_ID is set by
-  // cicy-code's shell init for every pane (e.g. "w-6002:main.0" → take the
-  // short form "w-6002"). The chat hub stamps each connecting client with
-  // its master pane as non_routing_master_agent_id_display_only — picking
-  // by that avoids landing on an unrelated webview (e.g. a master 'Claude'
-  // tab whose SPA may be a different build that doesn't await Promises in
-  // exec_js, producing '[object Promise]').
-  const pane = String(process.env.CICY_PANE_ID || '').split(':')[0];
-  let hit = null;
+  // Pick the client tied to THIS pane. Two host environments can connect a
+  // webpage client at the same time (e.g. cicy-desktop's Team Helper drawer
+  // + a separate Claude master tab), and not all of them target our IPC
+  // surface — some 'web-*' clients are on SPAs that don't even await
+  // Promises in exec_js, returning '[object Promise]'. So we MUST identify
+  // the one for the current pane and refuse to guess if we can't.
+  //
+  // Sources of "current pane", in order:
+  //   1. $CICY_PANE_ID  (set by cicy-code shell init, but opencode may not
+  //                      propagate it through Bash tool calls)
+  //   2. process.cwd() — opencode pane's workspace is ~/cicy-ai/workers/w-XXXX
+  const fromEnv = String(process.env.CICY_PANE_ID || '').split(':')[0];
+  const cwdMatch = process.cwd().match(/workers\/(w-\d+)/);
+  const fromCwd = cwdMatch ? cwdMatch[1] : '';
+  const pane = fromEnv || fromCwd;
+
   if (pane) {
-    hit = eligible.find((c) => c?.non_routing_master_agent_id_display_only === pane);
+    const matched = eligible.find((c) => c?.non_routing_master_agent_id_display_only === pane);
+    if (matched) { _clientID = matched.client_id; return _clientID; }
+    throw Object.assign(new Error(
+      `no webpage client connected for ${pane} (eligible clients are on: ${eligible.map(c => c?.non_routing_master_agent_id_display_only || '?').join(', ')}). Open the Team Helper drawer for this pane in CiCy Desktop.`
+    ), { exitCode: 3 });
   }
-  if (!hit) hit = eligible[0]; // fall back to any web-* client
-  _clientID = hit.client_id;
-  return _clientID;
+  // No pane hint: only safe if there's exactly one eligible client.
+  if (eligible.length === 1) { _clientID = eligible[0].client_id; return _clientID; }
+  throw Object.assign(new Error(
+    `multiple webpage clients connected; CICY_PANE_ID not set and cwd not under ~/cicy-ai/workers/w-* — refusing to guess. Run from a pane workspace or set CICY_PANE_ID.`
+  ), { exitCode: 3 });
 }
 
 // Run `agent-webpage exec-js '<jsExpr>' <client_id> --json`, returns

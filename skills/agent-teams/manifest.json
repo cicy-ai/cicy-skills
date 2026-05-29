@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-teams",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "title": "Agent Teams",
   "description": "Manage local cicy-code teams from the Team Helper pane. Subcommands wrap window.cicy.localTeams.* IPCs (list/add/remove/update/upgrade/open) so the agent doesn't hand-roll JS.",
   "category": "agent",
