@@ -269,17 +269,45 @@ async function cmdHelperInit(args) {
   );
   if (!target) throw Object.assign(new Error('no webpage client connected'), { exitCode: 3 });
   const code = `(async () => {
+    const ua = navigator.userAgent || '';
     const lang = navigator.language || '';
-    const isElectron = !!(window.cicy || /Electron/i.test(navigator.userAgent || ''));
+    const isElectron = !!(window.cicy || /Electron/i.test(ua));
+    let os = 'unknown', arch = 'amd64';
+    if (/Windows/i.test(ua))      os = 'windows';
+    else if (/Mac/i.test(ua))     os = 'darwin';
+    else if (/Linux/i.test(ua))   os = 'linux';
+    if (/arm64|aarch64/i.test(ua)) arch = 'arm64';
+    if (navigator.userAgentData && typeof navigator.userAgentData.getHighEntropyValues === 'function') {
+      try {
+        const v = await navigator.userAgentData.getHighEntropyValues(['architecture']);
+        if (v && v.architecture === 'arm') arch = 'arm64';
+      } catch (e) {}
+    }
+    const ping = async (u, ms) => {
+      try {
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), ms);
+        const r = await fetch(u, { signal: c.signal, cache: 'no-store' });
+        clearTimeout(t);
+        return r.ok || r.status === 401;
+      } catch (e) { return false; }
+    };
+    const [ipinfo, github, dockerhub] = await Promise.all([
+      (async () => {
+        try {
+          const c = new AbortController();
+          const t = setTimeout(() => c.abort(), 3000);
+          const r = await fetch('https://ipinfo.io/json', { signal: c.signal });
+          clearTimeout(t);
+          return r.ok ? await r.json() : null;
+        } catch (e) { return null; }
+      })(),
+      ping('https://api.github.com/zen', 3000),
+      ping('https://hub.docker.com/v2/repositories/library/hello-world/', 3000),
+    ]);
     let area = '';
-    try {
-      const r = await fetch('https://ipinfo.io/json');
-      if (r.ok) {
-        const p = await r.json();
-        area = [p.country, p.region, p.city].filter(Boolean).join('/');
-      }
-    } catch (e) {}
-    return { lang, area, isElectron };
+    if (ipinfo) area = [ipinfo.country, ipinfo.region, ipinfo.city].filter(Boolean).join('/');
+    return { lang, area, isElectron, os, arch, github, dockerhub };
   })()`;
   const msg = await rpc({
     clientID: target.client_id,
