@@ -20,6 +20,12 @@ const argsNoJson = argv.filter((a) => a !== '--json');
 const subcmd = argsNoJson[0];
 const rest = argsNoJson.slice(1);
 
+// Hoisted out of pickClient() because the IIFE below runs synchronously
+// until the first await — it calls pickClient() before the script's
+// top-level top-down execution reaches the declaration line, which
+// would otherwise throw TDZ.
+let _clientID = null;
+
 (async () => {
   try {
     switch (subcmd) {
@@ -118,7 +124,7 @@ function parseFlags(args, schema) {
 // cicy-desktop's webview where the SPA happily handles exec_js), we accept
 // any non-`:code-ext` client whose id starts with `web-`. Memoised per
 // process so list/add/upgrade in one shell share the lookup.
-let _clientID = null;
+// (_clientID is declared at the top of the file — see hoisting comment.)
 async function pickClient() {
   if (_clientID) return _clientID;
   const out = await new Promise((resolve, reject) => {
