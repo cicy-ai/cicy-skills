@@ -1,0 +1,75 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "agent-identity",
+  "version": "1.0.0",
+  "title": "Agent Identity",
+  "description": "Report local AI CLI identities (claude, codex, opencode, kiro) by reading each CLI auth/config files. Prints identifiers only; tokens, API keys and client secrets are always redacted.",
+  "category": "agent",
+  "tags": [
+    "identity",
+    "auth",
+    "claude",
+    "codex",
+    "opencode",
+    "kiro"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-identity",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/agent-identity",
+  "permissions": [
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Agent 身份",
+      "description": "读取本机已装 AI CLI(claude / codex / opencode / kiro)各自的 auth/config 文件,报告它们的 client id / device id / 账号标识。只输出标识符,token、API key、client secret 一律脱敏。"
+    }
+  },
+  "tools": [
+    {
+      "name": "all",
+      "example": "agent-identity",
+      "description": "Report identity for all four CLIs (claude, codex, opencode, kiro)"
+    },
+    {
+      "name": "claude",
+      "example": "agent-identity claude",
+      "description": "claude-code device userID + OAuth account (uuid/email/org)"
+    },
+    {
+      "name": "codex",
+      "example": "agent-identity codex",
+      "description": "codex auth mode + account id (ChatGPT login)"
+    },
+    {
+      "name": "opencode",
+      "example": "agent-identity opencode",
+      "description": "opencode configured provider names"
+    },
+    {
+      "name": "kiro",
+      "example": "agent-identity kiro",
+      "description": "kiro AWS IdC/SSO OAuth clientId + region + auth method"
+    },
+    {
+      "name": "json",
+      "example": "agent-identity all --json",
+      "description": "Machine-readable JSON output"
+    }
+  ]
+}

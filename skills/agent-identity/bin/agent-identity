@@ -1,0 +1,185 @@
+#!/usr/bin/env node
+// agent-identity — report the local IDENTITY (client id / device id / account)
+// of installed AI CLIs: claude, codex, opencode, kiro.
+//
+// It reads each CLI's own auth/config files under $HOME and prints IDENTIFIERS
+// only. Secrets are NEVER printed: any access/refresh token, API key,
+// clientSecret or password is redacted/omitted. Safe to run and share output.
+//
+// Usage:
+//   agent-identity [all|claude|codex|opencode|kiro] [--json]
+
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const HOME = homedir();
+const argv = process.argv.slice(2);
+const json = argv.includes('--json');
+const wantHelp = argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help';
+const target = (argv.find((a) => !a.startsWith('-')) || 'all').toLowerCase();
+
+if (wantHelp) {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('Usage: agent-identity [all|claude|codex|opencode|kiro] [--json]\n'); }
+  process.exit(0);
+}
+
+function readJSON(p) {
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+}
+
+// claude-code: ~/.claude.json (anon device userID + oauthAccount) and
+// ~/.claude/.credentials.json (subscription + token expiry; tokens redacted).
+function claude() {
+  const out = { agent: 'claude', found: false, sources: [], fields: {} };
+  const cfgP = join(HOME, '.claude.json');
+  const cfg = readJSON(cfgP);
+  if (cfg) {
+    out.found = true; out.sources.push(cfgP);
+    if (cfg.userID) out.fields.device_user_id = cfg.userID;
+    const oa = cfg.oauthAccount || {};
+    if (oa.accountUuid) out.fields.account_uuid = oa.accountUuid;
+    if (oa.emailAddress) out.fields.email = oa.emailAddress;
+    if (oa.organizationUuid) out.fields.org_uuid = oa.organizationUuid;
+    if (oa.organizationType) out.fields.org_type = oa.organizationType;
+    if (oa.displayName) out.fields.display_name = oa.displayName;
+  }
+  const credP = join(HOME, '.claude', '.credentials.json');
+  const cred = readJSON(credP);
+  if (cred?.claudeAiOauth) {
+    out.found = true; out.sources.push(credP);
+    const c = cred.claudeAiOauth;
+    out.fields.logged_in = true;
+    if (c.subscriptionType) out.fields.subscription = c.subscriptionType;
+    if (c.expiresAt) out.fields.token_expires_at = new Date(c.expiresAt).toISOString();
+  } else if (out.found) {
+    out.fields.logged_in = false; // config present but no OAuth creds (e.g. gateway mode)
+  }
+  return out;
+}
+
+// codex (@openai/codex): ~/.codex/installation_id is a per-install DEVICE id
+// (UUID) written on first run, present even without login. ~/.codex/auth.json
+// holds the login mode (apikey | chatgpt); the API key is never printed, and
+// for ChatGPT login the account id (if any) is shown.
+function codex() {
+  const out = { agent: 'codex', found: false, sources: [], fields: {} };
+  const idP = join(HOME, '.codex', 'installation_id');
+  if (existsSync(idP)) {
+    const id = (readFileSync(idP, 'utf8') || '').trim();
+    if (id) { out.found = true; out.sources.push(idP); out.fields.installation_id = id; }
+  }
+  const p = join(HOME, '.codex', 'auth.json');
+  const a = readJSON(p);
+  if (a) {
+    out.found = true; out.sources.push(p);
+    out.fields.auth_mode = a.auth_mode || (a.OPENAI_API_KEY ? 'apikey' : 'unknown');
+    const tok = a.tokens || {};
+    if (tok.account_id) out.fields.account_id = tok.account_id;
+    out.fields.logged_in = true;
+  } else {
+    out.fields.logged_in = false;
+    if (!out.found) out.fields.note = 'not installed (no ~/.codex/)';
+  }
+  return out;
+}
+
+// opencode (opencode-ai): its account identity lives in a sqlite db
+// (~/.local/share/opencode/opencode.db → account / account_state tables), not a
+// flat file. We read account_state.active_account_id + account.{id,email} via
+// the built-in node:sqlite (read-only); tokens in the db are never read. Older
+// opencode also kept a provider auth.json — checked as a fallback.
+async function opencode() {
+  const out = { agent: 'opencode', found: false, sources: [], fields: {} };
+  for (const p of [
+    join(HOME, '.local', 'share', 'opencode', 'auth.json'),
+    join(HOME, '.config', 'opencode', 'auth.json'),
+  ]) {
+    const a = readJSON(p);
+    if (a && typeof a === 'object') {
+      out.found = true; out.sources.push(p);
+      out.fields.providers = Object.keys(a);
+    }
+  }
+  const dbP = join(HOME, '.local', 'share', 'opencode', 'opencode.db');
+  if (existsSync(dbP)) {
+    try {
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(dbP, { readOnly: true });
+      try {
+        const hasTable = (n) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(n);
+        if (hasTable('account_state')) {
+          const s = db.prepare('SELECT active_account_id, active_org_id FROM account_state LIMIT 1').get();
+          if (s?.active_account_id) out.fields.active_account_id = s.active_account_id;
+          if (s?.active_org_id) out.fields.active_org_id = s.active_org_id;
+        }
+        if (hasTable('account')) {
+          const acct = db.prepare('SELECT id, email FROM account LIMIT 1').get();
+          if (acct?.id || acct?.email) {
+            out.found = true; out.sources.push(dbP);
+            if (acct.id) out.fields.account_id = acct.id;
+            if (acct.email) out.fields.email = acct.email;
+            out.fields.logged_in = true;
+          }
+        }
+      } finally { db.close(); }
+    } catch { /* node:sqlite unavailable or db busy — skip the db probe */ }
+  }
+  if (!out.found) out.fields.note = 'not logged in (no opencode account/auth)';
+  return out;
+}
+
+// kiro (AWS IdC / SSO device auth): ~/.aws/sso/cache/kiro-auth-token-cli.json
+// points at a registration file <clientIdHash>.json that holds the real
+// OAuth clientId. clientSecret + tokens are never printed.
+function kiro() {
+  const out = { agent: 'kiro', found: false, sources: [], fields: {} };
+  const dir = join(HOME, '.aws', 'sso', 'cache');
+  const tokP = join(dir, 'kiro-auth-token-cli.json');
+  const tok = readJSON(tokP);
+  if (tok) {
+    out.found = true; out.sources.push(tokP);
+    if (tok.region) out.fields.region = tok.region;
+    if (tok.authMethod) out.fields.auth_method = tok.authMethod;
+    if (tok.clientIdHash) out.fields.client_id_hash = tok.clientIdHash;
+    if (tok.expiresAt) out.fields.token_expires_at = tok.expiresAt;
+    const regP = join(dir, (tok.clientIdHash || '') + '.json');
+    const reg = readJSON(regP);
+    if (reg) {
+      out.sources.push(regP);
+      if (reg.clientId) out.fields.client_id = reg.clientId;
+      if (reg.expiresAt) out.fields.registration_expires_at = reg.expiresAt;
+    }
+  } else {
+    out.fields.note = 'not logged in (no ~/.aws/sso/cache/kiro-auth-token-cli.json)';
+  }
+  return out;
+}
+
+const resolvers = { claude, codex, opencode, kiro };
+
+(async () => {
+  let results;
+  if (target === 'all') {
+    results = [];
+    for (const f of Object.values(resolvers)) results.push(await f());
+  } else if (resolvers[target]) {
+    results = [await resolvers[target]()];
+  } else {
+    process.stderr.write(`agent-identity: unknown agent "${target}". Use: all|claude|codex|opencode|kiro\n`);
+    process.exit(2);
+  }
+
+  if (json) {
+    process.stdout.write(JSON.stringify({ ok: true, results }, null, 2) + '\n');
+    return;
+  }
+  for (const r of results) {
+    process.stdout.write(`\n${r.agent}${r.found ? '' : '  (not found)'}\n`);
+    for (const [k, v] of Object.entries(r.fields)) {
+      process.stdout.write(`  ${k.padEnd(24)} ${Array.isArray(v) ? v.join(', ') : v}\n`);
+    }
+    if (r.sources.length) process.stdout.write(`  ${'source'.padEnd(24)} ${r.sources.join(', ')}\n`);
+  }
+})();
