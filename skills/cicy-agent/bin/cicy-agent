@@ -194,7 +194,13 @@ async function cmdMsg(args, node) {
   const senderID = (process.env.X_AGENT_SHORT_ID || '').trim();
   let text = filtered.slice(1).join(' ');
   // Stamp the sender id (set inside cicy panes) so the receiver sees who sent it.
-  if (senderID && !text.startsWith(`[${senderID}]`)) text = `[${senderID}] ${text}`;
+  // Format: `📨 [w-10029] hello` — the envelope makes the line skim-readable
+  // in a busy tmux pane (vs. logs, webhooks, manual typing).
+  // Idempotent: skip stamping if the message already carries either marker
+  // (the receiver may forward the stamped text back to us).
+  if (senderID && !text.startsWith('📨 ') && !text.startsWith(`[${senderID}]`)) {
+    text = `📨 [${senderID}] ${text}`;
+  }
   const payload = { pane_id: filtered[0], text };
   // callback_to only works with a sender id; outside a pane (no env) it's skipped.
   if (callback && senderID) payload.callback_to = senderID;
