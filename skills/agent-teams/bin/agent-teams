@@ -1,0 +1,241 @@
+#!/usr/bin/env node
+// agent-teams — manage the user's local cicy-code teams from inside the
+// Team Helper opencode pane (w-6002).
+//
+// Thin wrapper around `agent-webpage exec-js` so the LLM doesn't have to
+// hand-roll `(async () => await window.cicy.localTeams.<verb>(...))()`
+// every time. One subcommand per IPC verb, stable text + --json output.
+
+import { spawn } from 'node:child_process';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+const argsNoJson = argv.filter((a) => a !== '--json');
+const subcmd = argsNoJson[0];
+const rest = argsNoJson.slice(1);
+
+(async () => {
+  try {
+    switch (subcmd) {
+      case 'list':    await cmdList(); break;
+      case 'add':     await cmdAdd(rest); break;
+      case 'remove':  await cmdRemove(rest); break;
+      case 'update':  await cmdUpdate(rest); break;
+      case 'upgrade': await cmdUpgrade(rest); break;
+      case 'open':    await cmdOpen(rest); break;
+      case 'tools':   printTools(); break;
+      default:        bail(`unknown command: ${subcmd}. Try agent-teams --help`, 2);
+    }
+  } catch (e) {
+    bail(e.message || String(e), e.exitCode || 1);
+  }
+})();
+
+// ── helpers ────────────────────────────────────────────────────────────
+
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+  else      process.stderr.write(`agent-teams: ${msg}\n`);
+  process.exit(code);
+}
+
+function ok(data) {
+  if (json) process.stdout.write(JSON.stringify({ ok: true, data }) + '\n');
+}
+
+function printHelp() {
+  process.stdout.write(
+    [
+      'Manage the user\'s local cicy-code teams.',
+      '',
+      'Usage:',
+      '  agent-teams list [--json]',
+      '  agent-teams add --name <name> --base-url <url> [--token <tok>]',
+      '                  [--source <install_source>]',
+      '                  [--os <darwin|linux|windows>] [--arch <amd64|arm64>]',
+      '                  [--path <install_path>] [--container <name>] [--image <ref>]',
+      '                  [--json]',
+      '  agent-teams update <id> [--name X] [--base-url X] [--token X] [--json]',
+      '  agent-teams remove <id> [--json]',
+      '  agent-teams upgrade <id> [--json]',
+      '  agent-teams open <id> [--json]',
+      '',
+      'All commands round-trip through agent-webpage exec-js to the connected',
+      'cicy-desktop, which is authoritative for `~/cicy-ai/global.json` writes.',
+      '',
+    ].join('\n')
+  );
+}
+
+function printTools() {
+  process.stdout.write(
+    [
+      '# agent-teams — tools',
+      '',
+      'Each subcommand sends one round-trip through agent-webpage exec-js,',
+      'which goes via the chat WebSocket to the cicy-desktop renderer,',
+      'which calls the matching window.cicy.localTeams.* IPC.',
+      '',
+      '| subcmd   | window.cicy.localTeams call            | renderer effect |',
+      '|----------|----------------------------------------|-----------------|',
+      '| list     | list({ refresh: true })                | none            |',
+      '| add      | add({...spec})                         | refreshes list  |',
+      '| remove   | remove(id)                             | refreshes list  |',
+      '| update   | update(id, {...patch})                 | refreshes list  |',
+      '| upgrade  | upgrade(id)                            | refreshes list  |',
+      '| open     | open(id)                               | spawns window   |',
+      '',
+    ].join('\n')
+  );
+}
+
+// Parse flag-style args. Returns { positional, flags } where flags is an
+// object keyed by canonical name. Supports both --flag value and --flag=value.
+function parseFlags(args, schema) {
+  const positional = [];
+  const flags = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith('--')) { positional.push(a); continue; }
+    const eq = a.indexOf('=');
+    let name, value;
+    if (eq !== -1) { name = a.slice(2, eq); value = a.slice(eq + 1); }
+    else            { name = a.slice(2); value = args[++i]; }
+    const canonical = schema[name] || name;
+    flags[canonical] = value;
+  }
+  return { positional, flags };
+}
+
+// Run `agent-webpage exec-js '<jsExpr>' --json`, returns whatever the page
+// returned (already unwrapped from the wire envelope).
+function callPage(jsExpr) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('agent-webpage', ['exec-js', jsExpr, '--json'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        return reject(Object.assign(new Error(`agent-webpage exited ${code}: ${stderr.trim() || stdout.trim()}`), { exitCode: 4 }));
+      }
+      let env;
+      try { env = JSON.parse(stdout.trim()); } catch (e) {
+        return reject(Object.assign(new Error(`agent-webpage produced non-JSON: ${stdout.trim().slice(0,200)}`), { exitCode: 5 }));
+      }
+      if (env.ok === false) {
+        return reject(Object.assign(new Error(env.error?.message || env.error || 'exec_js failed'), { exitCode: 4 }));
+      }
+      // agent-webpage --json envelope: { ok, data: { requestId, result } }
+      // SPA's exec_js handler JSON.stringify(...)es objects, so `result` is
+      // typically a JSON string. Try to parse one level; fall back to raw.
+      const raw = env.data?.result;
+      let value = raw;
+      if (typeof raw === 'string' && raw.length > 0) {
+        try { value = JSON.parse(raw); } catch { value = raw; }
+      }
+      resolve(value);
+    });
+  });
+}
+
+// ── commands ───────────────────────────────────────────────────────────
+
+async function cmdList() {
+  const teams = await callPage(
+    `(async () => await window.cicy.localTeams.list({ refresh: true }))()`
+  );
+  if (json) return ok(teams);
+  const rows = Array.isArray(teams) ? teams : (teams?.teams || []);
+  if (rows.length === 0) {
+    console.log('no local teams registered');
+    return;
+  }
+  const cols = ['id', 'name', 'base_url', 'status', 'version'];
+  const widths = cols.map((c) => Math.max(c.length, ...rows.map((r) => String(r[c] ?? '').length)));
+  const pad = (s, w) => String(s ?? '').padEnd(w);
+  console.log(cols.map((c, i) => pad(c.toUpperCase(), widths[i])).join('  '));
+  console.log(widths.map((w) => '-'.repeat(w)).join('  '));
+  for (const r of rows) console.log(cols.map((c, i) => pad(r[c] ?? '-', widths[i])).join('  '));
+  console.log(`\n(${rows.length} team${rows.length === 1 ? '' : 's'})`);
+}
+
+async function cmdAdd(args) {
+  const { flags } = parseFlags(args, {
+    name: 'name', 'base-url': 'base_url', url: 'base_url', token: 'api_token',
+    source: 'install_source', os: 'install_os', arch: 'install_arch',
+    path: 'install_path', container: 'container_name', image: 'image',
+  });
+  if (!flags.base_url) bail('--base-url is required', 2);
+  const spec = {};
+  for (const k of ['name', 'base_url', 'api_token', 'install_source', 'install_os', 'install_arch', 'install_path', 'container_name', 'image']) {
+    if (flags[k] !== undefined) spec[k] = flags[k];
+  }
+  const result = await callPage(
+    `(async () => await window.cicy.localTeams.add(${JSON.stringify(spec)}))()`
+  );
+  if (json) return ok(result);
+  if (!result || result.ok === false) bail(result?.error || 'add failed');
+  console.log(`✔ ${result.upserted ? 'upserted' : 'added'} ${result.id}  ${result.team?.base_url || ''}`);
+}
+
+async function cmdRemove(args) {
+  const id = args.find((a) => !a.startsWith('--'));
+  if (!id) bail('usage: agent-teams remove <id>', 2);
+  const result = await callPage(
+    `(async () => await window.cicy.localTeams.remove(${JSON.stringify(id)}))()`
+  );
+  if (json) return ok(result);
+  if (!result || result.ok === false) bail(result?.error || 'remove failed');
+  console.log(result.removed ? `✔ removed ${id}` : `✔ already absent: ${id}`);
+}
+
+async function cmdUpdate(args) {
+  const id = args.find((a) => !a.startsWith('--'));
+  if (!id) bail('usage: agent-teams update <id> [--name X] [--token X] [--base-url X]', 2);
+  const { flags } = parseFlags(args.filter((a) => a !== id), {
+    name: 'name', token: 'api_token', 'base-url': 'base_url', url: 'base_url',
+    source: 'install_source', os: 'install_os', arch: 'install_arch',
+    path: 'install_path', container: 'container_name', image: 'image',
+  });
+  const patch = {};
+  for (const k of Object.keys(flags)) patch[k] = flags[k];
+  if (Object.keys(patch).length === 0) bail('no fields to update — pass at least one --flag', 2);
+  const result = await callPage(
+    `(async () => await window.cicy.localTeams.update(${JSON.stringify(id)}, ${JSON.stringify(patch)}))()`
+  );
+  if (json) return ok(result);
+  if (!result || result.ok === false) bail(result?.error || 'update failed');
+  console.log(`✔ updated ${id}  (${Object.keys(patch).join(', ')})`);
+}
+
+async function cmdUpgrade(args) {
+  const id = args.find((a) => !a.startsWith('--'));
+  if (!id) bail('usage: agent-teams upgrade <id>', 2);
+  const result = await callPage(
+    `(async () => await window.cicy.localTeams.upgrade(${JSON.stringify(id)}))()`
+  );
+  if (json) return ok(result);
+  if (!result || result.ok === false) bail(result?.error || 'upgrade failed');
+  console.log(`✔ upgraded ${id}${result.version ? `  → v${result.version}` : ''}`);
+}
+
+async function cmdOpen(args) {
+  const id = args.find((a) => !a.startsWith('--'));
+  if (!id) bail('usage: agent-teams open <id>', 2);
+  const result = await callPage(
+    `(async () => await window.cicy.localTeams.open(${JSON.stringify(id)}))()`
+  );
+  if (json) return ok(result);
+  if (!result || result.ok === false) bail(result?.error || 'open failed');
+  console.log(`✔ opened ${id}${result.windowId ? `  (win=${result.windowId})` : ''}`);
+}
