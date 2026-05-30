@@ -1,0 +1,78 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cicy-r2",
+  "version": "1.0.0",
+  "title": "CiCy R2",
+  "description": "Upload, download, list, and manage objects in the project Cloudflare R2 bucket (public CDN at r2.deepfetch.de5.net). Global-friendly replacement for the arrears-prone Tencent COS bucket.",
+  "category": "cloud",
+  "tags": [
+    "cloudflare",
+    "r2",
+    "cdn",
+    "object-storage",
+    "assets"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-r2",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "python3",
+    "npx"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/cicy-r2",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/db/r2.json",
+    "secret_fields": [
+      "api_token"
+    ]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "CiCy R2",
+      "description": "上传、下载、列出和管理项目的 Cloudflare R2 存储桶对象（公网 CDN r2.deepfetch.de5.net）。面向全球分发，替代易欠费冻结的腾讯云 COS — 永久免费额度、无 ICP 屏蔽、CF 边缘缓存。"
+    }
+  },
+  "tools": [
+    {
+      "name": "cicy-r2 put",
+      "example": "cicy-r2 put binaries/manifest.json /tmp/manifest.json",
+      "description": "Upload a local file to R2 under a key"
+    },
+    {
+      "name": "cicy-r2 get",
+      "example": "cicy-r2 get binaries/manifest.json",
+      "description": "Download an R2 object"
+    },
+    {
+      "name": "cicy-r2 list",
+      "example": "cicy-r2 list app/v3/",
+      "description": "List objects (optionally by key prefix) via CF REST API"
+    },
+    {
+      "name": "cicy-r2 url",
+      "example": "cicy-r2 url app/v3/assets/index.js",
+      "description": "Print the public CDN URL for a key"
+    },
+    {
+      "name": "cicy-r2 delete",
+      "example": "cicy-r2 delete tmp/foo",
+      "description": "Delete an R2 object"
+    }
+  ]
+}

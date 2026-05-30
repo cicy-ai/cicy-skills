@@ -1,0 +1,211 @@
+#!/usr/bin/env node
+/**
+ * cicy-r2 — single-file CLI for Cloudflare R2 ops driven by ~/cicy-ai/db/r2.json.
+ *
+ * Subcommands:
+ *   info               print active config (token redacted)
+ *   list [prefix]      list objects via CF REST API (optionally by key prefix)
+ *   put <key> <file>   upload local file to R2 under <key>
+ *   get <key> [out]    download R2 object; out defaults to ./<basename(key)>
+ *   delete <key>       delete object
+ *   url <key>          print the public https URL
+ *   bucket-create <n>  create bucket
+ *   bucket-list        list buckets in the account
+ *   domain-list        list custom domains attached to current bucket
+ *
+ * Config: ~/cicy-ai/db/r2.json
+ *   { account_id, api_token, bucket, public_url }
+ * A single CF Bearer api_token drives everything — no S3 credentials.
+ */
+
+import fs from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import https from "node:https";
+
+const CONFIG_PATH = path.join(homedir(), "cicy-ai", "db", "r2.json");
+// wrangler is invoked from a dir that has node_modules/wrangler installed.
+const WRANGLER_CWD = "/home/cicy/projects/cicy-desktop/workers/render";
+
+function die(msg, code = 1) {
+  console.error(msg);
+  process.exit(code);
+}
+
+function loadConfig() {
+  if (!fs.existsSync(CONFIG_PATH)) die(`config not found: ${CONFIG_PATH}`);
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  } catch (e) {
+    die(`config parse error: ${e.message}`);
+  }
+  for (const k of ["account_id", "api_token", "bucket"]) {
+    if (!cfg[k]) die(`config missing field: ${k}`);
+  }
+  return cfg;
+}
+
+function redact(s, keep = 4) {
+  if (!s) return "";
+  return `${s.slice(0, keep)}…(len=${s.length})`;
+}
+
+function wrangler(cfg, args) {
+  const r = spawnSync("npx", ["wrangler", ...args], {
+    cwd: WRANGLER_CWD,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      CLOUDFLARE_ACCOUNT_ID: cfg.account_id,
+      CLOUDFLARE_API_TOKEN: cfg.api_token,
+    },
+  });
+  return r.status == null ? 1 : r.status;
+}
+
+// GET https://api.cloudflare.com/... with Bearer token, return parsed JSON.
+function cfApi(cfg, urlPath) {
+  return new Promise((resolve, reject) => {
+    const opts = {
+      hostname: "api.cloudflare.com",
+      path: `/client/v4${urlPath}`,
+      method: "GET",
+      headers: { Authorization: `Bearer ${cfg.api_token}` },
+    };
+    const req = https.request(opts, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(new Error(`bad JSON (HTTP ${res.statusCode}): ${body.slice(0, 200)}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function cmdInfo(cfg) {
+  console.log(`  account_id:  ${redact(cfg.account_id)}`);
+  console.log(`  api_token:   ${redact(cfg.api_token)}`);
+  console.log(`  bucket:      ${cfg.bucket || "(unset)"}`);
+  console.log(`  public_url:  ${cfg.public_url || "(unset)"}`);
+}
+
+async function cmdList(cfg, prefix) {
+  let total = 0;
+  let totalBytes = 0;
+  let cursor = "";
+  const base = `/accounts/${cfg.account_id}/r2/buckets/${cfg.bucket}/objects`;
+  for (;;) {
+    let url = `${base}?per_page=1000`;
+    if (prefix) url += `&prefix=${encodeURIComponent(prefix)}`;
+    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+    let body;
+    try {
+      body = await cfApi(cfg, url);
+    } catch (e) {
+      die(`list failed: ${e.message}`);
+    }
+    if (!body.success) die(`list failed: ${JSON.stringify(body.errors)}`);
+    for (const o of body.result || []) {
+      const size = o.size || 0;
+      total++;
+      totalBytes += size;
+      console.log(`  ${o.key.padEnd(50)} ${String(size).padStart(12)} B`);
+    }
+    const info = body.result_info || {};
+    cursor = info.cursor || "";
+    if (!info.is_truncated || !cursor) break;
+  }
+  console.log(`--- ${total} objects, ${(totalBytes / 1e6).toFixed(2)} MB total ---`);
+}
+
+function cmdPut(cfg, key, file) {
+  if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile())
+    die(`file not found: ${file}`);
+  process.exit(wrangler(cfg, ["r2", "object", "put", `${cfg.bucket}/${key}`, "--file", file]));
+}
+
+function cmdGet(cfg, key, out) {
+  const dest = out || path.basename(key);
+  const code = wrangler(cfg, ["r2", "object", "get", `${cfg.bucket}/${key}`, "--file", dest]);
+  if (code === 0) console.log(`saved to ${dest}`);
+  process.exit(code);
+}
+
+function cmdDelete(cfg, key) {
+  process.exit(wrangler(cfg, ["r2", "object", "delete", `${cfg.bucket}/${key}`]));
+}
+
+function cmdUrl(cfg, key) {
+  const base = (cfg.public_url || "").replace(/\/+$/, "");
+  if (!base) die("public_url not set in config");
+  console.log(`${base}/${key.replace(/^\/+/, "")}`);
+}
+
+function usage() {
+  console.error(`usage: cicy-r2 <command> [args]
+
+  info                  print active config (redacted)
+  list [prefix]         list objects (optionally by key prefix)
+  put <key> <file>      upload local file to R2
+  get <key> [out]       download R2 object
+  delete <key>          delete R2 object
+  url <key>             print public URL for key
+  bucket-create <name>  create a new R2 bucket
+  bucket-list           list R2 buckets in account
+  domain-list           list custom domains on current bucket`);
+  process.exit(2);
+}
+
+async function main() {
+  const [cmd, ...rest] = process.argv.slice(2);
+  if (!cmd) usage();
+  const cfg = loadConfig();
+
+  switch (cmd) {
+    case "info":
+      cmdInfo(cfg);
+      break;
+    case "list":
+      await cmdList(cfg, rest[0] || "");
+      break;
+    case "put":
+      if (rest.length < 2) usage();
+      cmdPut(cfg, rest[0], rest[1]);
+      break;
+    case "get":
+      if (rest.length < 1) usage();
+      cmdGet(cfg, rest[0], rest[1]);
+      break;
+    case "delete":
+      if (rest.length < 1) usage();
+      cmdDelete(cfg, rest[0]);
+      break;
+    case "url":
+      if (rest.length < 1) usage();
+      cmdUrl(cfg, rest[0]);
+      break;
+    case "bucket-create":
+      if (rest.length < 1) usage();
+      process.exit(wrangler(cfg, ["r2", "bucket", "create", rest[0]]));
+      break;
+    case "bucket-list":
+      process.exit(wrangler(cfg, ["r2", "bucket", "list"]));
+      break;
+    case "domain-list":
+      process.exit(wrangler(cfg, ["r2", "bucket", "domain", "list", cfg.bucket]));
+      break;
+    default:
+      console.error(`unknown command: ${cmd}`);
+      usage();
+  }
+}
+
+main();
