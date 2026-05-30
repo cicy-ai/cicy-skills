@@ -35,6 +35,13 @@ git tag $name-v$version && git push origin $name-v$version
 #    （zip 版本差异），手动注册会让 registry 的 sha256 与 Action 上传的 asset 冲突，
 #    安装时报 "sha256 mismatch"。发布唯一入口 = 推 tag。
 #    重跑某个已 tag 的版本：  gh workflow run publish.yml -f tag=$name-v$version
+#    ⚠️ workflow_dispatch 只在 Register 步骤之前挂掉时才能用（网络抖动、5xx）。
+#       一旦 registry 已经接住某个 (name, version) 的 sha 后又出现 sha 漂移
+#       (asset 被覆盖、或历史上跑过手动 publish.js)，再 dispatch 会被
+#       registry 以 409 CONFLICT 拒绝——(name, version) 是 immutable，必须
+#       bump 一个新版本号重发。修这种漂移的工作流：
+#         1. 升 manifest.version → 新 patch 号 (源码无变化也得升)
+#         2. 走上面正常的 commit + tag + push 流程
 ```
 
 ### 各步骤说明
