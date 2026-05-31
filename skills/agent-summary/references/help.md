@@ -1,12 +1,15 @@
 # agent-summary help
 
+Dump the raw basic conversation of an agent: `text` + `thinking` in order, with
+the system prompt, `<system-reminder>` boilerplate, tool calls and tool results
+stripped. Writes `<history>/summary/<conversation_id>.md`, repoints a `current.md`
+symlink at it, and prints that path. Hand it to a fork ("分身") or replay it to
+restore the conversation.
+
 ```
-agent-summary <agent-id>                    # text summary (default)
-agent-summary <agent-id> --stats            # token stats
-agent-summary <agent-id> --slim             # slim JSON
-agent-summary <agent-id> --text             # structured text
-agent-summary <agent-id> --ai               # AI handoff doc
-agent-summary <agent-id> --ai --provider=X  # specific provider
-agent-summary <agent-id> --ai --model=X     # specific model
-agent-summary <path/to/current.json>        # explicit file
+agent-summary <agent-id>                 # write the file, print its path
+agent-summary <path/to/current.json>     # explicit snapshot file
 ```
+
+Source (hardcoded): `~/cicy-ai/workers/<agent-id>/.cicy/history/{current.json,reply.json}`
+only — native agent logs (jsonl / codex / opencode db / kiro) are not read.

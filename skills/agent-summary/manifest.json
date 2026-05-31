@@ -1,13 +1,14 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-summary",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "title": "Agent Summary",
-  "description": "Generate conversation summaries and handoff documents from agent sessions (claude/codex/opencode).",
+  "description": "Dump the raw basic conversation (text + thinking) of an agent session from its request/reply snapshots, for forking or restoring a conversation.",
   "category": "dev",
   "tags": [
-    "summary",
-    "handoff",
+    "conversation",
+    "transcript",
+    "fork",
     "agent",
     "claude",
     "codex",
@@ -25,18 +26,11 @@
   "npm_dependencies": false,
   "entry": "bin/agent-summary",
   "permissions": [
-    "network",
     "filesystem:home"
   ],
   "compatible_agents": [
     "*"
   ],
-  "config": {
-    "path": "~/cicy-ai/global.json",
-    "secret_fields": [
-      "api_token"
-    ]
-  },
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md"
@@ -44,24 +38,14 @@
   "i18n": {
     "zh-CN": {
       "title": "Agent 会话摘要",
-      "description": "从 claude/codex/opencode agent 会话生成摘要和工作交接文档。"
+      "description": "从 agent 会话的请求/回复快照中导出原始基本对话(text + thinking),用于 fork 或恢复对话。"
     }
   },
   "tools": [
     {
       "name": "summary",
       "example": "agent-summary <agent-id>",
-      "description": "Generate a conversation summary for an agent session"
-    },
-    {
-      "name": "summary --ai",
-      "example": "agent-summary <agent-id> --ai",
-      "description": "AI-generated summary using default provider"
-    },
-    {
-      "name": "summary --stats",
-      "example": "agent-summary <agent-id> --stats",
-      "description": "Show token usage statistics only"
+      "description": "Dump the raw basic conversation (text + thinking) of an agent session"
     }
   ]
 }

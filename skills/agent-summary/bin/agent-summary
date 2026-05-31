@@ -8,17 +8,15 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const script = join(__dir, 'agent-summary.py');
 
 if (process.argv.slice(2).some(a => a === '--help' || a === '-h' || a === 'help')) {
-  process.stdout.write(`agent-summary — Generate conversation summaries and handoff documents.
+  process.stdout.write(`agent-summary — Dump the raw basic conversation of an agent session.
+
+Writes the basic conversation (text + thinking, no system prompt / tools) to
+<history>/summary/<conversation_id>.md, repoints a current.md symlink at it,
+and prints that path. Hand the file to a fork ("分身") or replay it to restore.
 
 Usage:
-  agent-summary <agent-id>                    # text summary
-  agent-summary <agent-id> --stats            # token stats
-  agent-summary <agent-id> --slim             # slim JSON
-  agent-summary <agent-id> --text             # structured text
-  agent-summary <agent-id> --ai               # AI handoff doc
-  agent-summary <agent-id> --ai --provider=X
-  agent-summary <agent-id> --ai --model=X
-  agent-summary <path/to/current.json>        # explicit file
+  agent-summary <agent-id>                    # write the file, print its path
+  agent-summary <path/to/current.json>        # explicit snapshot file
 `);
   process.exit(0);
 }
