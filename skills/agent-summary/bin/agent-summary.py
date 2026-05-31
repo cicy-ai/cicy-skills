@@ -741,9 +741,23 @@ def detect_format(data: dict) -> str:
     if 'input' in body:
         return 'openai'  # Responses API
     if 'messages' in body:
-        # openai provider uses Chat Completions; unknown/other uses Anthropic messages format
         if provider == 'openai':
             return 'openai_chat'
+        if provider == 'anthropic':
+            return 'anthropic'
+        # Provider label missing/unknown (e.g. MITM-audited turns to a host we
+        # don't classify) — infer from the message shape instead of blindly
+        # assuming Anthropic. Anthropic content is a list of blocks and the system
+        # prompt sits at the top level; OpenAI chat-completions content is a plain
+        # string. Sniffing keeps a mislabeled provider from mangling the parse.
+        if 'system' in body:
+            return 'anthropic'
+        for msg in body['messages']:
+            content = msg.get('content')
+            if isinstance(content, list):
+                return 'anthropic'
+            if isinstance(content, str):
+                return 'openai_chat'
         return 'anthropic'
     return 'unknown'
 
