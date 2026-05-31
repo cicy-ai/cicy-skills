@@ -1,0 +1,154 @@
+#!/usr/bin/env node
+// cicy-skill-spec — the cicy skill ecosystem conventions + scaffolder.
+// Zero npm dependencies. Pure ESM. Node 18+.
+
+import { readFileSync, mkdirSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+const NAME = 'cicy-skill-spec';
+
+function die(msg, code = 1) {
+  process.stderr.write(`${NAME}: ${msg}\n`);
+  process.exit(code);
+}
+
+function skillsRoot() {
+  return process.env.CICY_SKILLS_ROOT || join(homedir(), 'cicy-ai', 'skills');
+}
+
+// ── argument parsing ─────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+const cmd = argv[0];
+
+function flag(name) {
+  const i = argv.indexOf(name);
+  if (i < 0) return undefined;
+  const v = argv[i + 1];
+  return v && !v.startsWith('--') ? v : true;
+}
+
+// ── commands ─────────────────────────────────────────────────────────────────
+
+function cmdSpec() {
+  // print the adjacent SKILL.md (the authoritative spec)
+  try {
+    process.stdout.write(readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8'));
+  } catch {
+    cmdPaths();
+  }
+}
+
+function cmdPaths() {
+  process.stdout.write(
+    `cicy skill install layout (decided by the source a skill came from):\n\n` +
+    `  ~/cicy-ai/skills/\n` +
+    `  ├── <name>/                PUBLIC  — skills.cicy-ai.com (flat)\n` +
+    `  ├── private/<name>/        PRIVATE — your own local registry (localhost/127.0.0.1)\n` +
+    `  └── team/<team>/<name>/    TEAM    — another team's private registry\n\n` +
+    `  add a team source:   cicy-code skill registry add <url> --name <team> --token <t>\n` +
+    `  host your own:       cicy-code skill registry serve --dir ~/cicy-registry-data --token <t>\n`,
+  );
+}
+
+function cmdScaffold() {
+  const name = argv[1];
+  if (!name || name.startsWith('--')) die('usage: cicy-skill-spec scaffold <name> [--private | --team <t> | --dir <path>]', 2);
+  if (!/^[a-z][a-z0-9-]*$/.test(name)) die(`invalid skill name "${name}" (use lowercase, digits, hyphens)`, 2);
+
+  // resolve target base dir from mode
+  const team = flag('--team');
+  const dir = flag('--dir');
+  let base, mode;
+  if (argv.includes('--private')) {
+    base = join(skillsRoot(), 'private');
+    mode = 'private';
+  } else if (typeof team === 'string') {
+    base = join(skillsRoot(), 'team', team);
+    mode = `team/${team}`;
+  } else if (typeof dir === 'string') {
+    base = resolve(dir);
+    mode = 'public';
+  } else {
+    base = process.cwd();
+    mode = 'public';
+  }
+  const target = join(base, name);
+  if (existsSync(target)) die(`refusing to overwrite existing directory: ${target}`, 1);
+
+  const title = name.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  const desc = `TODO: one-line description of ${name} (<=200 chars, must match SKILL.md).`;
+
+  const manifest = {
+    $schema: 'https://skills.cicy-ai.com/v1/manifest.schema.json',
+    name,
+    version: '0.1.0',
+    title,
+    description: desc,
+    category: 'other',
+    tags: [],
+    author: process.env.USER || 'me',
+    license: 'MIT',
+    runtime: { node: '>=18' },
+    system_requirements: [],
+    npm_dependencies: false,
+    entry: `bin/${name}`,
+    permissions: [],
+    compatible_agents: ['*'],
+    files: { skill_md: 'SKILL.md', help_md: 'references/help.md', tools_md: 'references/tools.md', readme: 'README.md' },
+  };
+
+  const skillMd = `---\nname: ${name}\ndescription: ${desc}\n---\n\n# ${title}\n\nDescribe what this skill does and when an agent should invoke it.\n\n## Scope\n\nUse this skill when:\n\n- (replace with concrete triggers)\n\n## Quick start\n\n\`\`\`sh\n${name} --help\n\`\`\`\n\n## References\n\n- [help.md](./references/help.md)\n- [tools.md](./references/tools.md)\n`;
+  const readme = `# ${title}\n\n${desc}\n`;
+  const bin = `#!/usr/bin/env node\n// ${name} — replace with your logic. Zero deps, pure ESM, Node 18+.\nconst argv = process.argv.slice(2);\nif (argv[0] === '--help' || argv[0] === '-h' || !argv[0]) {\n  process.stdout.write('${name} — usage: ${name} <command>\\n');\n  process.exit(0);\n}\nprocess.stdout.write(JSON.stringify({ ok: true, cmd: argv[0] }) + '\\n');\n`;
+  const helpMd = `# ${name} — command reference\n\n\`\`\`\n${name} --help\n\`\`\`\n`;
+  const toolsMd = `# ${name} — endpoints / env / exit codes\n\n- config: (none yet)\n`;
+
+  mkdirSync(join(target, 'bin'), { recursive: true });
+  mkdirSync(join(target, 'references'), { recursive: true });
+  writeFileSync(join(target, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  writeFileSync(join(target, 'SKILL.md'), skillMd);
+  writeFileSync(join(target, 'README.md'), readme);
+  writeFileSync(join(target, 'bin', name), bin);
+  chmodSync(join(target, 'bin', name), 0o755);
+  writeFileSync(join(target, 'references', 'help.md'), helpMd);
+  writeFileSync(join(target, 'references', 'tools.md'), toolsMd);
+
+  process.stdout.write(`✓ scaffolded ${mode} skill → ${target}\n\n`);
+  if (mode === 'private' || mode.startsWith('team/')) {
+    process.stdout.write(
+      `next:\n` +
+      `  1. edit ${name}/manifest.json + SKILL.md + bin/${name}\n` +
+      `  2. host & publish to your local registry:\n` +
+      `     cicy-code skill registry serve --dir ~/cicy-registry-data --token <t> --admin-token <a>\n` +
+      `     cicy-code skill registry publish ${target}\n` +
+      `  3. share the address + token with teammates (they: cicy-code skill registry add ...)\n`,
+    );
+  } else {
+    process.stdout.write(
+      `next (public PR to cicy-skills):\n` +
+      `  1. edit ${name}/manifest.json + SKILL.md + bin/${name}\n` +
+      `  2. node tools/validate-skill.js skills/${name}\n` +
+      `     node tools/test-skill.js skills/${name}\n` +
+      `  3. open a PR; after merge: git tag ${name}-v<version> && git push origin ${name}-v<version>\n` +
+      `  ⚠ never run tools/publish.js by hand; (name,version) is immutable — bump on any change.\n`,
+    );
+  }
+}
+
+// ── dispatch ─────────────────────────────────────────────────────────────────
+const commands = {
+  spec: cmdSpec,
+  '--help': cmdSpec,
+  '-h': cmdSpec,
+  help: cmdSpec,
+  paths: cmdPaths,
+  scaffold: cmdScaffold,
+};
+const fn = commands[cmd];
+if (!fn) die(`unknown command: ${cmd ?? '(none)'}. Try: spec | paths | scaffold <name>`, 2);
+try {
+  fn();
+} catch (e) {
+  die(e.message);
+}

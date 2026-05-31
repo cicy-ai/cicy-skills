@@ -1,0 +1,65 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cicy-skill-spec",
+  "version": "1.0.0",
+  "title": "Cicy Skill Spec",
+  "description": "Conventions for the cicy skill ecosystem: private skill development, team skill install layout, and public skill PR submission. Scaffolds new skills into the right directory.",
+  "category": "dev",
+  "tags": [
+    "skill",
+    "conventions",
+    "registry",
+    "scaffold",
+    "private",
+    "team"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-skill-spec",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/cicy-skill-spec",
+  "permissions": [
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Cicy Skill 规范",
+      "description": "cicy skill 生态规范:私有 skill 开发、team skill 安装布局、公有 skill PR 提交;并把新建 skill 脚手架到正确目录。"
+    }
+  },
+  "tools": [
+    {
+      "name": "spec",
+      "example": "cicy-skill-spec spec",
+      "description": "Print the full skill conventions (private / team / public)"
+    },
+    {
+      "name": "scaffold-private",
+      "example": "cicy-skill-spec scaffold my-tool --private",
+      "description": "Create a new private skill skeleton in ~/cicy-ai/skills/private/<name>/"
+    },
+    {
+      "name": "scaffold-public",
+      "example": "cicy-skill-spec scaffold my-tool",
+      "description": "Create a new public skill skeleton in ./<name>/ for a cicy-skills PR"
+    },
+    {
+      "name": "paths",
+      "example": "cicy-skill-spec paths",
+      "description": "Print the source-based install directory layout"
+    }
+  ]
+}
