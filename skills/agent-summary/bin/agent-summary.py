@@ -624,6 +624,30 @@ def resolve_source(arg: str):
         p = Path(arg)
         return load_snapshot(p), "current", p
 
+    # ----------------------------------------------------------------- MARK
+    # TODO(unify-on-current.json): the gateway/non-gateway split below is meant
+    # to go away. Since the MITM audit work, NON-gateway codex/opencode/claude
+    # turns are ALSO written to .cicy/history/current.json — the MITM adapter
+    # drives the exact same audit session as the local gateway. End goal: always
+    # load current.json for codex/opencode/claude (gateway or not) and drop the
+    # per-agent-type fallbacks (load_codex_as_snapshot, load_opencode_as_snapshot,
+    # default claude JSONL).
+    #
+    # Tested 2026-05-31 — the skill ALREADY parses all three current.json shapes
+    # (detect_format → anthropic / openai Responses / openai_chat), so format is
+    # NOT a blocker. The one real gap was upstream: MITM wrote provider="unknown"
+    # for opencode (ProviderFromHost didn't know opencode.ai), so detect_format
+    # fell back to anthropic and mangled the string content. Fixed in cicy-code
+    # (mitm/provider.go: opencode.ai → "openai"); with provider="openai" the
+    # opencode current.json parses cleanly (openai_chat). So claude/codex/opencode
+    # can all unify on current.json now.
+    #
+    # Only remaining blocker: kiro-cli — it doesn't flow through gateway/MITM, has
+    # no current.json, and keeps its own load_kiro_as_snapshot. Once kiro is
+    # settled, collapse resolve_source to "current.json for codex/opencode/claude
+    # + the kiro branch".
+    # -----------------------------------------------------------------------
+
     # agent-id branch: gateway flag decides which source is authoritative.
     gw, atype = lookup_gateway(arg)
     atype_norm = (atype or "").lower()
