@@ -20,9 +20,7 @@
   "runtime": {
     "node": ">=18"
   },
-  "system_requirements": [
-    "python3"
-  ],
+  "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/agent-summary",
   "permissions": [
