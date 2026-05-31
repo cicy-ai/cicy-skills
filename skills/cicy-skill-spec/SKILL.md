@@ -135,6 +135,16 @@ git tag <name>-v<version> && git push origin <name>-v<version>
 
 ---
 
+## Maintaining cicy-skill-spec itself
+
+`cicy-skill-spec` is in cicy-code's `preinstalledSkills` (api/mgr/setup.go) and
+is auto-installed **from the public registry** on every host's daemon startup.
+Because it's a public skill, **any edit to it must follow §3** — bump
+`manifest.version`, commit, and push a new `cicy-skill-spec-v<version>` tag.
+Editing the files without re-publishing changes nothing for users: hosts keep
+pulling the last published version. The registry is immutable, so you can never
+overwrite a version — always bump.
+
 ## Quick start
 
 ```sh
