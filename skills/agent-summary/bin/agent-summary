@@ -1,14 +1,23 @@
 #!/usr/bin/env node
-// agent-summary — Node wrapper that delegates to agent-summary.py
-import { execFileSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// agent-summary — Dump the raw basic conversation of an agent session.
+//
+// Reads the gateway/MITM audit snapshots and writes the basic conversation —
+// text + thinking, in order, with the system prompt, <system-reminder>
+// boilerplate, tool_use and tool_result dropped — to
+// <history>/summary/<conversation_id>.md, repoints a `current.md` symlink at it,
+// and prints that path. Hand the file to a fork ("分身") or replay it to restore.
+//
+// Source is hardcoded to ~/cicy-ai/workers/<agent-id>/.cicy/history/{current,reply}.json;
+// native agent logs (claude jsonl / codex / opencode db / kiro) are not read.
+// Supports Anthropic, OpenAI Responses, and OpenAI Chat Completions snapshots.
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const script = join(__dir, 'agent-summary.py');
+import { readFileSync, writeFileSync, existsSync, statSync, lstatSync, mkdirSync, symlinkSync, unlinkSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
+import { homedir } from 'node:os';
 
-if (process.argv.slice(2).some(a => a === '--help' || a === '-h' || a === 'help')) {
-  process.stdout.write(`agent-summary — Dump the raw basic conversation of an agent session.
+const WORKERS_DIR = join(homedir(), 'cicy-ai', 'workers');
+
+const USAGE = `agent-summary — Dump the raw basic conversation of an agent session.
 
 Writes the basic conversation (text + thinking, no system prompt / tools) to
 <history>/summary/<conversation_id>.md, repoints a current.md symlink at it,
@@ -17,12 +26,289 @@ and prints that path. Hand the file to a fork ("分身") or replay it to restore
 Usage:
   agent-summary <agent-id>                    # write the file, print its path
   agent-summary <path/to/current.json>        # explicit snapshot file
-`);
-  process.exit(0);
+`;
+
+// --- source loading ------------------------------------------------------
+
+// Resolve an agent-id or explicit path to its current.json snapshot. The only
+// source is the gateway/MITM audit snapshot at the hardcoded path
+// ~/cicy-ai/workers/<agent-id>/.cicy/history/current.json. Native agent logs
+// (claude jsonl / codex / opencode db / kiro) are deliberately not read.
+function findSnapshot(arg) {
+  if (existsSync(arg) && statSync(arg).isFile()) return arg;
+  const path = join(WORKERS_DIR, arg, '.cicy', 'history', 'current.json');
+  if (existsSync(path)) return path;
+  throw new Error(
+    `No current.json for '${arg}' at ${path}. ` +
+    `(Only the gateway/MITM snapshot is read — no native agent logs.)`
+  );
 }
 
-try {
-  execFileSync('python3', [script, ...process.argv.slice(2)], { stdio: 'inherit' });
-} catch (e) {
-  process.exit(e.status ?? 1);
+function loadJson(path) {
+  return JSON.parse(readFileSync(path, 'utf8'));
 }
+
+// reply.json sits next to current.json; missing/unparseable → {}.
+function loadReplySnapshot(snapshotPath) {
+  const replyPath = join(dirname(snapshotPath), 'reply.json');
+  if (existsSync(replyPath)) {
+    try { return loadJson(replyPath); } catch { /* ignore */ }
+  }
+  return {};
+}
+
+// --- format detection + message normalization ----------------------------
+
+// Detect API format: 'anthropic', 'openai' (Responses API), or 'openai_chat'.
+function detectFormat(data) {
+  const provider = data.provider || '';
+  if (provider === 'anthropic') return 'anthropic';
+  const body = data.body || {};
+  if ('input' in body) return 'openai'; // Responses API
+  if ('messages' in body) {
+    if (provider === 'openai') return 'openai_chat';
+    if (provider === 'anthropic') return 'anthropic';
+    // Provider label missing/unknown (e.g. a MITM-audited host we don't
+    // classify) — infer from shape. Anthropic content is a list of blocks with
+    // the system prompt at top level; OpenAI chat content is a plain string.
+    if ('system' in body) return 'anthropic';
+    for (const msg of body.messages) {
+      const content = msg.content;
+      if (Array.isArray(content)) return 'anthropic';
+      if (typeof content === 'string') return 'openai_chat';
+    }
+    return 'anthropic';
+  }
+  return 'unknown';
+}
+
+// Normalize messages from any snapshot format to [{role, content:[block]}].
+function normalizeMessages(data) {
+  const fmt = detectFormat(data);
+  const body = data.body || {};
+
+  if (fmt === 'anthropic') return body.messages || [];
+
+  if (fmt === 'openai') {
+    const messages = [];
+    for (const item of body.input || []) {
+      const itemType = item.type || '';
+      const role = item.role || '';
+      const id = item.id || '';
+
+      if (itemType === 'message' && role) {
+        const content = [];
+        for (const block of item.content || []) {
+          if (block && typeof block === 'object') {
+            const bt = block.type || '';
+            if (bt === 'input_text' || bt === 'output_text') {
+              content.push({ type: 'text', text: block.text || '' });
+            } else {
+              content.push(block);
+            }
+          } else if (typeof block === 'string') {
+            content.push({ type: 'text', text: block });
+          }
+        }
+        messages.push({ role, id, content });
+      } else if (itemType === 'function_call') {
+        messages.push({ role: 'assistant', id, content: [{ type: 'tool_use', name: item.name || '', input: item.arguments || {} }] });
+      } else if (itemType === 'function_call_output') {
+        messages.push({ role: 'user', id, content: [{ type: 'tool_result', output: item.output || '' }] });
+      } else if (itemType === 'reasoning') {
+        messages.push({ role: 'assistant', id, content: [{ type: 'thinking', thinking: item.encrypted_content || '' }] });
+      }
+    }
+    return messages;
+  }
+
+  if (fmt === 'openai_chat') {
+    // OpenAI Chat Completions (Codex/OpenCode via gateway): system (skip), user
+    // (string content), assistant (string or tool_calls), tool (result).
+    const messages = [];
+    for (const msg of body.messages || []) {
+      let role = msg.role || '';
+      if (role === 'system') continue;
+      const contentRaw = msg.content;
+      const toolCalls = msg.tool_calls;
+      const toolCallId = msg.tool_call_id;
+
+      let content = [];
+      if (typeof contentRaw === 'string' && contentRaw) {
+        content.push({ type: 'text', text: contentRaw });
+      } else if (Array.isArray(contentRaw)) {
+        for (const block of contentRaw) {
+          if (typeof block === 'string') {
+            content.push({ type: 'text', text: block });
+          } else if (block && typeof block === 'object') {
+            const bt = block.type || '';
+            if (bt === 'text' || bt === 'input_text' || bt === 'output_text') {
+              content.push({ type: 'text', text: block.text || '' });
+            } else {
+              content.push(block);
+            }
+          }
+        }
+      }
+
+      if (role === 'assistant' && toolCalls) {
+        for (const tc of toolCalls) {
+          const fn = tc.function || {};
+          const argsRaw = fn.arguments ?? '{}';
+          let args;
+          try { args = typeof argsRaw === 'string' ? JSON.parse(argsRaw) : argsRaw; }
+          catch { args = { raw: String(argsRaw).slice(0, 200) }; }
+          content.push({ type: 'tool_use', name: fn.name || '', input: args, id: tc.id || '' });
+        }
+      }
+
+      if (role === 'tool' && toolCallId) {
+        const resultContent = typeof contentRaw === 'string' ? contentRaw : '';
+        content = [{ type: 'tool_result', output: resultContent.slice(0, 2000) }];
+        role = 'user';
+      }
+
+      if (content.length) {
+        messages.push({ role, id: String(msg.id ?? ''), content });
+      }
+    }
+    return messages;
+  }
+
+  return [];
+}
+
+// --- basic-conversation extraction (text + thinking only) ----------------
+
+// Chronological turns, text + thinking only. tool_use / tool_result, the system
+// prompt, <system-reminder> boilerplate and OpenClaw noise are dropped; no
+// truncation. Output:
+//   ## Turn N
+//   USER: <message>
+//   AI (thinking): <reasoning>
+//   AI: <reply text>
+function generateStructuredText(messages) {
+  const NOISE_PREFIXES = ['<system-reminder>', '<', '[OpenClaw heartbeat poll]'];
+  const clean = (s) => {
+    s = (s || '').trim();
+    if (!s) return '';
+    if (NOISE_PREFIXES.some((p) => s.startsWith(p))) return '';
+    return s;
+  };
+
+  // Group messages into turns: each user msg starts a turn, followed by
+  // assistant messages until the next user msg.
+  const turns = [];
+  let current = null; // { user: [str], ai: [[kind, text]] }
+  for (const msg of messages) {
+    const role = msg.role || '';
+    if (role !== 'user' && role !== 'assistant') continue;
+
+    if (role === 'user') {
+      // tool_result (a "user" message in the anthropic format) carries no
+      // 'text' block, so it falls away here.
+      const userTexts = [];
+      for (const block of msg.content || []) {
+        if (!block || typeof block !== 'object') continue;
+        if (block.type === 'text') {
+          const c = clean(block.text);
+          if (c) userTexts.push(c);
+        }
+      }
+      if (!userTexts.length) continue;
+      current = { user: userTexts, ai: [] };
+      turns.push(current);
+      continue;
+    }
+
+    // assistant
+    if (current === null) { current = { user: [], ai: [] }; turns.push(current); }
+    for (const block of msg.content || []) {
+      if (!block || typeof block !== 'object') continue;
+      if (block.type === 'text') {
+        const c = clean(block.text);
+        if (c) current.ai.push(['text', c]);
+      } else if (block.type === 'thinking') {
+        const t = (block.thinking || '').trim();
+        if (t) current.ai.push(['thinking', t]);
+      }
+      // tool_use intentionally dropped — not basic conversation.
+    }
+  }
+
+  const lines = [];
+  let turnNo = 0;
+  for (const t of turns) {
+    if (!t.user.length && !t.ai.length) continue;
+    turnNo += 1;
+    lines.push(`## Turn ${turnNo}`);
+    for (const u of t.user) lines.push(`USER: ${u}`);
+    for (const [kind, txt] of t.ai) lines.push(kind === 'text' ? `AI: ${txt}` : `AI (thinking): ${txt}`);
+    lines.push('');
+  }
+  return lines.join('\n').replace(/\s+$/, '') + '\n';
+}
+
+// --- output --------------------------------------------------------------
+
+// Hardcoded output path: <history>/summary/<conversation_id>.md, a sibling
+// `summary/` of the current.json snapshot.
+function getSummaryOutputPath(snapshotPath, data) {
+  const conversationId = data.conversation_id || 'unknown';
+  const summaryDir = join(dirname(snapshotPath), 'summary');
+  mkdirSync(summaryDir, { recursive: true });
+  return join(summaryDir, `${conversationId}.md`);
+}
+
+// --- entry ---------------------------------------------------------------
+
+function main() {
+  const argv = process.argv.slice(2);
+  if (argv.some((a) => a === '--help' || a === '-h' || a === 'help')) {
+    process.stdout.write(USAGE);
+    process.exit(0);
+  }
+  const target = argv.find((a) => !a.startsWith('-'));
+  if (!target) {
+    process.stderr.write('Error: No target specified\n' + USAGE);
+    process.exit(1);
+  }
+
+  let path;
+  try {
+    path = findSnapshot(target);
+  } catch (e) {
+    process.stderr.write(`Error: ${e.message}\n`);
+    process.exit(1);
+  }
+
+  const data = loadJson(path);
+  let messages = normalizeMessages(data);
+
+  // Fold the latest assistant turn (reply.json) in as a final assistant message
+  // so it renders through the same path (text + thinking only).
+  const reply = loadReplySnapshot(path);
+  const replyBlocks = (reply.items || []).filter(
+    (item) => item && typeof item === 'object' && (item.type === 'text' || item.type === 'thinking')
+  );
+  if (replyBlocks.length) {
+    messages = messages.concat([{ role: 'assistant', content: replyBlocks }]);
+  }
+
+  const text = generateStructuredText(messages);
+
+  // Write <conversation_id>.md, then repoint `current.md` at it — matching the
+  // original ln convention (current.<x>.md -> <conversation_id>.<x>.md).
+  const outputPath = getSummaryOutputPath(path, data);
+  writeFileSync(outputPath, text);
+  const link = join(dirname(outputPath), 'current.md');
+  try {
+    try { lstatSync(link); unlinkSync(link); } catch { /* not present */ }
+    symlinkSync(basename(outputPath), link); // relative target
+  } catch { /* ignore symlink failures */ }
+
+  // Output is the <conversation_id>.md path.
+  console.log(outputPath);
+}
+
+main();
