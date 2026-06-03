@@ -9,8 +9,11 @@
 | `add`                   | `chrome_add_profile`          | `{ gmail?, orgPath?, launchAfterCreate? }` |
 | `proxy <idx> <url>`     | `chrome_set_profile_proxy`    | `{ accountIdx, proxy }`             |
 | `note <idx> <text>`     | `chrome_set_profile_meta`     | `{ accountIdx, note }`              |
-| `account <idx> <svc> <id>` | `chrome_set_profile_meta`  | `{ accountIdx, accounts:{[svc]:id} }` (empty id deletes) |
-| `accounts <idx>`        | `chrome_get_profile`          | reads back the `accounts` map       |
+| `account <idx> <svc> <id>` | `chrome_set_profile_meta`  | `{ accountIdx, accounts:{[svc]:{account:id}} }` |
+| `password <idx> <svc> <pwd>` | `chrome_set_profile_meta` | `{ accountIdx, accounts:{[svc]:{password}} }` |
+| `2fa <idx> <svc> <secret>` | `chrome_set_profile_meta`  | `{ accountIdx, accounts:{[svc]:{totp}} }` |
+| `otp <idx> <svc>`       | `chrome_get_profile`          | reads `totp`, computes TOTP locally |
+| `accounts <idx> [--show]` | `chrome_get_profile`        | reads `accounts`; masks secrets unless `--show` |
 | `ip <idx> [--url U]`    | `chrome_cdp_call`             | `Runtime.evaluate` fetch → `{ip,country,cc}` |
 | `launch <idx>`          | `chrome_launch_profile`       | `{ accountIdx, url?, activateIfRunning? }` |
 | `close <idx>`           | `chrome_close_profile`        | `{ accountIdx }`                    |
@@ -35,14 +38,18 @@ push `desktop_event { rpc_call, tool, args, requestId }`, await
     "debuggerPort": 11001,
     "proxy": "socks5://127.0.0.1:1080",
     "note": "main work identity",
-    "accounts": { "github": "octocat", "gmail": "me@gmail.com", "apple": "me@icloud.com", "cf": "ops@acme.com" }
+    "accounts": {
+      "github": { "account": "octocat", "password": "•••", "totp": "JBSWY3DPEHPK3PXP" },
+      "gmail":  { "account": "me@gmail.com", "password": "•••" }
+    }
   }
 }
 ```
 
-`note` + `accounts` need cicy-desktop ≥ 2.1.36 (adds the `chrome_set_profile_meta`
-RPC with the `service → accountId` map and returns both fields from
-`chrome_list_profiles`/`chrome_get_profile`).
+`note` + `accounts` need cicy-desktop ≥ 2.1.37 (the `chrome_set_profile_meta`
+RPC merges the `service → {account,password,totp}` map field-by-field, writes
+chrome.json `0600`, and returns both fields from `chrome_list_profiles` /
+`chrome_get_profile`). Secrets are never printed by the CLI unless `--show`.
 
 ## Egress IP
 

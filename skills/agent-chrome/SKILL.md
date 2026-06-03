@@ -21,7 +21,7 @@ Use this skill when the task involves:
 - inspecting open page targets across profiles
 - making raw CDP calls (`Page.navigate`, `Runtime.evaluate`, `Input.dispatchMouseEvent`, …)
 - listing the gmail / github identities the host's Chrome profiles are signed into
-- recording the actual account a profile holds per service (a `service → accountId` map) + a free-form `note`, and filtering by service (`profiles --with github`)
+- recording per service the account id + password + TOTP (2FA) secret (a `service → {account,password,totp}` map) + a free-form `note`, filtering by service (`profiles --with github`), and generating 2FA codes (`otp`) — secrets masked unless `--show`
 - checking a profile's egress IP + country (`ip <idx>`) to verify its proxy
 
 ## Rules
