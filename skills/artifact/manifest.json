@@ -1,0 +1,71 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "artifact",
+  "version": "1.0.0",
+  "title": "Artifact",
+  "description": "Open and remote-control the cicy-code 产物 (artifact) tab page frame: navigate, inject JS, call native Electron <webview>/webContents methods, and drive full CDP — input, screenshots, logs.",
+  "category": "dev",
+  "tags": [
+    "artifact",
+    "webview",
+    "agent-bridge",
+    "cdp",
+    "automation"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/artifact",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=22"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/artifact",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": [
+      "api_token"
+    ]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "产物",
+      "description": "打开并完全遥控 cicy-code「产物」tab 里的页面框:导航、在内层页面跑 JS、调用任意原生 Electron <webview>/webContents 方法、全量 CDP(调试器)、鼠标键盘、截图/PDF、拉取 console/CDP 日志。"
+    }
+  },
+  "tools": [
+    {
+      "name": "open",
+      "example": "artifact open https://example.com",
+      "description": "Open a URL in the artifact tab (activates the tab)"
+    },
+    {
+      "name": "exec",
+      "example": "artifact exec 'document.title'",
+      "description": "Run JS inside the inner artifact page and return the result"
+    },
+    {
+      "name": "cdp",
+      "example": "artifact cdp Page.navigate '{\"url\":\"https://example.com\"}'",
+      "description": "Send any Chrome DevTools Protocol command to the artifact webview"
+    },
+    {
+      "name": "capture",
+      "example": "artifact capture shot.png",
+      "description": "Screenshot the artifact webview to a PNG"
+    }
+  ]
+}
