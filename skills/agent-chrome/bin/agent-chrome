@@ -46,6 +46,7 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000); // Ch
       case 'add':       await cmdAdd(rest); return;
       case 'proxy':     await cmdProxy(rest); return;
       case 'note':      await cmdNote(rest); return;
+      case 'account':   await cmdAccount(rest); return;
       case 'accounts':  await cmdAccounts(rest); return;
       case 'ip':        await cmdIp(rest); return;
       case 'launch':    await cmdLaunch(rest); return;
@@ -72,7 +73,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: agent-chrome <profiles|profile|add|proxy|note|accounts|ip|launch|close|targets|cdp|gmails|github> [...] [--client ID]\n'); }
+  catch { process.stdout.write('Usage: agent-chrome <profiles|profile|add|proxy|note|account|accounts|ip|launch|close|targets|cdp|gmails|github> [...] [--client ID]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -193,8 +194,10 @@ async function cmdProfiles(args) {
 
   const list = Array.isArray(res) ? res : (res?.profiles || res?.entries || []);
   const has = (p) => {
-    const tags = Array.isArray(p?.accounts) ? p.accounts.map((s) => String(s).toLowerCase()) : [];
-    if (tags.includes(withSvc)) return true;
+    // accounts is a { service: accountId } map; a non-empty value means the
+    // profile holds an account for that service.
+    const accts = p?.accounts && typeof p.accounts === 'object' && !Array.isArray(p.accounts) ? p.accounts : {};
+    if (accts[withSvc]) return true;
     const plat = p?.platform && typeof p.platform === 'object' ? p.platform : {};
     const v = plat[withSvc];
     if (v && (typeof v !== 'object' || Object.keys(v).length)) return true;
@@ -235,13 +238,24 @@ async function cmdNote(args) {
   emit(await rpc('chrome_set_profile_meta', { accountIdx: idx, note }));
 }
 
-// accounts <idx> <github,gmail,apple,cf> — set the service tags (comma/space
-// separated). Pass "" to clear.
-async function cmdAccounts(args) {
-  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome accounts <accountIdx> <github,gmail,apple,cf>'), { exitCode: 2 });
+// account <idx> <service> <accountId...> — record the actual account a profile
+// holds for a service, e.g. `account 3 github octocat` or
+// `account 3 gmail me@gmail.com`. Empty accountId removes that service.
+async function cmdAccount(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome account <accountIdx> <service> <accountId>   (empty accountId removes it)'), { exitCode: 2 });
   const idx = intArg(args[0], 'accountIdx');
-  const accounts = args.slice(1).join(',').split(/[,\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-  emit(await rpc('chrome_set_profile_meta', { accountIdx: idx, accounts }));
+  const service = String(args[1]).trim().toLowerCase();
+  const value = args.slice(2).join(' ').trim();
+  emit(await rpc('chrome_set_profile_meta', { accountIdx: idx, accounts: { [service]: value } }));
+}
+
+// accounts <idx> — show the service→account map recorded for a profile.
+async function cmdAccounts(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome accounts <accountIdx>   (list a profile\'s accounts; use `account` to set one)'), { exitCode: 2 });
+  const idx = intArg(args[0], 'accountIdx');
+  const p = await rpc('chrome_get_profile', { accountIdx: idx });
+  const accounts = p?.accounts && typeof p.accounts === 'object' ? p.accounts : {};
+  emit(json ? accounts : { accountIdx: idx, accounts, note: p?.note || '' });
 }
 
 // ip <idx> [--url <ipApi>] — report the profile's egress IP + country by

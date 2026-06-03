@@ -9,7 +9,8 @@
 | `add`                   | `chrome_add_profile`          | `{ gmail?, orgPath?, launchAfterCreate? }` |
 | `proxy <idx> <url>`     | `chrome_set_profile_proxy`    | `{ accountIdx, proxy }`             |
 | `note <idx> <text>`     | `chrome_set_profile_meta`     | `{ accountIdx, note }`              |
-| `accounts <idx> <csv>`  | `chrome_set_profile_meta`     | `{ accountIdx, accounts:[…] }`      |
+| `account <idx> <svc> <id>` | `chrome_set_profile_meta`  | `{ accountIdx, accounts:{[svc]:id} }` (empty id deletes) |
+| `accounts <idx>`        | `chrome_get_profile`          | reads back the `accounts` map       |
 | `ip <idx> [--url U]`    | `chrome_cdp_call`             | `Runtime.evaluate` fetch → `{ip,country,cc}` |
 | `launch <idx>`          | `chrome_launch_profile`       | `{ accountIdx, url?, activateIfRunning? }` |
 | `close <idx>`           | `chrome_close_profile`        | `{ accountIdx }`                    |
@@ -34,13 +35,14 @@ push `desktop_event { rpc_call, tool, args, requestId }`, await
     "debuggerPort": 11001,
     "proxy": "socks5://127.0.0.1:1080",
     "note": "main work identity",
-    "accounts": ["github", "gmail", "apple", "cf"]
+    "accounts": { "github": "octocat", "gmail": "me@gmail.com", "apple": "me@icloud.com", "cf": "ops@acme.com" }
   }
 }
 ```
 
-`note` + `accounts` need cicy-desktop ≥ 2.1.35 (adds the `chrome_set_profile_meta`
-RPC and returns both fields from `chrome_list_profiles`/`chrome_get_profile`).
+`note` + `accounts` need cicy-desktop ≥ 2.1.36 (adds the `chrome_set_profile_meta`
+RPC with the `service → accountId` map and returns both fields from
+`chrome_list_profiles`/`chrome_get_profile`).
 
 ## Egress IP
 
