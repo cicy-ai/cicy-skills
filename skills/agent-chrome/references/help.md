@@ -3,10 +3,13 @@
 ## Commands
 
 ```
-agent-chrome profiles [--all] [--json]
+agent-chrome profiles [--all] [--with <service>] [--json]
 agent-chrome profile <accountIdx> [--json]
 agent-chrome add [--gmail <addr>] [--org-path <path>] [--launch] [--json]
 agent-chrome proxy <accountIdx> <url|"">
+agent-chrome note <accountIdx> <text>            set/clear a free-form note
+agent-chrome accounts <accountIdx> <github,gmail,apple,cf>   set service tags
+agent-chrome ip <accountIdx> [--url <ipApi>]     egress IP + country via CDP
 agent-chrome launch <accountIdx> [--url <url>] [--no-activate]
 agent-chrome close <accountIdx>
 agent-chrome targets [--idx <n>] [--json]
@@ -17,6 +20,31 @@ agent-chrome github [--json]
 agent-chrome --client <client_id> ...
 agent-chrome --help / -h / help
 agent-chrome tools
+```
+
+## Per-profile accounts + notes
+
+Each profile records which services it holds (`accounts` tags) and a free-form
+`note`, stored in its `~/cicy-ai/db/chrome.json` entry:
+
+```
+agent-chrome accounts 3 github,gmail,apple,cf   # tag profile 3
+agent-chrome note 3 "main work identity — 2FA on phone"
+agent-chrome profiles --with github             # every profile that has github
+```
+
+`--with <service>` matches both the `accounts` tags and any signed-in
+`platform.<service>` (github/gmail detection), case-insensitive.
+
+## Egress IP
+
+`agent-chrome ip <idx>` fetches an IP-info API from *inside* that profile's
+Chrome, so the result reflects that profile's proxy egress. The profile must be
+launched (have a live tab):
+
+```
+agent-chrome ip 3                          # {"ip","country","cc"} via api.myip.com
+agent-chrome ip 3 --url https://ipinfo.io/json
 ```
 
 ## Notes

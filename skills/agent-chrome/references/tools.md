@@ -4,10 +4,13 @@
 
 | subcmd                  | tool                          | args                                |
 |-------------------------|-------------------------------|-------------------------------------|
-| `profiles [--all]`      | `chrome_list_profiles`        | `{ includeHidden }`                 |
+| `profiles [--all] [--with <svc>]` | `chrome_list_profiles` | `{ includeHidden }` (`--with` filters client-side) |
 | `profile <idx>`         | `chrome_get_profile`          | `{ accountIdx }`                    |
 | `add`                   | `chrome_add_profile`          | `{ gmail?, orgPath?, launchAfterCreate? }` |
 | `proxy <idx> <url>`     | `chrome_set_profile_proxy`    | `{ accountIdx, proxy }`             |
+| `note <idx> <text>`     | `chrome_set_profile_meta`     | `{ accountIdx, note }`              |
+| `accounts <idx> <csv>`  | `chrome_set_profile_meta`     | `{ accountIdx, accounts:[…] }`      |
+| `ip <idx> [--url U]`    | `chrome_cdp_call`             | `Runtime.evaluate` fetch → `{ip,country,cc}` |
 | `launch <idx>`          | `chrome_launch_profile`       | `{ accountIdx, url?, activateIfRunning? }` |
 | `close <idx>`           | `chrome_close_profile`        | `{ accountIdx }`                    |
 | `targets [--idx N]`     | `chrome_get_targets`          | `{ accountIdx? }`                   |
@@ -29,9 +32,21 @@ push `desktop_event { rpc_call, tool, args, requestId }`, await
     "gmail": "x@y.com",
     "userDataDir": "~/chrome/account_1",
     "debuggerPort": 11001,
-    "proxy": "socks5://127.0.0.1:1080"
+    "proxy": "socks5://127.0.0.1:1080",
+    "note": "main work identity",
+    "accounts": ["github", "gmail", "apple", "cf"]
   }
 }
+```
+
+`note` + `accounts` need cicy-desktop ≥ 2.1.35 (adds the `chrome_set_profile_meta`
+RPC and returns both fields from `chrome_list_profiles`/`chrome_get_profile`).
+
+## Egress IP
+
+```bash
+agent-chrome ip 1                          # via api.myip.com → {ip,country,cc}
+agent-chrome ip 1 --url https://ipinfo.io/json
 ```
 
 ## CDP examples
