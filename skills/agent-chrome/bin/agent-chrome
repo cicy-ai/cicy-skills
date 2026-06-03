@@ -45,6 +45,9 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000); // Ch
       case 'profile':   await cmdProfile(rest); return;
       case 'add':       await cmdAdd(rest); return;
       case 'proxy':     await cmdProxy(rest); return;
+      case 'note':      await cmdNote(rest); return;
+      case 'accounts':  await cmdAccounts(rest); return;
+      case 'ip':        await cmdIp(rest); return;
       case 'launch':    await cmdLaunch(rest); return;
       case 'close':     await cmdClose(rest); return;
       case 'targets':   await cmdTargets(rest); return;
@@ -69,7 +72,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: agent-chrome <profiles|profile|add|proxy|launch|close|targets|cdp|gmails|github> [...] [--client ID]\n'); }
+  catch { process.stdout.write('Usage: agent-chrome <profiles|profile|add|proxy|note|accounts|ip|launch|close|targets|cdp|gmails|github> [...] [--client ID]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -177,7 +180,29 @@ function intArg(s, name) {
 
 async function cmdProfiles(args) {
   const includeHidden = args.includes('--all');
-  emit(await rpc('chrome_list_profiles', { includeHidden }));
+  // `--with <service>` filters to profiles tagged with (or signed into) that
+  // service, e.g. `profiles --with github`. Matches the per-profile `accounts`
+  // tags AND any non-empty `platform.<service>` (gmail/github/kiro signed-in
+  // detection), case-insensitive.
+  let withSvc = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--with') { withSvc = String(args[++i] || '').trim().toLowerCase(); }
+  }
+  const res = await rpc('chrome_list_profiles', { includeHidden });
+  if (!withSvc) return emit(res);
+
+  const list = Array.isArray(res) ? res : (res?.profiles || res?.entries || []);
+  const has = (p) => {
+    const tags = Array.isArray(p?.accounts) ? p.accounts.map((s) => String(s).toLowerCase()) : [];
+    if (tags.includes(withSvc)) return true;
+    const plat = p?.platform && typeof p.platform === 'object' ? p.platform : {};
+    const v = plat[withSvc];
+    if (v && (typeof v !== 'object' || Object.keys(v).length)) return true;
+    if (withSvc === 'gmail' && p?.gmail) return true; // gmail lives at top level
+    return false;
+  };
+  const filtered = Array.isArray(list) ? list.filter(has) : list;
+  emit(Array.isArray(res) ? filtered : { ...res, profiles: filtered, filteredBy: withSvc, count: filtered.length });
 }
 
 async function cmdProfile(args) {
@@ -200,6 +225,48 @@ async function cmdProxy(args) {
   if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome proxy <accountIdx> <url|"">'), { exitCode: 2 });
   const idx = intArg(args[0], 'accountIdx');
   emit(await rpc('chrome_set_profile_proxy', { accountIdx: idx, proxy: args[1] }));
+}
+
+// note <idx> <text...> — set a free-form note on the profile (chrome.json).
+async function cmdNote(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome note <accountIdx> <text>   (empty text clears)'), { exitCode: 2 });
+  const idx = intArg(args[0], 'accountIdx');
+  const note = args.slice(1).join(' ');
+  emit(await rpc('chrome_set_profile_meta', { accountIdx: idx, note }));
+}
+
+// accounts <idx> <github,gmail,apple,cf> — set the service tags (comma/space
+// separated). Pass "" to clear.
+async function cmdAccounts(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome accounts <accountIdx> <github,gmail,apple,cf>'), { exitCode: 2 });
+  const idx = intArg(args[0], 'accountIdx');
+  const accounts = args.slice(1).join(',').split(/[,\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  emit(await rpc('chrome_set_profile_meta', { accountIdx: idx, accounts }));
+}
+
+// ip <idx> [--url <ipApi>] — report the profile's egress IP + country by
+// fetching an IP-info API from inside that profile's Chrome (so it goes through
+// that profile's proxy). Defaults to api.myip.com ({ip,country,cc}); the
+// profile must be launched (have a live page target).
+async function cmdIp(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome ip <accountIdx> [--url <ipApi>]'), { exitCode: 2 });
+  const idx = intArg(args[0], 'accountIdx');
+  let url = 'https://api.myip.com';
+  for (let i = 1; i < args.length; i++) { if (args[i] === '--url') url = args[++i]; }
+  const expression = `fetch(${JSON.stringify(url)}, { cache: 'no-store' }).then(r => r.json()).catch(e => ({ error: String(e && e.message || e) }))`;
+  const res = await rpc('chrome_cdp_call', {
+    accountIdx: idx,
+    method: 'Runtime.evaluate',
+    params: { expression, awaitPromise: true, returnByValue: true },
+  });
+  // chrome_cdp_call → { debuggerPort, result }, result = CDP Runtime.evaluate
+  // result: { result: { type, value }, exceptionDetails? }.
+  const cdp = res?.result ?? res;
+  if (cdp?.exceptionDetails) {
+    throw Object.assign(new Error(`page eval failed: ${cdp.exceptionDetails.text || 'exception'} (is the profile launched with an open tab?)`), { exitCode: 4 });
+  }
+  const value = cdp?.result?.value ?? cdp?.value ?? cdp;
+  emit(value);
 }
 
 async function cmdLaunch(args) {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-chrome",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "title": "Agent Chrome",
   "description": "Control system Chrome on a connected cicy-desktop host with per-profile proxy support. CDP + ~/cicy-ai/db/chrome.json multi-profile via desktop_event RPC.",
   "category": "dev",
@@ -64,8 +64,23 @@
     },
     {
       "name": "profiles",
-      "example": "agent-chrome profiles",
-      "description": "List available Chrome profiles with proxy config"
+      "example": "agent-chrome profiles --with github",
+      "description": "List Chrome profiles; --with <service> filters to profiles tagged with / signed into that service"
+    },
+    {
+      "name": "accounts",
+      "example": "agent-chrome accounts 3 github,gmail,apple,cf",
+      "description": "Tag which services a profile holds (stored in chrome.json)"
+    },
+    {
+      "name": "note",
+      "example": "agent-chrome note 3 \"main work identity\"",
+      "description": "Set a free-form note on a profile"
+    },
+    {
+      "name": "ip",
+      "example": "agent-chrome ip 3",
+      "description": "Show the profile's egress IP + country (CDP fetch through its proxy)"
     }
   ]
 }
