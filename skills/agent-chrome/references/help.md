@@ -8,7 +8,8 @@ agent-chrome profile <accountIdx> [--json]
 agent-chrome add [--gmail <addr>] [--org-path <path>] [--launch] [--json]
 agent-chrome proxy <accountIdx> <url|"">
 agent-chrome note <accountIdx> <text>            set/clear a free-form note
-agent-chrome accounts <accountIdx> <github,gmail,apple,cf>   set service tags
+agent-chrome account <accountIdx> <service> <accountId>   record the account for a service
+agent-chrome accounts <accountIdx>               list a profile's service→account map
 agent-chrome ip <accountIdx> [--url <ipApi>]     egress IP + country via CDP
 agent-chrome launch <accountIdx> [--url <url>] [--no-activate]
 agent-chrome close <accountIdx>
@@ -24,17 +25,23 @@ agent-chrome tools
 
 ## Per-profile accounts + notes
 
-Each profile records which services it holds (`accounts` tags) and a free-form
-`note`, stored in its `~/cicy-ai/db/chrome.json` entry:
+Each profile records the **actual account** it holds per service (a
+`service → accountId` map) plus a free-form `note`, stored in its
+`~/cicy-ai/db/chrome.json` entry:
 
 ```
-agent-chrome accounts 3 github,gmail,apple,cf   # tag profile 3
+agent-chrome account 3 github octocat           # profile 3's github account
+agent-chrome account 3 gmail  me@gmail.com
+agent-chrome account 3 apple  me@icloud.com
+agent-chrome account 3 cf     ops@acme.com
+agent-chrome account 3 github ""                # empty removes that service
+agent-chrome accounts 3                         # list profile 3's accounts
 agent-chrome note 3 "main work identity — 2FA on phone"
-agent-chrome profiles --with github             # every profile that has github
+agent-chrome profiles --with github             # every profile that has a github account
 ```
 
-`--with <service>` matches both the `accounts` tags and any signed-in
-`platform.<service>` (github/gmail detection), case-insensitive.
+`--with <service>` matches a recorded `accounts[<service>]` value and any
+signed-in `platform.<service>` (github/gmail detection), case-insensitive.
 
 ## Egress IP
 
