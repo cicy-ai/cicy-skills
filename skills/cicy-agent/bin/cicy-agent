@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
 // Subcommands: list / ls / tree / windows / capture / reply / msg /
-//              send-keys / create / restart / clear
+//              send-keys / restart / clear / fork
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -38,6 +38,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'send-keys':          await cmdSendKeys(r2, node); break;
       case 'restart':            await cmdRestart(r2, node); break;
       case 'clear':               await cmdClear(r2, node); break;
+      case 'fork':               await cmdFork(r2, node); break;
       default: bail(`unknown command: ${cmd}. Try cicy-agent --help.`, 2);
     }
   } catch (e) {
@@ -56,7 +57,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|send-keys|restart|clear> [args...] [--node NAME]\n'); }
+  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|send-keys|restart|clear|fork> [args...] [--node NAME]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -180,18 +181,19 @@ async function cmdReply(args, node) {
 }
 
 // Stamp the sender id (set inside cicy panes) so the receiver can skim who
-// messaged in a busy pane. Format: `📨 [w-10029] hello`.
+// messaged in a busy pane. Format: `📮 [w-10029] hello`.
 // Idempotent: leaves the text alone if it already carries either marker
-// (the receiver may forward the stamped text back to us).
+// (the receiver may forward the stamped text back to us). The 📨 check stays
+// so text stamped by older installs is still recognized during the rollover.
 function stampSender(text) {
   const senderID = (process.env.X_AGENT_SHORT_ID || '').trim();
   if (!senderID) return { text, senderID: '' };
-  if (text.startsWith('📨 ') || text.startsWith(`[${senderID}]`)) return { text, senderID };
-  return { text: `📨 [${senderID}] ${text}`, senderID };
+  if (text.startsWith('📮 ') || text.startsWith('📨 ') || text.startsWith(`[${senderID}]`)) return { text, senderID };
+  return { text: `📮 [${senderID}] ${text}`, senderID };
 }
 
 async function cmdMsg(args, node) {
-  // Default ON: callback (reply routes back to the sender) + a 📨 [sender]
+  // Default ON: callback (reply routes back to the sender) + a 📮 [sender]
   // prefix so the recipient knows who messaged. Disable callback with
   // --no-callback.
   let callback = true;
@@ -229,4 +231,32 @@ async function cmdClear(args, node) {
   const data = await api('POST', '/api/tmux/clear', { pane: args[0] }, node);
   if (json) return ok(data);
   console.log(typeof data === 'string' ? data : JSON.stringify(data));
+}
+
+// fork — replicate an existing agent: the server dumps the source agent's
+// conversation (agent-summary) and spawns a NEW agent that copies the source's
+// config (agent_type, model, role, allow_all, reply_in_chinese, use_custom_gateway,
+// proxy_enable) and is prompted to INHERIT that context and continue. POSTs
+// /api/tmux/fork.
+async function cmdFork(args, node) {
+  let title = '', master = '';
+  const pos = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--title' || args[i] === '-t') title = args[++i] || '';
+    else if (args[i] === '--master' || args[i] === '-m') master = args[++i] || '';
+    else pos.push(args[i]);
+  }
+  if (pos.length < 1) {
+    throw Object.assign(new Error('Usage: cicy-agent fork <source-pane> [--title T] [--master PANE]'), { exitCode: 2 });
+  }
+  const payload = { source_pane_id: pos[0] };
+  if (title) payload.title = title;
+  if (master) payload.master_pane_id = master;
+  const data = await api('POST', '/api/tmux/fork', payload, node);
+  if (json) return ok(data);
+  const pid = data?.pane_id || data?.data?.pane_id || '';
+  if (!pid) { console.log(typeof data === 'string' ? data : JSON.stringify(data)); return; }
+  let line = `forked ${pos[0]} -> ${pid}`;
+  if (data?.prompt_sent === false) line += ' (context prompt NOT sent — new agent not ready in time)';
+  console.log(line);
 }
