@@ -26,7 +26,7 @@ cicy-code skill install cicy-todo
 # In any worker pane (e.g. w-10025) — own todos only.
 cicy-todo                           # list active
 cicy-todo add "Ship it"
-cicy-todo start <id>                # → doing
+cicy-todo test  <id>                # → test (done coding, awaiting review)
 cicy-todo done  <id>                # → done
 cicy-todo drop  <id>                # → dropped
 cicy-todo back  <id>                # → todo
