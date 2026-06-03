@@ -8,8 +8,11 @@ agent-chrome profile <accountIdx> [--json]
 agent-chrome add [--gmail <addr>] [--org-path <path>] [--launch] [--json]
 agent-chrome proxy <accountIdx> <url|"">
 agent-chrome note <accountIdx> <text>            set/clear a free-form note
-agent-chrome account <accountIdx> <service> <accountId>   record the account for a service
-agent-chrome accounts <accountIdx>               list a profile's service→account map
+agent-chrome account <accountIdx> <service> <accountId>   record the login id for a service
+agent-chrome password <accountIdx> <service> <pwd>        record the password
+agent-chrome 2fa <accountIdx> <service> <base32-secret>   record the TOTP (2FA) secret
+agent-chrome otp <accountIdx> <service>          generate the current 2FA code
+agent-chrome accounts <accountIdx> [--show]      list accounts (secrets masked unless --show)
 agent-chrome ip <accountIdx> [--url <ipApi>]     egress IP + country via CDP
 agent-chrome launch <accountIdx> [--url <url>] [--no-activate]
 agent-chrome close <accountIdx>
@@ -23,25 +26,30 @@ agent-chrome --help / -h / help
 agent-chrome tools
 ```
 
-## Per-profile accounts + notes
+## Per-profile accounts (id + password + 2FA) + notes
 
-Each profile records the **actual account** it holds per service (a
-`service → accountId` map) plus a free-form `note`, stored in its
-`~/cicy-ai/db/chrome.json` entry:
+Each profile records, per service, the **account id, password, and TOTP (2FA)
+secret** — a `service → { account, password, totp }` map — plus a free-form
+profile `note`, stored in its `~/cicy-ai/db/chrome.json` entry:
 
 ```
-agent-chrome account 3 github octocat           # profile 3's github account
-agent-chrome account 3 gmail  me@gmail.com
-agent-chrome account 3 apple  me@icloud.com
-agent-chrome account 3 cf     ops@acme.com
-agent-chrome account 3 github ""                # empty removes that service
-agent-chrome accounts 3                         # list profile 3's accounts
-agent-chrome note 3 "main work identity — 2FA on phone"
-agent-chrome profiles --with github             # every profile that has a github account
+agent-chrome account  3 github octocat            # login id
+agent-chrome password 3 github 's3cr3t!'          # password
+agent-chrome 2fa      3 github JBSWY3DPEHPK3PXP   # TOTP secret (base32)
+agent-chrome otp      3 github                    # → 492039  (17s left)
+agent-chrome accounts 3                           # list (password/totp masked as "✓ set")
+agent-chrome accounts 3 --show                    # reveal secrets
+agent-chrome password 3 github ""                 # empty clears that field
+agent-chrome note 3 "main work identity"
+agent-chrome profiles --with github               # every profile that has a github account
 ```
 
-`--with <service>` matches a recorded `accounts[<service>]` value and any
-signed-in `platform.<service>` (github/gmail detection), case-insensitive.
+- **Secrets are masked by default** in `accounts` / setter output (shown as
+  `✓ set`); pass `--show` to reveal. chrome.json is written `0600`.
+- `otp` computes a standard RFC-6238 TOTP (SHA1, 6 digits, 30s) locally from
+  the stored secret — handy for scripting a login that needs 2FA.
+- `--with <service>` matches a recorded `accounts[<service>]` and any signed-in
+  `platform.<service>` (github/gmail detection), case-insensitive.
 
 ## Egress IP
 
