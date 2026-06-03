@@ -1,537 +1,546 @@
-#!/usr/bin/env python3
+#!/usr/bin/env node
+// proxy_ssh — manage local SSH SOCKS5 proxy profiles (pure Node, no python).
+//
+// Each profile pins a local SOCKS port to an SSH target. Profiles live in
+// ~/cicy-ai/db/proxy_ssh.json. Subcommands: list/show/create/delete,
+// start/stop/restart, test, install-autossh.
 
-import argparse
-import copy
-import fcntl
-import json
-import os
-import re
-import shlex
-import signal
-import subprocess
-import sys
-import tempfile
-import time
-from pathlib import Path
-from typing import Any, Dict, List
+import { spawnSync } from 'node:child_process';
+import { homedir, platform } from 'node:os';
+import {
+  existsSync, mkdirSync, readFileSync, writeFileSync, renameSync,
+  openSync, closeSync, unlinkSync, statSync,
+} from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 
-DEFAULT_TEST_URL = "https://api.myip.com"
-DEFAULT_SSH_PORT = 22
-DEFAULT_BIND_HOST = "127.0.0.1"
+const DEFAULT_TEST_URL = 'https://api.myip.com';
+const DEFAULT_SSH_PORT = 22;
+const DEFAULT_BIND_HOST = '127.0.0.1';
 
+// SystemExit equivalent: print message to stderr, exit 1.
+class Die extends Error {}
+function die(msg) { throw new Die(msg); }
 
-def first_non_empty(*values: Any) -> str:
-    for value in values:
-        if value is None:
-            continue
-        text = str(value).strip()
-        if text:
-            return text
-    return ""
+function sleep(sec) {
+  const sab = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(sab, 0, 0, Math.round(sec * 1000));
+}
 
+function expanduser(p) {
+  if (!p) return '';
+  if (p === '~') return homedir();
+  if (p.startsWith('~/')) return join(homedir(), p.slice(2));
+  return p;
+}
 
-def int_value(value: Any, default: int = 0) -> int:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        return default
-    try:
-        return int(text)
-    except ValueError:
-        return default
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
 
+function intValue(value, dflt = 0) {
+  if (value === null || value === undefined) return dflt;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'number') return Math.trunc(value);
+  const text = String(value).trim();
+  if (!text) return dflt;
+  const n = parseInt(text, 10);
+  return Number.isNaN(n) ? dflt : n;
+}
 
-def proxy_ssh_file_path() -> Path:
-    override = os.environ.get("CICY_PROXY_SSH_FILE", "").strip()
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / "cicy-ai" / "db" / "proxy_ssh.json"
+function proxySshFilePath() {
+  const override = (process.env.CICY_PROXY_SSH_FILE || '').trim();
+  if (override) return expanduser(override);
+  return join(homedir(), 'cicy-ai', 'db', 'proxy_ssh.json');
+}
 
+// shlex.quote: POSIX-safe single-quoting.
+function shlexQuote(s) {
+  if (s === '') return "''";
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s)) return s;
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
 
-def expand_path(value: str) -> str:
-    return str(Path(value).expanduser()) if value else ""
+function shellJoin(parts) {
+  return parts.map(shlexQuote).join(' ');
+}
 
+function parseProxyUrl(proxyUrl) {
+  const m = String(proxyUrl).trim().match(/^[a-zA-Z0-9+.-]+:\/\/([^:/]+):(\d+)$/);
+  if (!m) die(`invalid proxy_url: ${proxyUrl}`);
+  return [m[1], parseInt(m[2], 10)];
+}
 
-def shell_join(parts: List[str]) -> str:
-    return " ".join(shlex.quote(part) for part in parts)
+function normalizeProfile(raw) {
+  const profile = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const name = firstNonEmpty(profile.name);
+  if (!name) die('profile name must not be empty');
+  const proxyUrl = firstNonEmpty(profile.proxy_url);
+  const startCmd = firstNonEmpty(profile.start_cmd);
+  if (!proxyUrl) die(`profile '${name}' requires proxy_url`);
+  if (!startCmd) die(`profile '${name}' requires start_cmd`);
+  return { name, proxy_url: proxyUrl, start_cmd: startCmd };
+}
 
+function normalizeRegistry(data) {
+  let rawProfiles = [];
+  if (Array.isArray(data)) rawProfiles = data;
+  else if (data && typeof data === 'object' && Array.isArray(data.profiles)) rawProfiles = data.profiles;
+  const profiles = [];
+  const seen = new Set();
+  for (const raw of rawProfiles) {
+    const profile = normalizeProfile(raw);
+    if (seen.has(profile.name)) continue;
+    seen.add(profile.name);
+    profiles.push(profile);
+  }
+  profiles.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return profiles;
+}
 
-def parse_proxy_url(proxy_url: str) -> tuple[str, int]:
-    m = re.match(r"^[a-zA-Z0-9+.-]+://([^:/]+):(\d+)$", proxy_url.strip())
-    if not m:
-        raise SystemExit(f"invalid proxy_url: {proxy_url}")
-    return m.group(1), int(m.group(2))
+function loadRegistryUnlocked(path) {
+  if (!existsSync(path)) return [];
+  const data = JSON.parse(readFileSync(path, 'utf8'));
+  return normalizeRegistry(data);
+}
 
+function writeRegistryUnlocked(path, profiles) {
+  const payload = normalizeRegistry(profiles);
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
+  writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  try {
+    renameSync(tmp, path);
+  } finally {
+    if (existsSync(tmp)) { try { unlinkSync(tmp); } catch { /* ignore */ } }
+  }
+}
 
-def normalize_profile(raw: Dict[str, Any]) -> Dict[str, Any]:
-    profile = copy.deepcopy(raw) if isinstance(raw, dict) else {}
-    name = first_non_empty(profile.get("name"))
-    if not name:
-        raise SystemExit("profile name must not be empty")
-    proxy_url = first_non_empty(profile.get("proxy_url"))
-    start_cmd = first_non_empty(profile.get("start_cmd"))
-    if not proxy_url:
-        raise SystemExit(f"profile '{name}' requires proxy_url")
-    if not start_cmd:
-        raise SystemExit(f"profile '{name}' requires start_cmd")
-    return {
-        "name": name,
-        "proxy_url": proxy_url,
-        "start_cmd": start_cmd,
+// RegistryLock — exclusive lockfile (Node has no flock). Spin until acquired;
+// steal a lock older than 30s (a crashed holder). Lock window is tiny.
+function withRegistryLock(path, fn) {
+  const lockPath = `${path}.lock`;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  let fd = null;
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    try {
+      fd = openSync(lockPath, 'wx');
+      writeFileSync(fd, String(process.pid));
+      break;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let stale = false;
+      try { stale = (Date.now() - statSync(lockPath).mtimeMs) > 30000; } catch { stale = true; }
+      if (stale || Date.now() > deadline) { try { unlinkSync(lockPath); } catch { /* ignore */ } continue; }
+      sleep(0.05);
     }
+  }
+  try {
+    return fn();
+  } finally {
+    if (fd !== null) { try { closeSync(fd); } catch { /* ignore */ } }
+    try { unlinkSync(lockPath); } catch { /* ignore */ }
+  }
+}
 
+function printJson(payload) {
+  process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+}
 
-def normalize_registry(data: Any) -> List[Dict[str, Any]]:
-    raw_profiles = []
-    if isinstance(data, list):
-        raw_profiles = data
-    elif isinstance(data, dict):
-        maybe_profiles = data.get("profiles")
-        if isinstance(maybe_profiles, list):
-            raw_profiles = maybe_profiles
-    profiles: List[Dict[str, Any]] = []
-    seen = set()
-    for raw in raw_profiles:
-        profile = normalize_profile(raw)
-        name = profile["name"]
-        if name in seen:
-            continue
-        seen.add(name)
-        profiles.append(profile)
-    profiles.sort(key=lambda item: item.get("name", ""))
-    return profiles
+function findProfile(profiles, name) {
+  const key = firstNonEmpty(name);
+  for (const item of profiles) {
+    if (item.name === key) return item;
+  }
+  die(`profile '${key}' not found`);
+}
 
+function psLines() {
+  const proc = spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' });
+  if (proc.status !== 0 || typeof proc.stdout !== 'string') return null;
+  return proc.stdout.split('\n');
+}
 
-def load_registry_unlocked(path: Path) -> List[Dict[str, Any]]:
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    return normalize_registry(data)
+function matchesPort(args, localPort) {
+  const first = args.split(/\s+/, 1)[0] || '';
+  const cmd = first.split('/').pop();
+  if (cmd !== 'ssh' && cmd !== 'autossh') return false;
+  return args.includes(`-D ${localPort}`) || args.includes(`:${localPort}`);
+}
 
+function statusText(profile) {
+  const proxyUrl = firstNonEmpty(profile.proxy_url);
+  const startCmd = firstNonEmpty(profile.start_cmd);
+  if (!proxyUrl || !startCmd) return 'stopped';
+  const [, localPort] = parseProxyUrl(proxyUrl);
+  const lines = psLines();
+  if (lines === null) return 'stopped';
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(\S+)\s+(.*)$/);
+    if (!m) continue;
+    const args = m[2];
+    if (!matchesPort(args, localPort)) continue;
+    if (firstNonEmpty(profile.proxy_url) && firstNonEmpty(profile.start_cmd)) return 'running';
+  }
+  return 'stopped';
+}
 
-def write_registry_unlocked(path: Path, profiles: List[Dict[str, Any]]) -> None:
-    payload = normalize_registry(profiles)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, ensure_ascii=False)
-            fh.write("\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_name, path)
-    finally:
-        if os.path.exists(tmp_name):
-            os.unlink(tmp_name)
+function findProfilePids(profile) {
+  const proxyUrl = firstNonEmpty(profile.proxy_url);
+  if (!proxyUrl) return [];
+  const [, localPort] = parseProxyUrl(proxyUrl);
+  const lines = psLines();
+  if (lines === null) return [];
+  const pids = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(\S+)\s+(.*)$/);
+    if (!m) continue;
+    const pidText = m[1];
+    const args = m[2];
+    if (!matchesPort(args, localPort)) continue;
+    const pid = parseInt(pidText, 10);
+    if (!Number.isNaN(pid)) pids.push(pid);
+  }
+  return pids;
+}
 
+function killQuiet(pid, signal) {
+  try { process.kill(pid, signal); } catch (e) { if (e.code !== 'ESRCH') throw e; }
+}
 
-class RegistryLock:
-    def __init__(self, path: Path):
-        self.lock_path = Path(f"{path}.lock")
-        self.lock_fh = None
+function stopProfileProcesses(profile) {
+  const pids = findProfilePids(profile);
+  if (pids.length === 0) return true;
+  for (const pid of pids) killQuiet(pid, 'SIGTERM');
+  sleep(1);
+  for (const pid of findProfilePids(profile)) killQuiet(pid, 'SIGKILL');
+  sleep(1);
+  return findProfilePids(profile).length === 0;
+}
 
-    def __enter__(self):
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        self.lock_fh = self.lock_path.open("a+")
-        fcntl.flock(self.lock_fh.fileno(), fcntl.LOCK_EX)
-        return self
+function printProfilesTable(profiles) {
+  if (profiles.length === 0) { console.log('(no proxy_ssh profiles)'); return; }
+  const headers = ['name', 'status', 'proxy_url'];
+  const rows = profiles.map((item) => [
+    String(item.name || ''),
+    statusText(item),
+    String(item.proxy_url || ''),
+  ]);
+  const widths = headers.map((h) => h.length);
+  for (const row of rows) row.forEach((cell, i) => { widths[i] = Math.max(widths[i], cell.length); });
+  const fmt = (row) => row.map((cell, i) => cell.padEnd(widths[i])).join('  ');
+  console.log(fmt(headers));
+  for (const row of rows) console.log(fmt(row));
+}
 
-    def __exit__(self, exc_type, exc, tb):
-        if self.lock_fh is not None:
-            fcntl.flock(self.lock_fh.fileno(), fcntl.LOCK_UN)
-            self.lock_fh.close()
-        return False
+// ── commands ──
 
+function commandList(args) {
+  const profiles = loadRegistryUnlocked(proxySshFilePath());
+  if (args.json) printJson(profiles);
+  else printProfilesTable(profiles);
+  return 0;
+}
 
-def print_json(payload: Any) -> None:
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+function commandShow(args) {
+  const profiles = loadRegistryUnlocked(proxySshFilePath());
+  printJson(findProfile(profiles, args.name));
+  return 0;
+}
 
+function commandCreate(args) {
+  const path = proxySshFilePath();
+  const identityFile = firstNonEmpty(args.identity_file);
+  let target = firstNonEmpty(args.target);
+  if (!target) {
+    const host = firstNonEmpty(args.ssh_host_name, args.ssh_host);
+    if (!host) die('create requires --target or --ssh-host/--ssh-host-name');
+    const user = firstNonEmpty(args.ssh_user);
+    target = user ? `${user}@${host}` : host;
+  }
+  const bindHost = firstNonEmpty(args.bind_host, DEFAULT_BIND_HOST);
+  const proxyHost = firstNonEmpty(args.proxy_host, bindHost !== '0.0.0.0' ? bindHost : '127.0.0.1');
+  const proxyUrl = `socks5://${proxyHost}:${args.local_port}`;
+  const parts = ['ssh', '-N', '-f', '-D', `${bindHost}:${args.local_port}`];
+  if (identityFile) parts.push('-i', identityFile);
+  parts.push(
+    '-p', String(args.ssh_port),
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=8',
+    '-o', 'ExitOnForwardFailure=yes',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'TCPKeepAlive=yes',
+    '-o', 'ServerAliveInterval=15',
+    '-o', 'ServerAliveCountMax=3',
+    target,
+  );
+  const item = { name: args.name, proxy_url: proxyUrl, start_cmd: shellJoin(parts) };
+  withRegistryLock(path, () => {
+    const profiles = loadRegistryUnlocked(path);
+    if (profiles.some((p) => p.name === args.name)) die(`profile '${args.name}' already exists`);
+    profiles.push(item);
+    writeRegistryUnlocked(path, profiles);
+  });
+  if (args.json) printJson(item);
+  else console.log(`created ${args.name} -> ${proxyUrl}`);
+  return 0;
+}
 
-def find_profile(profiles: List[Dict[str, Any]], name: str) -> Dict[str, Any]:
-    key = first_non_empty(name)
-    for item in profiles:
-        if item.get("name") == key:
-            return item
-    raise SystemExit(f"profile '{key}' not found")
-
-
-def status_text(profile: Dict[str, Any]) -> str:
-    proxy_url = first_non_empty(profile.get("proxy_url"))
-    start_cmd = first_non_empty(profile.get("start_cmd"))
-    if not proxy_url or not start_cmd:
-        return "stopped"
-    _, local_port = parse_proxy_url(proxy_url)
-    try:
-        proc = subprocess.run(["ps", "-eo", "pid=,args="], check=True, capture_output=True, text=True)
-    except Exception:
-        return "stopped"
-    for raw_line in proc.stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 1)
-        if len(parts) != 2:
-            continue
-        args = parts[1]
-        cmd = args.split(None, 1)[0].rsplit("/", 1)[-1]
-        if cmd not in ("ssh", "autossh"):
-            continue
-        if f"-D {local_port}" not in args and f":{local_port}" not in args:
-            continue
-        if first_non_empty(profile.get("proxy_url")) and first_non_empty(profile.get("start_cmd")):
-            return "running"
-    return "stopped"
-
-
-def find_profile_pids(profile: Dict[str, Any]) -> List[int]:
-    proxy_url = first_non_empty(profile.get("proxy_url"))
-    if not proxy_url:
-        return []
-    _, local_port = parse_proxy_url(proxy_url)
-    try:
-        proc = subprocess.run(["ps", "-eo", "pid=,args="], check=True, capture_output=True, text=True)
-    except Exception:
-        return []
-    pids: List[int] = []
-    for raw_line in proc.stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 1)
-        if len(parts) != 2:
-            continue
-        pid_text, args = parts
-        cmd = args.split(None, 1)[0].rsplit("/", 1)[-1]
-        if cmd not in ("ssh", "autossh"):
-            continue
-        if f"-D {local_port}" not in args and f":{local_port}" not in args:
-            continue
-        try:
-            pids.append(int(pid_text))
-        except ValueError:
-            continue
-    return pids
-
-
-def stop_profile_processes(profile: Dict[str, Any]) -> bool:
-    pids = find_profile_pids(profile)
-    if not pids:
-        return True
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    time.sleep(1)
-    remaining = find_profile_pids(profile)
-    for pid in remaining:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    time.sleep(1)
-    return not find_profile_pids(profile)
-
-
-def print_profiles_table(profiles: List[Dict[str, Any]]) -> None:
-    if not profiles:
-        print("(no proxy_ssh profiles)")
-        return
-    headers = ["name", "status", "proxy_url"]
-    rows: List[List[str]] = []
-    for item in profiles:
-        rows.append([
-            str(item.get("name", "")),
-            status_text(item),
-            str(item.get("proxy_url", "")),
-        ])
-    widths = [len(h) for h in headers]
-    for row in rows:
-        for idx, cell in enumerate(row):
-            widths[idx] = max(widths[idx], len(cell))
-    fmt = "  ".join("{:<" + str(width) + "}" for width in widths)
-    print(fmt.format(*headers))
-    for row in rows:
-        print(fmt.format(*row))
-
-
-def command_list(args: argparse.Namespace) -> int:
-    path = proxy_ssh_file_path()
-    profiles = load_registry_unlocked(path)
-    if args.json:
-        print_json(profiles)
-    else:
-        print_profiles_table(profiles)
-    return 0
-
-
-def command_show(args: argparse.Namespace) -> int:
-    profiles = load_registry_unlocked(proxy_ssh_file_path())
-    print_json(find_profile(profiles, args.name))
-    return 0
-
-
-def command_create(args: argparse.Namespace) -> int:
-    path = proxy_ssh_file_path()
-    identity_file = first_non_empty(args.identity_file)
-    target = first_non_empty(args.target)
-    if not target:
-        host = first_non_empty(args.ssh_host_name, args.ssh_host)
-        if not host:
-            raise SystemExit("create requires --target or --ssh-host/--ssh-host-name")
-        user = first_non_empty(args.ssh_user)
-        target = f"{user}@{host}" if user else host
-    bind_host = first_non_empty(args.bind_host, DEFAULT_BIND_HOST)
-    proxy_host = first_non_empty(args.proxy_host, bind_host if bind_host != "0.0.0.0" else "127.0.0.1")
-    proxy_url = f"socks5://{proxy_host}:{args.local_port}"
-    parts = ["ssh", "-N", "-f", "-D", f"{bind_host}:{args.local_port}"]
-    if identity_file:
-        parts.extend(["-i", identity_file])
-    parts.extend([
-        "-p", str(args.ssh_port),
-        "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=8",
-        "-o", "ExitOnForwardFailure=yes",
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "TCPKeepAlive=yes",
-        "-o", "ServerAliveInterval=15",
-        "-o", "ServerAliveCountMax=3",
-        target,
-    ])
-    item: Dict[str, Any] = {
-        "name": args.name,
-        "proxy_url": proxy_url,
-        "start_cmd": shell_join(parts),
+function commandDelete(args) {
+  const path = proxySshFilePath();
+  let profile;
+  withRegistryLock(path, () => {
+    const profiles = loadRegistryUnlocked(path);
+    profile = findProfile(profiles, args.name);
+    if (statusText(profile) === 'running') {
+      if (!args.force) die(`profile '${args.name}' is running; use --force to stop and delete`);
+      if (!stopProfileProcesses(profile)) die(`failed to stop running profile '${args.name}'`);
     }
-    with RegistryLock(path):
-        profiles = load_registry_unlocked(path)
-        if any(p.get("name") == args.name for p in profiles):
-            raise SystemExit(f"profile '{args.name}' already exists")
-        profiles.append(item)
-        write_registry_unlocked(path, profiles)
-    if args.json:
-        print_json(item)
-    else:
-        print(f"created {args.name} -> {proxy_url}")
-    return 0
+    const remaining = profiles.filter((item) => item.name !== args.name);
+    writeRegistryUnlocked(path, remaining);
+  });
+  if (args.json) printJson({ success: true, deleted: profile });
+  else console.log(`deleted ${args.name}`);
+  return 0;
+}
 
+function startCmdRun(profile) {
+  const proc = spawnSync('bash', ['-lc', profile.start_cmd], { stdio: 'inherit' });
+  if (proc.status !== 0) die(`failed to start profile '${profile.name}'`);
+}
 
-def command_delete(args: argparse.Namespace) -> int:
-    path = proxy_ssh_file_path()
-    with RegistryLock(path):
-        profiles = load_registry_unlocked(path)
-        profile = find_profile(profiles, args.name)
-        if status_text(profile) == "running":
-            if not args.force:
-                raise SystemExit(f"profile '{args.name}' is running; use --force to stop and delete")
-            if not stop_profile_processes(profile):
-                raise SystemExit(f"failed to stop running profile '{args.name}'")
-        remaining = [item for item in profiles if item.get("name") != args.name]
-        write_registry_unlocked(path, remaining)
-    if args.json:
-        print_json({"success": True, "deleted": profile})
-    else:
-        print(f"deleted {args.name}")
-    return 0
+function commandStart(args) {
+  const profiles = loadRegistryUnlocked(proxySshFilePath());
+  const profile = findProfile(profiles, args.name);
+  if (statusText(profile) === 'running') {
+    if (args.json) printJson({ success: true, name: args.name, status: 'running', message: 'already running' });
+    else console.log(`proxy_ssh: profile ${args.name} already running`);
+    return 0;
+  }
+  startCmdRun(profile);
+  sleep(1);
+  if (statusText(profile) !== 'running') die(`failed to start profile '${args.name}'`);
+  if (args.json) printJson({ success: true, name: args.name, status: 'running' });
+  else console.log(`started ${args.name}`);
+  return 0;
+}
 
+function commandStop(args) {
+  const profiles = loadRegistryUnlocked(proxySshFilePath());
+  const profile = findProfile(profiles, args.name);
+  if (statusText(profile) !== 'running') {
+    if (args.json) printJson({ success: true, name: args.name, status: 'stopped', message: 'already stopped' });
+    else console.log(`proxy_ssh: profile ${args.name} already stopped`);
+    return 0;
+  }
+  if (!stopProfileProcesses(profile)) die(`failed to stop profile '${args.name}'`);
+  if (args.json) printJson({ success: true, name: args.name, status: 'stopped' });
+  else console.log(`stopped ${args.name}`);
+  return 0;
+}
 
-def command_start(args: argparse.Namespace) -> int:
-    profiles = load_registry_unlocked(proxy_ssh_file_path())
-    profile = find_profile(profiles, args.name)
-    if status_text(profile) == "running":
-        if args.json:
-            print_json({"success": True, "name": args.name, "status": "running", "message": "already running"})
-        else:
-            print(f"proxy_ssh: profile {args.name} already running")
-        return 0
-    subprocess.run(["bash", "-lc", profile["start_cmd"]], check=True)
-    time.sleep(1)
-    if status_text(profile) != "running":
-        raise SystemExit(f"failed to start profile '{args.name}'")
-    if args.json:
-        print_json({"success": True, "name": args.name, "status": "running"})
-    else:
-        print(f"started {args.name}")
-    return 0
+function commandRestart(args) {
+  const profiles = loadRegistryUnlocked(proxySshFilePath());
+  const profile = findProfile(profiles, args.name);
+  if (statusText(profile) === 'running') {
+    if (!stopProfileProcesses(profile)) die(`failed to stop profile '${args.name}'`);
+    sleep(0.5);
+  }
+  startCmdRun(profile);
+  sleep(1);
+  if (statusText(profile) !== 'running') die(`failed to restart profile '${args.name}'`);
+  if (args.json) printJson({ success: true, name: args.name, status: 'running' });
+  else console.log(`restarted ${args.name}`);
+  return 0;
+}
 
+function commandInstallAutossh(args) {
+  const system = platform();
+  let cmd;
+  if (system === 'darwin') {
+    cmd = ['brew', 'install', 'autossh'];
+  } else if (system === 'linux') {
+    const managers = [['apt-get', 'install -y'], ['yum', 'install -y'], ['dnf', 'install -y'], ['apk', 'add']];
+    let found = null;
+    for (const [pm, pmInstall] of managers) {
+      if (spawnSync('which', [pm], { stdio: 'ignore' }).status === 0) {
+        found = ['sudo', pm, ...pmInstall.split(' '), 'autossh'];
+        break;
+      }
+    }
+    if (!found) die('unsupported Linux package manager');
+    cmd = found;
+  } else {
+    die(`unsupported platform: ${system}`);
+  }
+  const proc = spawnSync(cmd[0], cmd.slice(1), { stdio: 'inherit' });
+  if (proc.status !== 0) die(`failed to install autossh on ${system}`);
+  if (args.json) printJson({ success: true, action: 'installed', platform: system });
+  else console.log(`installed autossh on ${system}`);
+  return 0;
+}
 
-def command_stop(args: argparse.Namespace) -> int:
-    profiles = load_registry_unlocked(proxy_ssh_file_path())
-    profile = find_profile(profiles, args.name)
-    if status_text(profile) != "running":
-        if args.json:
-            print_json({"success": True, "name": args.name, "status": "stopped", "message": "already stopped"})
-        else:
-            print(f"proxy_ssh: profile {args.name} already stopped")
-        return 0
-    if not stop_profile_processes(profile):
-        raise SystemExit(f"failed to stop profile '{args.name}'")
-    if args.json:
-        print_json({"success": True, "name": args.name, "status": "stopped"})
-    else:
-        print(f"stopped {args.name}")
-    return 0
+function commandTest(args) {
+  const profiles = loadRegistryUnlocked(proxySshFilePath());
+  const profile = findProfile(profiles, args.name);
+  if (statusText(profile) !== 'running') die(`profile '${args.name}' is not running`);
+  const [proxyHost, proxyPort] = parseProxyUrl(profile.proxy_url);
+  const target = firstNonEmpty(args.url, DEFAULT_TEST_URL);
+  const cmd = ['-fsS', '--socks5-hostname', `${proxyHost}:${proxyPort}`, '--connect-timeout', '5', target];
+  const proc = spawnSync('curl', cmd, { encoding: 'utf8' });
+  const ok = proc.status === 0;
+  const out = (proc.stdout || '').trim();
+  const err = (proc.stderr || '').trim();
+  if (args.json) {
+    printJson({ success: ok, name: args.name, test_url: target, stdout: out, stderr: err });
+  } else if (ok) {
+    console.log(`proxy_ssh: ok ${args.name}`);
+    if (out) console.log(out);
+  } else {
+    console.error(`proxy_ssh: test failed for ${args.name}`);
+    if (err) console.error(err);
+  }
+  return ok ? 0 : 1;
+}
 
+// ── argument parsing (mirrors the argparse surface) ──
 
-def command_restart(args: argparse.Namespace) -> int:
-    profiles = load_registry_unlocked(proxy_ssh_file_path())
-    profile = find_profile(profiles, args.name)
-    if status_text(profile) == "running":
-        if not stop_profile_processes(profile):
-            raise SystemExit(f"failed to stop profile '{args.name}'")
-        time.sleep(0.5)
-    subprocess.run(["bash", "-lc", profile["start_cmd"]], check=True)
-    time.sleep(1)
-    if status_text(profile) != "running":
-        raise SystemExit(f"failed to restart profile '{args.name}'")
-    if args.json:
-        print_json({"success": True, "name": args.name, "status": "running"})
-    else:
-        print(f"restarted {args.name}")
-    return 0
+const USAGE = `usage: proxy_ssh <command> [options]
 
+Manage local SSH proxy profiles.
 
-def command_install_autossh(args: argparse.Namespace) -> int:
-    import platform
-    system = platform.system().lower()
-    if system == "darwin":
-        cmd = ["brew", "install", "autossh"]
-    elif system == "linux":
-        for pm, pm_install in [("apt-get", "install -y"), ("yum", "install -y"), ("dnf", "install -y"), ("apk", "add")]:
-            if subprocess.run(["which", pm.split()[0]], capture_output=True).returncode == 0:
-                cmd = ["sudo", pm] + pm_install.split() + ["autossh"]
-                break
-        else:
-            raise SystemExit("unsupported Linux package manager")
-    else:
-        raise SystemExit(f"unsupported platform: {system}")
-    proc = subprocess.run(cmd, check=False)
-    if proc.returncode != 0:
-        raise SystemExit(f"failed to install autossh on {system}")
-    if args.json:
-        print_json({"success": True, "action": "installed", "platform": system})
-    else:
-        print(f"installed autossh on {system}")
-    return 0
+commands:
+  list [--json]                       List proxy_ssh profiles
+  show <name>                         Show one proxy_ssh profile
+  create <name> --local-port N [...]  Create one proxy_ssh profile
+  delete <name> [--force] [--json]    Delete one proxy_ssh profile
+  start <name> [--json]               Start one proxy_ssh profile
+  stop <name> [--json]                Stop one proxy_ssh profile
+  restart <name> [--json]             Restart one proxy_ssh profile
+  test <name> [--url URL] [--json]    Test one proxy_ssh profile
+  install-autossh [--json]            Install autossh (macOS/Linux)
 
+create options:
+  --local-port N        Local SOCKS port (required)
+  --bind-host HOST      SSH -D bind host (default 127.0.0.1)
+  --proxy-host HOST     Host used in proxy_url; default follows bind host
+  --target T            Full SSH target like root@1.2.3.4
+  --ssh-host H          SSH host label or name
+  --ssh-host-name H     SSH hostname or IP
+  --ssh-user U          SSH user
+  --ssh-port N          SSH port (default 22)
+  --identity-file PATH  SSH identity file path
+`;
 
-def command_test(args: argparse.Namespace) -> int:
-    profiles = load_registry_unlocked(proxy_ssh_file_path())
-    profile = find_profile(profiles, args.name)
-    if status_text(profile) != "running":
-        raise SystemExit(f"profile '{args.name}' is not running")
-    proxy_host, proxy_port = parse_proxy_url(profile["proxy_url"])
-    target = first_non_empty(args.url, DEFAULT_TEST_URL)
-    cmd = [
-        "curl",
-        "-fsS",
-        "--socks5-hostname",
-        f"{proxy_host}:{proxy_port}",
-        "--connect-timeout",
-        "5",
-        target,
-    ]
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
-    if args.json:
-        print_json({
-            "success": proc.returncode == 0,
-            "name": args.name,
-            "test_url": target,
-            "stdout": proc.stdout.strip(),
-            "stderr": proc.stderr.strip(),
-        })
-    else:
-        if proc.returncode == 0:
-            print(f"proxy_ssh: ok {args.name}")
-            if proc.stdout.strip():
-                print(proc.stdout.strip())
-        else:
-            print(f"proxy_ssh: test failed for {args.name}", file=sys.stderr)
-            if proc.stderr.strip():
-                print(proc.stderr.strip(), file=sys.stderr)
-    return 0 if proc.returncode == 0 else 1
+// spec: per command, flag name -> {key, type}. positional `name` handled below.
+const COMMANDS = {
+  list: { positional: false, flags: { '--json': { key: 'json', type: 'bool' } }, func: commandList },
+  show: { positional: true, flags: {}, func: commandShow },
+  create: {
+    positional: true,
+    flags: {
+      '--local-port': { key: 'local_port', type: 'int', required: true },
+      '--bind-host': { key: 'bind_host', type: 'str', default: DEFAULT_BIND_HOST },
+      '--proxy-host': { key: 'proxy_host', type: 'str' },
+      '--target': { key: 'target', type: 'str' },
+      '--ssh-host': { key: 'ssh_host', type: 'str' },
+      '--ssh-host-name': { key: 'ssh_host_name', type: 'str' },
+      '--ssh-user': { key: 'ssh_user', type: 'str' },
+      '--ssh-port': { key: 'ssh_port', type: 'int', default: DEFAULT_SSH_PORT },
+      '--identity-file': { key: 'identity_file', type: 'str' },
+      '--json': { key: 'json', type: 'bool' },
+    },
+    func: commandCreate,
+  },
+  delete: { positional: true, flags: { '--force': { key: 'force', type: 'bool' }, '--json': { key: 'json', type: 'bool' } }, func: commandDelete },
+  start: { positional: true, flags: { '--json': { key: 'json', type: 'bool' } }, func: commandStart },
+  stop: { positional: true, flags: { '--json': { key: 'json', type: 'bool' } }, func: commandStop },
+  restart: { positional: true, flags: { '--json': { key: 'json', type: 'bool' } }, func: commandRestart },
+  test: { positional: true, flags: { '--url': { key: 'url', type: 'str' }, '--json': { key: 'json', type: 'bool' } }, func: commandTest },
+  'install-autossh': { positional: false, flags: { '--json': { key: 'json', type: 'bool' } }, func: commandInstallAutossh },
+};
 
+// argparse-style error: usage+message to stderr, exit 2.
+function argError(msg) {
+  process.stderr.write(USAGE);
+  process.stderr.write(`proxy_ssh: error: ${msg}\n`);
+  process.exit(2);
+}
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="proxy_ssh", description="Manage local SSH proxy profiles.")
-    sub = parser.add_subparsers(dest="command", required=True)
+function parseAndRun(argv) {
+  if (argv.length === 0 || argv.some((a) => a === '--help' || a === '-h' || a === 'help')) {
+    process.stdout.write(USAGE);
+    return 0;
+  }
+  const command = argv[0];
+  const spec = COMMANDS[command];
+  if (!spec) argError(`argument command: invalid choice: '${command}'`);
+  const rest = argv.slice(1);
+  const args = {};
+  for (const f of Object.values(spec.flags)) {
+    if (f.type === 'bool') args[f.key] = false;
+    else if ('default' in f) args[f.key] = f.default;
+    else args[f.key] = undefined;
+  }
+  let positionalSet = false;
+  for (let i = 0; i < rest.length; i++) {
+    const tok = rest[i];
+    if (tok.startsWith('--') || (tok.startsWith('-') && tok.length > 1 && Number.isNaN(Number(tok)))) {
+      let flagName = tok;
+      let inlineVal = null;
+      const eq = tok.indexOf('=');
+      if (eq !== -1) { flagName = tok.slice(0, eq); inlineVal = tok.slice(eq + 1); }
+      const f = spec.flags[flagName];
+      if (!f) argError(`unrecognized arguments: ${tok}`);
+      if (f.type === 'bool') {
+        args[f.key] = true;
+      } else {
+        let val = inlineVal;
+        if (val === null) { val = rest[++i]; if (val === undefined) argError(`argument ${flagName}: expected one argument`); }
+        if (f.type === 'int') {
+          const n = parseInt(val, 10);
+          if (Number.isNaN(n)) argError(`argument ${flagName}: invalid int value: '${val}'`);
+          args[f.key] = n;
+        } else {
+          args[f.key] = val;
+        }
+      }
+    } else if (spec.positional && !positionalSet) {
+      args.name = tok;
+      positionalSet = true;
+    } else {
+      argError(`unrecognized arguments: ${tok}`);
+    }
+  }
+  if (spec.positional && !positionalSet) argError('the following arguments are required: name');
+  for (const [flagName, f] of Object.entries(spec.flags)) {
+    if (f.required && (args[f.key] === undefined || args[f.key] === null)) {
+      argError(`the following arguments are required: ${flagName}`);
+    }
+  }
+  return spec.func(args);
+}
 
-    list_parser = sub.add_parser("list", help="List proxy_ssh profiles")
-    list_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    list_parser.set_defaults(func=command_list)
+function main() {
+  try {
+    const code = parseAndRun(process.argv.slice(2));
+    process.exit(code || 0);
+  } catch (e) {
+    if (e instanceof Die) {
+      process.stderr.write(`${e.message}\n`);
+      process.exit(1);
+    }
+    throw e;
+  }
+}
 
-    show_parser = sub.add_parser("show", help="Show one proxy_ssh profile")
-    show_parser.add_argument("name", help="Profile name")
-    show_parser.set_defaults(func=command_show)
-
-    create_parser = sub.add_parser("create", help="Create one proxy_ssh profile")
-    create_parser.add_argument("name", help="Profile name")
-    create_parser.add_argument("--local-port", required=True, type=int, help="Local SOCKS port")
-    create_parser.add_argument("--bind-host", default=DEFAULT_BIND_HOST, help="SSH -D bind host")
-    create_parser.add_argument("--proxy-host", help="Host used in proxy_url; default follows bind host")
-    create_parser.add_argument("--target", help="Full SSH target like root@1.2.3.4")
-    create_parser.add_argument("--ssh-host", help="SSH host label or name")
-    create_parser.add_argument("--ssh-host-name", help="SSH hostname or IP")
-    create_parser.add_argument("--ssh-user", help="SSH user")
-    create_parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH port")
-    create_parser.add_argument("--identity-file", help="SSH identity file path")
-    create_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    create_parser.set_defaults(func=command_create)
-
-    delete_parser = sub.add_parser("delete", help="Delete one proxy_ssh profile")
-    delete_parser.add_argument("name", help="Profile name")
-    delete_parser.add_argument("--force", action="store_true", help="Stop running profile before deleting")
-    delete_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    delete_parser.set_defaults(func=command_delete)
-
-    start_parser = sub.add_parser("start", help="Start one proxy_ssh profile")
-    start_parser.add_argument("name", help="Profile name")
-    start_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    start_parser.set_defaults(func=command_start)
-
-    stop_parser = sub.add_parser("stop", help="Stop one proxy_ssh profile")
-    stop_parser.add_argument("name", help="Profile name")
-    stop_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    stop_parser.set_defaults(func=command_stop)
-
-    restart_parser = sub.add_parser("restart", help="Restart one proxy_ssh profile (stop then start)")
-    restart_parser.add_argument("name", help="Profile name")
-    restart_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    restart_parser.set_defaults(func=command_restart)
-
-    test_parser = sub.add_parser("test", help="Test one proxy_ssh profile")
-    test_parser.add_argument("name", help="Profile name")
-    test_parser.add_argument("--url", help="Override test URL")
-    test_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    test_parser.set_defaults(func=command_test)
-
-    install_autossh_parser = sub.add_parser("install-autossh", help="Install autossh (macOS/Linux)")
-    install_autossh_parser.add_argument("--json", action="store_true", help="Print JSON output")
-    install_autossh_parser.set_defaults(func=command_install_autossh)
-
-    return parser
-
-
-def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
-    return args.func(args)
-
-
-if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except BrokenPipeError:
-        try:
-            sys.stdout.close()
-        except Exception:
-            pass
-        raise SystemExit(1)
+main();
