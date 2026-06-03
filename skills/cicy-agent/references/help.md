@@ -13,6 +13,7 @@ cicy-agent msg <pane> <text> [--callback]     Send chat message (fire-and-forget
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
 cicy-agent restart                            Restart all panes
 cicy-agent clear <pane>                       Clear pane
+cicy-agent fork <src> [--title T] [--master PANE]     Replicate an agent so a new one inherits its context
 
 cicy-agent --node <NAME> ...                  Run against a remote node
 cicy-agent --json ...                         JSON output mode
