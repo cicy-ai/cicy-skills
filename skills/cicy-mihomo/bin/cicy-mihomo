@@ -325,13 +325,18 @@ async function cmdRestart() {
 
 async function cmdReload() {
   if (readPID() === 0) bail('not running — start first', 4);
-  // PUT /configs?force=true with { path: CONFIG_PATH }
+  // Reload the SAME config the process was launched with (`-f CONFIG_PATH`).
+  // We send an empty path on purpose: mihomo then reloads C.Path.Config() (the
+  // launched config) and skips its safe-path check, which only fires for an
+  // explicit, different path. Sending CONFIG_PATH explicitly would trip
+  // "path is not subpath of home directory or SAFE_PATHS" because the config
+  // lives at ~/cicy-ai/db/mihomo.yaml, outside mihomo's ~/.config/mihomo home.
   let r;
   try {
     r = await fetch(CTRL_BASE + '/configs?force=true', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: CONFIG_PATH }),
+      body: JSON.stringify({}),
     });
   } catch (e) {
     bail(`controller unreachable at ${CTRL_BASE}: ${e.message}`, 4);
