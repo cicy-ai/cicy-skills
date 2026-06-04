@@ -24,6 +24,7 @@ Use this skill when the task involves:
 - running a shell command on the desktop machine
 - inspecting OS / hardware info or window list
 - making an arbitrary Electron-main tool call via raw electronRPC
+- discovering the live tool set — `agent-desktop tools` queries the connected client via the `list_tools` meta-tool (`--schema`/`--names`/`--tag`), falling back to the static reference when no client is connected
 
 ## Rules
 

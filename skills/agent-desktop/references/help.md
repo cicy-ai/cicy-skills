@@ -13,8 +13,14 @@ agent-desktop windows [--client ID] [--json]
 agent-desktop sysinfo [--client ID] [--json]
 agent-desktop rpc <tool> [json_args] [--client ID] [--json]
 agent-desktop --help / -h / help
-agent-desktop tools
+agent-desktop tools [--schema] [--names] [--tag <Tag>] [--static] [--client ID] [--json]
 ```
+
+`tools` queries the connected cicy-desktop **live** via the `list_tools`
+meta-tool (name/description/tag; `--schema` adds each inputSchema, `--names`
+returns just names, `--tag` filters by tag). It falls back to the bundled
+static `references/tools.md` when no client is connected or the client predates
+`list_tools` — or force the static doc with `--static`.
 
 ## Options
 

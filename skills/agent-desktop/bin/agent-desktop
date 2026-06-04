@@ -41,7 +41,7 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 30000);
 (async () => {
   try {
     switch (cmd) {
-      case 'tools':       printTools(); return;
+      case 'tools':       await cmdTools(rest); return;
       case 'clients':     await cmdClients(); return;
       case 'ping':        await cmdPing(); return;
       case 'screenshot':  await cmdScreenshot(); return;
@@ -241,6 +241,46 @@ async function cmdSimpleRPC(tool) {
   if (json) return ok(result);
   if (typeof result === 'string') console.log(result);
   else console.log(JSON.stringify(result, null, 2));
+}
+
+async function cmdTools(rest) {
+  // Live tool discovery via the `list_tools` meta-tool on the connected
+  // cicy-desktop. Falls back to the bundled static references/tools.md when no
+  // client is connected or the client is too old to have list_tools.
+  //   agent-desktop tools [--schema] [--names] [--tag <Tag>] [--static]
+  if (rest.includes('--static')) { printTools(); return; }
+  const toolArgs = {};
+  if (rest.includes('--schema')) toolArgs.schema = true;
+  if (rest.includes('--names'))  toolArgs.names_only = true;
+  const ti = rest.indexOf('--tag');
+  if (ti !== -1 && rest[ti + 1]) toolArgs.tag = rest[ti + 1];
+
+  let payload;
+  try {
+    const { result } = await rpc('list_tools', toolArgs);
+    const text = (result?.content || []).map((c) => c.text).filter(Boolean).join('');
+    if (!text) throw new Error('empty list_tools result (client may predate list_tools)');
+    payload = JSON.parse(text);
+  } catch (e) {
+    if (json) { ok({ live: false, error: e.message }); return; }
+    process.stderr.write(`agent-desktop: live list_tools unavailable (${e.message}); showing static reference\n`);
+    printTools();
+    return;
+  }
+
+  if (json) { ok(payload); return; }
+  if (Array.isArray(payload.tools) && typeof payload.tools[0] === 'string') {
+    console.log(`${payload.count} tools:`);
+    console.log(payload.tools.join('\n'));
+    return;
+  }
+  console.log(`${payload.count} tools${payload.tags ? ` · ${payload.tags.length} tags` : ''}:`);
+  let lastTag = null;
+  for (const t of payload.tools || []) {
+    if (t.tag !== lastTag) { console.log(`\n[${t.tag}]`); lastTag = t.tag; }
+    console.log(`  ${t.name}${t.description ? ' — ' + t.description : ''}`);
+    if (t.inputSchema) console.log(`      ${JSON.stringify(t.inputSchema)}`);
+  }
 }
 
 async function cmdRPC(args) {
