@@ -1,5 +1,10 @@
 # agent-desktop — tools
 
+> **Static snapshot.** For the live, authoritative tool set on a connected
+> client, run `agent-desktop tools` (queries the `list_tools` meta-tool;
+> `--schema` / `--names` / `--tag <Tag>` / `--json`). This doc is the offline
+> fallback and may lag the actual ~100+ tools.
+
 ## Wire protocol
 
 ```

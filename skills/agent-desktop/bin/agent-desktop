@@ -258,7 +258,11 @@ async function cmdTools(rest) {
   let payload;
   try {
     const { result } = await rpc('list_tools', toolArgs);
-    const text = (result?.content || []).map((c) => c.text).filter(Boolean).join('');
+    // The desktop_event bridge already unwraps {content:[{text}]} to the raw
+    // text string; tolerate both shapes.
+    const text = typeof result === 'string'
+      ? result
+      : (result?.content || []).map((c) => c.text).filter(Boolean).join('');
     if (!text) throw new Error('empty list_tools result (client may predate list_tools)');
     payload = JSON.parse(text);
   } catch (e) {
