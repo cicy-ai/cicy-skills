@@ -21,7 +21,7 @@ webview 内部的 guest 页里**,不是 host 页;其余命令经 `window.cicyArt
 | `cdp-attach [v]` | 挂 CDP debugger(会自动关掉手开的 DevTools) | 需要 bridge |
 | `cdp <Domain.method> ['{params}']` | 全量 CDP:DOM/Network/Runtime/Input/Page/Emulation… | 需要 bridge;先 `cdp-attach` |
 | `cdp-detach` | 卸下 debugger | |
-| `capture [out.png]` | 截图;给路径则落盘 PNG,否则回 dataURL | 走元素 `capturePage` |
+| `capture [out.png]` | 像素截图;给路径则落盘 PNG,否则回 dataURL | 走元素 `capturePage`。⚠️ **base64 吃大量 token，截图前先问 user**；读页面用 `snapshot` |
 | `pdf [out.pdf]` | 渲染 PDF;给路径则落盘 | 走元素 `printToPDF` |
 | `events [max]` / `peek [max]` | 取走 / 偷看页面缓冲的事件(console、导航、CDP 流) | exec_js 是请求响应式,事件只能拉 |
 | `clear-events` | 清空事件缓冲 | |

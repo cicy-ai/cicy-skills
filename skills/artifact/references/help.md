@@ -24,6 +24,7 @@ Daemon: `http://127.0.0.1:8008` (override with `$CICY_API_PORT`).
 
 ## Inner-page JS
 - `artifact list-tools`       — 动态列出当前产物帧可用的全部 Electron 能力（webview 元素方法+中文说明、webContentsId、bridge/CDP 可用性；`--json` 给结构化）.
+- `artifact snapshot`         — DOM 快照(机器可读，自带点击 box 坐标)：url/title/可见可点击元素/输入框。**读页面、定位点击用它，不吃 token**.
 - `artifact exec '<js>'`      — 在 **webview guest 页内**执行 JS（直接走 `webview.executeJavaScript`），返回结果.
                                 (alias: `exec-js`; async expressions are awaited.)
 
@@ -48,7 +49,7 @@ Daemon: `http://127.0.0.1:8008` (override with `$CICY_API_PORT`).
 - `artifact call sendInputEvent '{"type":"mouseDown","x":10,"y":20,"button":"left","clickCount":1}'`
 
 ## Capture
-- `artifact capture [out.png]`  — screenshot; prints a data URL, or writes a PNG if a path is given.
+- `artifact capture [out.png]`  — screenshot; prints a data URL, or writes a PNG if a path is given.  ⚠️ 像素图(base64)吃大量 token，截图前先问用户；优先 `snapshot`.
 - `artifact pdf [out.pdf]`      — print to PDF; prints base64, or writes a PDF if a path is given.
 
 ## Logs / events (pull-based)

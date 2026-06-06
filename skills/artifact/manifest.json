@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "artifact",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "title": "Artifact",
   "description": "Open and remote-control the cicy-code 产物 (artifact) tab frame: open drawer+tab, run JS in the webview guest page, call native <webview> methods (list-tools), screenshot/PDF, drive full CDP.",
   "category": "dev",
@@ -58,6 +58,11 @@
       "description": "动态枚举当前产物帧可用的全部 Electron 能力：67 个 webview 元素方法（含中文说明）+ webContentsId + bridge/CDP 可用性"
     },
     {
+      "name": "snapshot",
+      "example": "artifact snapshot",
+      "description": "DOM 快照(机器可读、自带点击坐标)：url/title/可见可点击元素(box)+输入框。读页面/驱动点击用它，不吃 token"
+    },
+    {
       "name": "exec",
       "example": "artifact exec 'document.title'",
       "description": "在 webview guest 页内执行 JS（直接走 webview.executeJavaScript）并返回结果"
@@ -70,7 +75,7 @@
     {
       "name": "capture",
       "example": "artifact capture /tmp/shot.png",
-      "description": "截图产物页，落盘 PNG 或返回 dataURL"
+      "description": "像素截图(base64)——会消耗大量 token，截图前先问用户；读页面优先用 snapshot"
     },
     {
       "name": "pdf",
