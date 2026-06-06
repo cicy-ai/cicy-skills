@@ -52,9 +52,24 @@ Each `accountIdx` (N) maps to:
 Windows in the same session share cookies, localStorage, IndexedDB,
 service workers, cache, and proxy.
 
+## Open discipline (agent protocol)
+
+Before `open <idx> --url <u>`, run `windows` (or `session <idx>`):
+
+1. **URL already open in that session →** do NOT open a new window.
+   Bring the existing one to front and tell the user its winId:
+   `agent-electron cdp <winId> Page.bringToFront '{}'`
+2. **Needs fresh content →** refresh in place instead of re-opening:
+   `agent-electron url <winId> <u>` or `agent-electron cdp <winId> Page.reload '{}'`
+3. **User explicitly wants a second window →** only then
+   `agent-electron open <idx> --url <u> --no-reuse`
+
 ## CDP examples
 
 ```bash
+# bring window 4 to front (activate instead of re-opening)
+agent-electron cdp 4 Page.bringToFront '{}'
+
 # evaluate JS in window 4
 agent-electron cdp 4 Runtime.evaluate '{"expression":"document.title","returnByValue":true}'
 
