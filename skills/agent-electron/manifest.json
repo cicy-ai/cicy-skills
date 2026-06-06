@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-electron",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "title": "Agent Electron",
   "description": "Drive cicy-desktop Electron BrowserWindows and per-account sandbox sessions via desktop_event RPC. Each accountIdx = its own session.fromPartition() with proxy. Electron analog of agent-chrome.",
   "category": "dev",
@@ -96,12 +96,12 @@
     {
       "name": "screenshot",
       "example": "agent-electron screenshot 4 --out shot.png",
-      "description": "Screenshot a window (to clipboard by default, or to a file with --out)"
+      "description": "Screenshot a window (clipboard by default, --out for file). Only with explicit user permission — default to snapshot for inspecting page state"
     },
     {
       "name": "snapshot",
       "example": "agent-electron snapshot 4",
-      "description": "Capture a DOM/accessibility snapshot of a window's page"
+      "description": "Capture a DOM/accessibility snapshot of a window page — the default way to inspect/verify page state (no screenshot needed)"
     },
     {
       "name": "sysinfo",

@@ -35,6 +35,9 @@ agent-electron tools
 - `proxy <idx> "" ` clears the proxy on a session.
 - `screenshot --out path` writes a PNG to `path`; with no `--out` it puts
   the image on the host's clipboard (avoids large WebSocket payloads).
+- **Default to `snapshot`, not `screenshot`.** Screenshots capture the
+  user's screen — only when the user explicitly allows it. Use `snapshot`
+  (DOM structure) to inspect page state.
 - `cdp` accepts any CDP method — `Runtime.evaluate`, `Page.navigate`,
   `Page.reload`, `Network.setCookie`, `Input.dispatchMouseEvent`, etc.
 

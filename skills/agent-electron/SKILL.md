@@ -57,6 +57,10 @@ Use this skill when the task involves:
 5. **`--client <client_id>` targets a specific cicy-desktop host.** With no
    flag, auto-selects the single host whose UA contains `CiCyDesktop` /
    `ElectronMCP`.
+6. **Prefer `snapshot` over `screenshot`.** Screenshots capture the user's
+   screen — only take one when the user has explicitly allowed it. For
+   checking page state / verifying renders, use `snapshot` (DOM structure,
+   machine-readable) by default.
 
 ## References
 
