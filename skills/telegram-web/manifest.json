@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "telegram-web",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Telegram Web",
   "description": "Drive Telegram Web A inside a cicy-desktop BrowserWindow. Sync localStorage from system Chrome to login, then read/dispatch via webpack-extracted typify() — no inject file required.",
   "category": "productivity",
