@@ -201,10 +201,11 @@ async function cmdProxy(args) {
 }
 
 async function cmdOpen(args) {
-  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron open <accountIdx> --url <url> [--no-reuse]'), { exitCode: 2 });
-  const idx = intArg(args[0], 'accountIdx');
+  // accountIdx is optional and defaults to 1: `open --url <u>` == `open 1 --url <u>`
+  let idx = 1, start = 0;
+  if (args[0] !== undefined && !args[0].startsWith('--')) { idx = intArg(args[0], 'accountIdx'); start = 1; }
   let url = '', reuseWindow = true;
-  for (let i = 1; i < args.length; i++) {
+  for (let i = start; i < args.length; i++) {
     if (args[i] === '--url')       { url = args[++i]; continue; }
     if (args[i] === '--no-reuse')  { reuseWindow = false; continue; }
   }

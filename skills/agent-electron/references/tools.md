@@ -7,7 +7,7 @@
 | `sessions`                      | `get_windows` (grouped)           | `{}` — derived from window list            |
 | `session <idx>`                 | `get_windows` (filtered)          | `{}` — filtered by accountIdx              |
 | `proxy <idx> <url>`             | `set_account_proxy`               | `{ accountIdx, proxy }`                    |
-| `open <idx> --url <u>`          | `open_window`                     | `{ url, accountIdx, reuseWindow }`         |
+| `open [idx=1] --url <u>`        | `open_window`                     | `{ url, accountIdx, reuseWindow }`         |
 | `close <winId>`                 | `close_window`                    | `{ win_id }`                               |
 | `windows`                       | `get_windows`                     | `{}`                                       |
 | `window <winId>`                | `get_window_info`                 | `{ win_id }`                               |
