@@ -7,7 +7,7 @@
 | `sessions`                      | `get_windows` (grouped)           | `{}` — derived from window list            |
 | `session <idx>`                 | `get_windows` (filtered)          | `{}` — filtered by accountIdx              |
 | `proxy <idx> <url>`             | `set_account_proxy`               | `{ accountIdx, proxy }`                    |
-| `open [idx=1] --url <u>`        | `open_window`                     | `{ url, accountIdx, reuseWindow }`         |
+| `open <url> [--idx 1]`          | `open_window`                     | `{ url, accountIdx, reuseWindow }`         |
 | `close <winId>`                 | `close_window`                    | `{ win_id }`                               |
 | `windows`                       | `get_windows`                     | `{}`                                       |
 | `window <winId>`                | `get_window_info`                 | `{ win_id }`                               |
@@ -54,7 +54,7 @@ service workers, cache, and proxy.
 
 ## Open discipline (agent protocol)
 
-Before `open <idx> --url <u>`, run `windows` (or `session <idx>`):
+Before `open <url> [--idx N]`, run `windows` (or `session <idx>`):
 
 1. **URL already open in that session →** do NOT open a new window.
    Activate the existing one with native BrowserWindow methods and tell
@@ -66,7 +66,7 @@ Before `open <idx> --url <u>`, run `windows` (or `session <idx>`):
 2. **Needs fresh content →** refresh in place instead of re-opening:
    `agent-electron url <winId> <u>`
 3. **User explicitly wants a second window →** only then
-   `agent-electron open <idx> --url <u> --no-reuse`
+   `agent-electron open <url> --no-reuse`
 
 Note: `open` with default reuse does NOT match by URL on the desktop side
 (it only reuses in oneWindow mode) — that's why the check above is the

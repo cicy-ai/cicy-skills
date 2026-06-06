@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-electron",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "title": "Agent Electron",
   "description": "Drive cicy-desktop Electron BrowserWindows and per-account sandbox sessions via desktop_event RPC. Each accountIdx = its own session.fromPartition() with proxy. Electron analog of agent-chrome.",
   "category": "dev",
@@ -65,8 +65,8 @@
     },
     {
       "name": "open",
-      "example": "agent-electron open --url https://example.com",
-      "description": "Open a BrowserWindow under a session (accountIdx optional, default 1). Check windows first: if the URL is already open, win.show()/focus() it and report its winId; --no-reuse forces a fresh window"
+      "example": "agent-electron open https://example.com",
+      "description": "Open <url> in a BrowserWindow (--idx selects the session, default 1). Check windows first: if the URL is already open, win.show()/focus() it and report its winId; --no-reuse forces a fresh window"
     },
     {
       "name": "close",

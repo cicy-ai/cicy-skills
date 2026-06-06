@@ -6,7 +6,7 @@
 agent-electron sessions [--json]
 agent-electron session <accountIdx> [--json]
 agent-electron proxy <accountIdx> <url|"">
-agent-electron open [accountIdx=1] --url <url> [--no-reuse] [--json]
+agent-electron open <url> [--idx 1] [--no-reuse] [--json]
 agent-electron close <winId>
 agent-electron windows [--json]
 agent-electron window <winId> [--json]

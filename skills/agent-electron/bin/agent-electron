@@ -201,15 +201,21 @@ async function cmdProxy(args) {
 }
 
 async function cmdOpen(args) {
-  // accountIdx is optional and defaults to 1: `open --url <u>` == `open 1 --url <u>`
-  let idx = 1, start = 0;
-  if (args[0] !== undefined && !args[0].startsWith('--')) { idx = intArg(args[0], 'accountIdx'); start = 1; }
-  let url = '', reuseWindow = true;
-  for (let i = start; i < args.length; i++) {
+  // open <url> [--idx N] [--no-reuse] — url is positional, session defaults to 1.
+  // Legacy forms still accepted: `open <idx> --url <u>`, `open --url <u>`.
+  let idx = 1, url = '', reuseWindow = true;
+  const pos = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--idx')       { idx = intArg(args[++i], 'idx'); continue; }
     if (args[i] === '--url')       { url = args[++i]; continue; }
     if (args[i] === '--no-reuse')  { reuseWindow = false; continue; }
+    pos.push(args[i]);
   }
-  if (!url) throw Object.assign(new Error('--url <url> is required'), { exitCode: 2 });
+  for (const p of pos) {
+    if (/^\d+$/.test(p)) idx = intArg(p, 'idx');   // bare number = session idx (legacy)
+    else if (!url) url = p;                         // first non-number positional = url
+  }
+  if (!url) throw Object.assign(new Error('usage: agent-electron open <url> [--idx 1] [--no-reuse]'), { exitCode: 2 });
   const r = unwrap(await rpc('open_window', { url, accountIdx: idx, reuseWindow }));
   // open_window returns plain text "Opened window with ID: N" or "...reusing it"
   const txt = typeof r === 'string' ? r : (r?.text || JSON.stringify(r));
