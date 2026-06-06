@@ -1,0 +1,413 @@
+#!/usr/bin/env node
+// artifact — remote-control the 产物 (artifact) tab's page frame in a live
+// cicy-code UI. Drives window.cicyArtifact.* over the chat-WS exec_js channel
+// (POST /api/chat/push, wait_ack), the same transport agent-webpage uses.
+//
+// In cicy-desktop the artifact frame is an Electron <webview>, so this gives
+// the agent full native control: navigate, run JS in the inner page, call any
+// <webview>/webContents method, full CDP (debugger), mouse/keyboard input,
+// screenshots, PDF, and a console/CDP event log. In a plain browser the frame
+// is an <iframe> and only navigation/reload/getUrl work.
+//
+// Requires Node 22+ (native fetch). Auth: api_token from ~/cicy-ai/global.json
+// or $CICY_API_TOKEN.
+
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const argv = process.argv.slice(2);
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+const cmd = argv[0];
+const rest = argv.slice(1).filter((a) => a !== '--json');
+
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+const HTTP_BASE = `http://127.0.0.1:${API_PORT}`;
+const DEFAULT_TIMEOUT = Number(process.env.CICY_AGENT_TIMEOUT_MS || 30000);
+
+// optional --client <id> selects the target cicy-code page client.
+let CLIENT_ID = null;
+{
+  const i = rest.indexOf('--client');
+  if (i >= 0) { CLIENT_ID = rest[i + 1]; rest.splice(i, 2); }
+}
+
+(async () => {
+  try {
+    switch (cmd) {
+      case 'tools':                    printTools();                       break;
+      case 'list-tools': case 'list_tools': await cmdListTools();          break;
+      case 'clients':                  await cmdClients();                 break;
+      case 'info':                     await cmdSimple('info', []);        break;
+      case 'open':                     await cmdOpen(rest);                break;
+      case 'set-url': case 'load':     await cmdArg1('setUrl', rest, 'url'); break;
+      case 'geturl': case 'url':       await cmdSimple('getUrl', []);      break;
+      case 'reload':                   await cmdSimple('reload', []);      break;
+      case 'clear':                    await cmdSimple('clear', []);       break;
+      case 'exec': case 'exec-js':     await cmdExec(rest);                break;
+      case 'call':                     await cmdCall(rest);                break;
+      case 'invoke':                   await cmdInvoke(rest);              break;
+      case 'cdp':                      await cmdCdp(rest);                 break;
+      case 'cdp-attach':               await cmdCdpAttach(rest);           break;
+      case 'cdp-detach':               await cmdSimple('cdpDetach', []);   break;
+      case 'capture': case 'screenshot': await cmdCapture(rest);          break;
+      case 'pdf':                      await cmdPdf(rest);                 break;
+      case 'events': case 'drain':     await cmdEvents(rest, true);        break;
+      case 'peek':                     await cmdEvents(rest, false);       break;
+      case 'clear-events':             await cmdSimple('clearEvents', []); break;
+      default: bail(`unknown command: ${cmd}. Try 'artifact help'.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── output helpers ────────────────────────────────────────────────────────────
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`artifact: ${msg}\n`);
+  process.exit(code);
+}
+function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
+function printResult(payload) {
+  if (json) { ok({ result: payload }); return; }
+  if (payload === undefined || payload === '') return;
+  console.log(payload);
+}
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write("Usage: artifact <open|load|geturl|reload|clear|exec|call|invoke|cdp|cdp-attach|cdp-detach|capture|pdf|events|peek|clear-events|info|clients> [...] [--client <id>] [--json]\n"); }
+}
+function printTools() {
+  try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('# artifact tools\n'); }
+}
+
+// ── auth + transport ────────────────────────────────────────────────────────────
+function loadToken() {
+  const env = process.env.CICY_API_TOKEN;
+  if (env) return env;
+  if (!existsSync(GLOBAL_JSON)) {
+    throw Object.assign(new Error(`api_token not found: set CICY_API_TOKEN or create ${GLOBAL_JSON} with {"api_token":"..."}`), { exitCode: 3 });
+  }
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(GLOBAL_JSON, 'utf8')); }
+  catch (e) { throw Object.assign(new Error(`failed to parse ${GLOBAL_JSON}: ${e.message}`), { exitCode: 3 }); }
+  if (!cfg.api_token || typeof cfg.api_token !== 'string') {
+    throw Object.assign(new Error(`api_token not found in ${GLOBAL_JSON}`), { exitCode: 3 });
+  }
+  return cfg.api_token;
+}
+
+async function api(method, path, payload) {
+  const token = loadToken();
+  const headers = { 'Authorization': `Bearer ${token}` };
+  const init = { method, headers };
+  if (payload !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(payload); }
+  let res;
+  try { res = await fetch(HTTP_BASE + path, init); }
+  catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${HTTP_BASE} — is it running? (${e.message})`), { exitCode: 3 }); }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error(`auth failed (${res.status}): check api_token`), { exitCode: 3 });
+  if (res.status >= 400) {
+    let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
+    throw Object.assign(new Error(`api error (${res.status}): ${body?.error || body?.message || text}`), { exitCode: 4 });
+  }
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function chatClients() {
+  const data = await api('GET', '/api/chat/clients');
+  let raw = data?.clients || data?.data?.clients || data?.data || data || [];
+  if (!Array.isArray(raw)) {
+    const flat = [];
+    for (const [, m] of Object.entries(raw)) {
+      for (const [cid, info] of Object.entries(m || {})) flat.push({ client_id: cid, ...info });
+    }
+    raw = flat;
+  }
+  return raw.filter((c) => c?.client_id);
+}
+
+// exec_js round-trip to one client; returns the stringified result payload or
+// throws on the page-side error.
+async function execOn(clientID, code, timeoutMs = DEFAULT_TIMEOUT) {
+  const resp = await api('POST', '/api/chat/push', {
+    client_id: clientID, type: 'exec_js', data: { code }, wait_ack: true, timeout_ms: timeoutMs,
+  });
+  if (resp?.type && resp.type !== 'exec_js_result') {
+    throw Object.assign(new Error(`expected exec_js_result got ${resp.type}`), { exitCode: 4 });
+  }
+  const d = resp?.data || {};
+  if (d.error) throw Object.assign(new Error(d.error), { exitCode: 4 });
+  return d.result ?? '';
+}
+
+// Resolve the cicy-code page that owns window.cicyArtifact. Probe candidates
+// when there is more than one, since the cicy-code UI may itself be an Electron
+// client (so we can't just exclude electron the way agent-webpage does).
+async function resolveTarget() {
+  if (CLIENT_ID) {
+    const clients = await chatClients();
+    if (!clients.find((c) => c.client_id === CLIENT_ID)) {
+      throw Object.assign(new Error(`client_id ${CLIENT_ID} not found`), { exitCode: 4 });
+    }
+    return CLIENT_ID;
+  }
+  const candidates = (await chatClients()).filter((c) => c.client_id && !c.client_id.endsWith(':code-ext'));
+  if (candidates.length === 0) throw Object.assign(new Error('no page client connected; pass --client <id> (see `artifact clients`)'), { exitCode: 3 });
+  if (candidates.length === 1) return candidates[0].client_id;
+  // multiple — probe for the artifact bridge.
+  const hits = [];
+  for (const c of candidates) {
+    try {
+      const r = await execOn(c.client_id, "(typeof window.cicyArtifact!=='undefined')", 6000);
+      if (String(r) === 'true') hits.push(c.client_id);
+    } catch { /* unreachable/non-cicy page — skip */ }
+  }
+  if (hits.length === 1) return hits[0];
+  if (hits.length === 0) throw Object.assign(new Error('no connected page exposes the artifact bridge (open the cicy-code UI); pass --client <id>'), { exitCode: 3 });
+  throw Object.assign(new Error(`multiple cicy-code pages connected; pass --client <id> (${hits.join(', ')})`), { exitCode: 2 });
+}
+
+// Build a `window.cicyArtifact.<method>(...args)` expression with JSON-safe args.
+function bridgeExpr(method, args) {
+  const parts = (args || []).map((a) => JSON.stringify(a));
+  return `window.cicyArtifact.${method}(${parts.join(',')})`;
+}
+
+async function runBridge(method, args, timeoutMs) {
+  const clientID = await resolveTarget();
+  return await execOn(clientID, bridgeExpr(method, args), timeoutMs);
+}
+
+// ── commands ────────────────────────────────────────────────────────────────
+async function cmdClients() {
+  const data = await chatClients();
+  if (json) return ok(data);
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function cmdSimple(method, args) { printResult(await runBridge(method, args)); }
+
+async function cmdArg1(method, args, label) {
+  if (args.length < 1) throw Object.assign(new Error(`Usage: artifact ${cmd} <${label}>`), { exitCode: 2 });
+  printResult(await runBridge(method, [args[0]]));
+}
+
+async function cmdOpen(args) {
+  if (args.length < 1) throw Object.assign(new Error('Usage: artifact open <url>'), { exitCode: 2 });
+  printResult(await runBridge('open', [args[0]]));
+}
+
+async function cmdExec(args) {
+  if (args.length < 1) throw Object.assign(new Error("Usage: artifact exec '<js run inside the artifact page>'"), { exitCode: 2 });
+  // Run INSIDE the webview guest page, addressing the element directly so it
+  // works regardless of the page bridge's electron detection. Falls back to
+  // window.cicyArtifact.execJs (iframe/same-origin path) when no webview.
+  const code = JSON.stringify(args[0]);
+  const snippet = `(async () => {
+    const el = document.getElementById('cicy-artifact-webview')
+      || document.querySelector('[data-id="cli-content-artifact-host"] [data-id="web-frame-webview"]')
+      || document.querySelector('[data-id="artifact-webview"]');
+    if (el && typeof el.executeJavaScript === 'function') {
+      return await el.executeJavaScript(${code}, true);
+    }
+    return await window.cicyArtifact.execJs(${code});
+  })()`;
+  const clientID = await resolveTarget();
+  printResult(await execOn(clientID, snippet));
+}
+
+// artifact call <method> [jsonArg ...]  → window.cicyArtifact.call(method, ...args)
+async function cmdCall(args) {
+  if (args.length < 1) throw Object.assign(new Error("Usage: artifact call <method> [jsonArg ...]"), { exitCode: 2 });
+  const method = args[0];
+  const callArgs = args.slice(1).map(parseJsonArg);
+  printResult(await runBridge('call', [method, ...callArgs]));
+}
+
+// artifact invoke <method> [jsonArg ...] → forces the main-process webContents path
+async function cmdInvoke(args) {
+  if (args.length < 1) throw Object.assign(new Error("Usage: artifact invoke <method> [jsonArg ...]"), { exitCode: 2 });
+  const method = args[0];
+  const callArgs = args.slice(1).map(parseJsonArg);
+  printResult(await runBridge('invoke', [method, callArgs]));
+}
+
+// artifact cdp <Method> [jsonParams] → window.cicyArtifact.cdp(method, params)
+async function cmdCdp(args) {
+  if (args.length < 1) throw Object.assign(new Error("Usage: artifact cdp <Domain.method> ['{json params}']"), { exitCode: 2 });
+  const method = args[0];
+  const params = args[1] != null ? parseJsonArg(args[1]) : {};
+  printResult(await runBridge('cdp', [method, params]));
+}
+
+async function cmdCdpAttach(args) { printResult(await runBridge('cdpAttach', args[0] ? [args[0]] : [])); }
+
+async function cmdCapture(args) {
+  const outfile = args[0];
+  const dataUrl = await runBridge('capture', [], 60000);
+  if (!outfile) { printResult(dataUrl); return; }
+  const b64 = String(dataUrl).replace(/^data:[^,]*,/, '');
+  writeFileSync(outfile, Buffer.from(b64, 'base64'));
+  if (json) ok({ written: outfile, bytes: Buffer.from(b64, 'base64').length });
+  else console.log(`✅ screenshot → ${outfile}`);
+}
+
+async function cmdPdf(args) {
+  const outfile = args[0];
+  const b64 = await runBridge('pdf', [{}], 60000);
+  if (!outfile) { printResult(b64); return; }
+  writeFileSync(outfile, Buffer.from(String(b64), 'base64'));
+  if (json) ok({ written: outfile, bytes: Buffer.from(String(b64), 'base64').length });
+  else console.log(`✅ pdf → ${outfile}`);
+}
+
+async function cmdEvents(args, drain) {
+  const max = args[0] != null ? Number(args[0]) : undefined;
+  const method = drain ? 'drainEvents' : 'peekEvents';
+  printResult(await runBridge(method, max != null && !Number.isNaN(max) ? [max] : []));
+}
+
+
+// ── list-tools ───────────────────────────────────────────────────────────────
+// Enumerate every Electron capability reachable on the LIVE artifact frame:
+// all methods on the <webview> element's prototype chain (element-level
+// control), the guest webContentsId, and desktop-bridge (invoke/CDP)
+// availability. Dynamic — what it prints is exactly what this page can do.
+const LIST_TOOLS_SNIPPET = `(() => {
+  const el = document.getElementById('cicy-artifact-webview')
+    || document.querySelector('[data-id="cli-content-artifact-host"] [data-id="web-frame-webview"]')
+    || document.querySelector('[data-id="artifact-webview"]')
+    || document.querySelector('[data-id="cli-content-artifact-host"] [data-id="web-frame-iframe"]');
+  if (!el) return JSON.stringify({ error: 'no artifact frame mounted - open the artifact tab and load a URL first' });
+  const out = { tag: el.tagName, src: String(el.src || '').slice(0, 140), methods: [], webContentsId: null };
+  if (el.tagName === 'WEBVIEW') {
+    try { out.webContentsId = el.getWebContentsId(); } catch (e) {}
+    const seen = new Set();
+    let p = Object.getPrototypeOf(el);
+    while (p && p.constructor && !/^(HTML|Element|EventTarget|Node|Object)/.test(p.constructor.name || '')) {
+      for (const k of Object.getOwnPropertyNames(p)) {
+        if (k === 'constructor' || seen.has(k)) continue;
+        try { if (typeof el[k] === 'function') { seen.add(k); out.methods.push(k); } } catch (e) {}
+      }
+      p = Object.getPrototypeOf(p);
+    }
+    out.methods.sort();
+  }
+  const b = window.cicy && window.cicy.artifact;
+  out.bridge = { invoke: !!(b && b.invoke), cdp: !!(b && b.cdp) };
+  return JSON.stringify(out);
+})()`;
+
+const WEBVIEW_METHOD_DESC = {
+  loadURL: '加载 URL（返回 Promise，失败时 reject）',
+  downloadURL: '下载该 URL 的资源（不导航）',
+  getURL: '返回 guest 页当前 URL',
+  getTitle: '返回 guest 页标题',
+  isLoading: '页面是否加载中',
+  isLoadingMainFrame: '主 frame 是否加载中',
+  isWaitingForResponse: '是否在等待首个响应',
+  stop: '停止加载',
+  reload: '重新加载',
+  reloadIgnoringCache: '忽略缓存重载',
+  canGoBack: '能否后退',
+  canGoForward: '能否前进',
+  canGoToOffset: '能否做相对历史跳转',
+  clearHistory: '清空导航历史',
+  goBack: '后退',
+  goForward: '前进',
+  goToIndex: '跳到历史第 index 项',
+  goToOffset: '相对当前历史位置跳转',
+  isCrashed: '渲染进程是否已崩溃',
+  setUserAgent: '设置 guest 的 UA',
+  getUserAgent: '读取 guest 的 UA',
+  insertCSS: '注入 CSS，返回 key（供移除）',
+  removeInsertedCSS: '按 key 移除已注入 CSS',
+  executeJavaScript: '在 guest 页执行 JS 并返回结果（= artifact exec）',
+  openDevTools: '打开 guest 的 DevTools',
+  closeDevTools: '关闭 DevTools',
+  isDevToolsOpened: 'DevTools 是否已打开',
+  isDevToolsFocused: 'DevTools 是否聚焦',
+  inspectElement: '审查 (x,y) 处元素',
+  inspectSharedWorker: '审查 shared worker',
+  inspectServiceWorker: '审查 service worker',
+  setAudioMuted: '静音 / 取消静音',
+  isAudioMuted: '是否已静音',
+  isCurrentlyAudible: '是否正在发声',
+  undo: '编辑：撤销',
+  redo: '编辑：重做',
+  cut: '编辑：剪切',
+  copy: '编辑：复制选区',
+  centerSelection: '滚动使选区居中',
+  paste: '编辑：粘贴',
+  pasteAndMatchStyle: '粘贴并匹配样式',
+  delete: '编辑：删除选区',
+  selectAll: '全选',
+  unselect: '取消选区',
+  scrollToTop: '滚到顶部',
+  scrollToBottom: '滚到底部',
+  adjustSelection: '调整选区端点',
+  replace: '用文本替换选区',
+  replaceMisspelling: '替换拼写错误',
+  insertText: '向焦点元素插入文本',
+  findInPage: '页内查找（结果走 found-in-page 事件）',
+  stopFindInPage: '结束页内查找',
+  print: '调起打印',
+  printToPDF: '渲染为 PDF（= artifact pdf）',
+  capturePage: '截图 → NativeImage（= artifact capture）',
+  send: '经 IPC 向 guest 发消息（需 guest preload 监听）',
+  sendToFrame: '向指定 frame 发 IPC',
+  sendInputEvent: '合成鼠标/键盘/滚轮输入事件',
+  setZoomFactor: '设置缩放倍数（1.0 = 100%）',
+  getZoomFactor: '读取缩放倍数',
+  setZoomLevel: '设置缩放等级（0 = 100%）',
+  getZoomLevel: '读取缩放等级',
+  setVisualZoomLevelLimits: '设置双指缩放上下限',
+  showDefinitionForSelection: 'macOS：查词典',
+  getWebContentsId: '返回 guest 的 webContentsId',
+  focus: '聚焦 webview',
+};
+
+async function cmdListTools() {
+  const clientID = await resolveTarget();
+  const raw = await execOn(clientID, LIST_TOOLS_SNIPPET);
+  let data;
+  try { data = JSON.parse(raw); } catch { throw Object.assign(new Error('unexpected page reply: ' + String(raw).slice(0, 200)), { exitCode: 4 }); }
+  if (data.error) throw Object.assign(new Error(data.error), { exitCode: 4 });
+  if (json) {
+    data.descriptions = Object.fromEntries((data.methods || []).map((m) => [m, WEBVIEW_METHOD_DESC[m] || null]));
+    return ok(data);
+  }
+  console.log(`产物帧: <${String(data.tag).toLowerCase()}>  src=${data.src}`);
+  if (data.tag !== 'WEBVIEW') {
+    console.log('当前是 <iframe>（非 Electron webview）— 无原生方法可枚举；仅 open/load/geturl/reload/clear（以及同源 exec）可用。');
+    return;
+  }
+  console.log(`webContentsId: ${data.webContentsId ?? '未知'}`);
+  console.log(`desktop bridge: invoke=${data.bridge?.invoke ? '✓' : '✗'}  cdp=${data.bridge?.cdp ? '✓' : '✗'}`);
+  console.log('');
+  console.log(`webview 元素方法（${data.methods.length} 个）— 用法: artifact call <method> [jsonArg ...]`);
+  const w = Math.max(0, ...data.methods.map((m) => m.length)) + 2;
+  for (const m of data.methods) {
+    console.log('  ' + m.padEnd(w) + (WEBVIEW_METHOD_DESC[m] || '（未收录说明）'));
+  }
+  console.log('');
+  if (data.bridge?.cdp) {
+    console.log('CDP 可用：artifact cdp-attach 后可调任意 Domain.method（DOM / Network / Runtime / Input / Page / Emulation …）。');
+  } else {
+    console.log('webContents 级方法与 CDP 需要 desktop bridge（window.cicy.artifact）— 当前桌面未注入，只有上面的元素级方法可用。');
+  }
+}
+
+// JSON arg if parseable, else treat as a plain string.
+function parseJsonArg(s) {
+  try { return JSON.parse(s); } catch { return s; }
+}
