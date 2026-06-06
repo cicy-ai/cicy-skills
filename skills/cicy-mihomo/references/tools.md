@@ -10,7 +10,7 @@ Process manager + thin controller-API client + yaml editor for mihomo's
 | op     | path                                       | mode | when                       |
 |--------|--------------------------------------------|------|----------------------------|
 | write  | `~/.local/bin/mihomo`                      | 0755 | `install`                  |
-| write  | `~/cicy-ai/db/mihomo.yaml`                 | 0600 | `gen-config`, `add-chrome-profile`, `remove-chrome-profile` |
+| write  | `~/cicy-ai/db/mihomo.yaml`                 | 0600 | `gen-config`, `add-chrome-profile`, `remove-chrome-profile`, `addProxy` |
 | read   | `~/cicy-ai/db/mihomo.yaml`                 | —    | `show-config`, `listeners` |
 | write  | `~/.local/state/cicy-skills/mihomo/pid`    | 0644 | `start`                    |
 | append | `~/logs/mihomo.log`                        | —    | `start`                    |
@@ -82,6 +82,31 @@ Name must match `^[a-zA-Z][\w-]*$` (exit 2 otherwise).
 Removes the matching listener entry, the `<name>-group` proxy-group entry,
 and any `IN-NAME,<name>,...` rule line. Idempotent on the rule line; exit 4
 if the profile doesn't exist anywhere in the yaml.
+
+## addProxy (alias: add-proxy)
+
+```
+cicy-mihomo addProxy name=<id> type=<adapter> server=<host> port=<n> [k=v ...] \
+                     [--group <group>|--no-group]
+```
+
+Appends a node under the top-level `proxies:` key (canonical block style,
+`name`/`type` first, remaining k=v pairs in argument order) and adds the node
+name to a proxy-group's `proxies:` selection — `default_proxy_group` unless
+`--group <other>` or `--no-group`. Flat k=v pairs only; nested adapter opts
+(`ws-opts`, …) are out of scope.
+
+- `server=`/`port=` required for every type except `direct` (exit 2)
+- node-name uniqueness across `proxies:` (exit 4); group must exist (exit 4)
+- numbers / `true` / `false` stay bare yaml scalars; everything else is
+  single-quoted
+- sensitive values (`password`, `uuid`, `token`, `psk`, `private-key`, …) are
+  masked as `***` in stdout/`--json` output — except literal `<PLACEHOLDER>`
+  values, which print verbatim so the user knows to replace them
+- prefer placeholder credentials (`password='<YOUR_PASSWORD_HERE>'`) and let
+  the user substitute the real secret in an editor afterwards
+
+Follow with `cicy-mihomo reload`.
 
 ## Configuration
 

@@ -137,6 +137,7 @@ rules:
       case 'listeners':   await cmdListeners(); return;
       case 'add-chrome-profile':    await cmdAddChromeProfile(rest); return;
       case 'remove-chrome-profile': await cmdRemoveChromeProfile(rest); return;
+      case 'addProxy': case 'add-proxy': cmdAddProxy(rest); return;
       default: bail(`unknown command: ${cmd}. Try cicy-mihomo --help.`, 2);
     }
   } catch (e) {
@@ -556,6 +557,157 @@ function cmdRemoveChromeProfile(args) {
   if (json) return ok({ removed: name, group: groupName });
   console.log(`✓ removed chrome profile '${name}'`);
   console.log(`  Reload mihomo to release the port:  cicy-mihomo reload`);
+}
+
+// ── addProxy ────────────────────────────────────────────────────────────
+
+// Sensitive keys whose values must never be echoed back to the terminal
+// (unless they are obvious <PLACEHOLDER> values the user still has to fill).
+// Plain function (hoisted) — the top-level IIFE dispatches before module
+// consts below it would initialize.
+function isSensitiveProxyKey(key) {
+  return ['password', 'uuid', 'token', 'psk', 'private-key', 'pre-shared-key', 'auth-str', 'auth_str'].includes(key.toLowerCase());
+}
+
+function cmdAddProxy(args) {
+  // cicy-mihomo addProxy name=<id> type=<adapter> server=<host> port=<n> [k=v ...] [--group G | --no-group]
+  // Writes a node into `proxies:` (canonical block style) and appends it to a
+  // proxy-group's `proxies:` selection (default_proxy_group unless --group /
+  // --no-group). Flat k=v pairs only — nested opts (ws-opts etc.) are out of
+  // scope for the wrapper.
+  if (args.length === 0) bail('Usage: cicy-mihomo addProxy name=<id> type=<adapter> server=<host> port=<n> [k=v ...] [--group <group>|--no-group]', 2);
+  if (!existsSync(CONFIG_PATH)) bail(`config missing: ${CONFIG_PATH} — run cicy-mihomo gen-config`, 3);
+
+  // split flags from k=v fields
+  let group = 'default_proxy_group';
+  let noGroup = false;
+  const fields = [];           // [key, value] in argument order (name/type pulled out below)
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--group') { group = args[++i]; if (!group) bail('--group needs a value', 2); continue; }
+    if (a === '--no-group') { noGroup = true; continue; }
+    const eq = a.indexOf('=');
+    if (eq <= 0) bail(`expected k=v pair or flag, got: ${a}`, 2);
+    const k = a.slice(0, eq).trim();
+    const v = a.slice(eq + 1);
+    if (!/^[A-Za-z_][\w-]*$/.test(k)) bail(`invalid field name: ${k}`, 2);
+    fields.push([k, v]);
+  }
+
+  const get = (k) => (fields.find(([fk]) => fk === k) || [])[1];
+  const name = get('name');
+  const type = get('type');
+  if (!name) bail('missing required field: name=<id>', 2);
+  if (!/^[A-Za-z][\w-]*$/.test(name)) bail(`invalid node name: ${name} (must match [a-zA-Z][\\w-]*)`, 2);
+  if (!type) bail('missing required field: type=<adapter> (http/socks5/ss/vmess/trojan/...)', 2);
+  if (type !== 'direct') {
+    if (!get('server')) bail(`type=${type} requires server=<host>`, 2);
+    if (!get('port')) bail(`type=${type} requires port=<n>`, 2);
+  }
+  const portV = get('port');
+  if (portV !== undefined && !/^\d+$/.test(portV)) bail(`invalid port: ${portV}`, 2);
+
+  const text = readFileSync(CONFIG_PATH, 'utf8');
+  if (parseProxyNames(text).includes(name)) bail(`proxy '${name}' already exists in ${CONFIG_PATH}`, 4);
+  if (!noGroup && !parseProxyGroupNames(text).includes(group)) bail(`proxy-group '${group}' not found (use --group <existing> or --no-group)`, 4);
+
+  // build the canonical block-style entry; name/type first, rest in given order
+  const ordered = [['name', name], ['type', type], ...fields.filter(([k]) => k !== 'name' && k !== 'type')];
+  let block = '';
+  for (const [k, v] of ordered) {
+    block += block === '' ? `  - ${k}: ${yamlScalar(v)}\n` : `    ${k}: ${yamlScalar(v)}\n`;
+  }
+
+  let updated = appendUnderTopKey(text, 'proxies', block);
+  if (updated === text) bail('failed to update yaml — no `proxies:` top-level key found', 4);
+  if (!noGroup) {
+    const withGroup = appendToGroupProxies(updated, group, name);
+    if (withGroup === updated) bail(`failed to append '${name}' to proxy-group '${group}' — group has no proxies: list?`, 4);
+    updated = withGroup;
+  }
+
+  writeFileSync(CONFIG_PATH, updated, { mode: 0o600 });
+
+  const masked = ordered.map(([k, v]) => [k, maskSensitive(k, v)]);
+  const result = { name, type, group: noGroup ? null : group, config: CONFIG_PATH, fields: Object.fromEntries(masked) };
+  if (json) return ok(result);
+  console.log(`✓ added proxy '${name}' (${type})`);
+  for (const [k, v] of masked) {
+    if (k === 'name' || k === 'type') continue;
+    console.log(`  ${k}: ${v}`);
+  }
+  console.log(noGroup ? `  group:  (none — add it to a proxy-group to route through it)` : `  group:  ${group}`);
+  console.log(`  config: ${CONFIG_PATH}`);
+  console.log('');
+  console.log('Reload mihomo to pick up the node:');
+  console.log('  cicy-mihomo reload');
+}
+
+// Render a k=v value as a yaml scalar: bare numbers / booleans stay bare,
+// everything else is single-quoted (with '' escaping).
+function yamlScalar(v) {
+  if (/^\d+$/.test(v) || v === 'true' || v === 'false') return v;
+  return `'${String(v).replace(/'/g, "''")}'`;
+}
+
+// Mask sensitive values in terminal/JSON output — except obvious
+// <PLACEHOLDER> values, which the user still needs to see and replace.
+function maskSensitive(key, value) {
+  if (!isSensitiveProxyKey(key)) return value;
+  if (/^<[^<>]+>$/.test(value)) return value;
+  return '***';
+}
+
+// Names of nodes under the top-level `proxies:` key. Handles both canonical
+// block style (`- name: foo`) and inline flow (`- { name: foo, ... }`).
+function parseProxyNames(text) {
+  const lines = text.split('\n');
+  const names = [];
+  let inBlock = false;
+  for (const raw of lines) {
+    if (/^[A-Za-z][\w-]*:/.test(raw)) {
+      inBlock = raw.startsWith('proxies:');
+      continue;
+    }
+    if (!inBlock) continue;
+    const noComment = raw.replace(/#.*/, '');
+    let m = /^\s*-\s+name:\s*(.+?)\s*$/.exec(noComment);
+    if (m) { names.push(stripQuotes(m[1])); continue; }
+    m = /^\s*-\s*\{.*?name:\s*([^,}]+)/.exec(noComment);
+    if (m) names.push(stripQuotes(m[1]));
+  }
+  return names;
+}
+
+// Append `      - <node>` to the `proxies:` list of a named proxy-group.
+// Returns text unchanged when the group or its proxies: subkey isn't found.
+function appendToGroupProxies(text, groupName, nodeName) {
+  const lines = text.split('\n');
+  let inGroups = false;
+  let inTarget = false;
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (/^[A-Za-z][\w-]*:/.test(raw)) { inGroups = raw.startsWith('proxy-groups:'); inTarget = false; continue; }
+    if (!inGroups) continue;
+    const nameM = /^\s*-\s+name:\s*(.+?)\s*(?:#.*)?$/.exec(raw);
+    if (nameM) { inTarget = stripQuotes(nameM[1]) === groupName; continue; }
+    if (inTarget && /^\s+proxies:\s*(?:#.*)?$/.test(raw)) {
+      // walk past existing list items (strictly deeper-indented than the
+      // proxies: subkey — a sibling group's `- name:` is shallower), insert
+      // after the last one
+      const keyIndent = /^(\s*)/.exec(raw)[1].length;
+      let j = i + 1;
+      while (j < lines.length) {
+        const m = /^(\s*)-\s+/.exec(lines[j]);
+        if (!m || m[1].length <= keyIndent) break;
+        j++;
+      }
+      const indent = j > i + 1 ? /^(\s*)/.exec(lines[i + 1])[1] : ' '.repeat(keyIndent + 2);
+      lines.splice(j, 0, `${indent}- ${nodeName}`);
+      return lines.join('\n');
+    }
+  }
+  return text;
 }
 
 // ── yaml mini-helpers (top-level block append / list-item remove) ──────

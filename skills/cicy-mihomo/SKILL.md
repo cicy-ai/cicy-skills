@@ -18,6 +18,7 @@ Use this skill when the task involves:
 - tailing mihomo logs
 - speed-testing the configured proxy nodes against fixed targets
 - installing the mihomo binary itself (`cicy-mihomo install` downloads from cicy-ai/cicy-mihomo)
+- **adding a proxy node (1.2.0+)**: `cicy-mihomo addProxy name=<id> type=<adapter> server=<host> port=<n> [k=v ...]` writes the node into `proxies:` and adds it to `default_proxy_group` (`--group`/`--no-group` to override). Use `<YOUR_PASSWORD_HERE>`-style placeholders for secrets — never real values — and let the user substitute them in an editor; the command masks non-placeholder sensitive values in its output
 - **per-Chrome-profile listeners**: open one auth-free local port per Chrome profile and route each port to its own proxy via IN-NAME rules
 
 ## Per-Chrome-profile listeners (1.1.0+)

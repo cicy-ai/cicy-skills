@@ -21,6 +21,11 @@ cicy-mihomo add-chrome-profile <name> [--port N] [--upstream G] [--listen ADDR]
                                          Append listener + proxy-group + IN-NAME rule
 cicy-mihomo remove-chrome-profile <name> Remove listener + group + rule
 
+cicy-mihomo addProxy name=<id> type=<adapter> server=<host> port=<n> [k=v ...]
+                     [--group <group>|--no-group]
+                                         Append a node under proxies: and add it to a
+                                         proxy-group (default: default_proxy_group)
+
 cicy-mihomo --help / -h / help
 cicy-mihomo tools
 ```
