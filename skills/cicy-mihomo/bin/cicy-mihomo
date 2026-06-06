@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSyn
 import { homedir, platform, arch } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, execFileSync, execSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 
 const argv = process.argv.slice(2);
 
@@ -138,6 +139,8 @@ rules:
       case 'add-chrome-profile':    await cmdAddChromeProfile(rest); return;
       case 'remove-chrome-profile': await cmdRemoveChromeProfile(rest); return;
       case 'addProxy': case 'add-proxy': cmdAddProxy(rest); return;
+      case 'addGroup': case 'add-group': cmdAddGroup(rest); return;
+      case 'addUser': case 'add-user': cmdAddUser(rest); return;
       default: bail(`unknown command: ${cmd}. Try cicy-mihomo --help.`, 2);
     }
   } catch (e) {
@@ -708,6 +711,143 @@ function appendToGroupProxies(text, groupName, nodeName) {
     }
   }
   return text;
+}
+
+// ── addGroup ────────────────────────────────────────────────────────────
+
+function cmdAddGroup(args) {
+  // cicy-mihomo addGroup <name> <member1> [member2 ...]
+  // Writes a `select` group into proxy-groups:. Same name overwrites (upsert).
+  // Members may be proxy nodes, other groups, or DIRECT/REJECT/PASS;
+  // comma- and space-separated both accepted.
+  if (args.length < 2) bail('Usage: cicy-mihomo addGroup <name> <member1> [member2 ...]', 2);
+  if (!existsSync(CONFIG_PATH)) bail(`config missing: ${CONFIG_PATH} — run cicy-mihomo gen-config`, 3);
+
+  const name = args[0];
+  if (!/^[A-Za-z][\w-]*$/.test(name)) bail(`invalid group name: ${name} (must match [a-zA-Z][\\w-]*)`, 2);
+  const members = args.slice(1).flatMap((a) => a.split(',')).map((s) => s.trim()).filter(Boolean);
+  if (members.length === 0) bail('at least one member is required', 2);
+  if (members.includes(name)) bail(`group '${name}' cannot contain itself`, 2);
+  const dup = members.find((m, i) => members.indexOf(m) !== i);
+  if (dup) bail(`duplicate member: ${dup}`, 2);
+
+  const text = readFileSync(CONFIG_PATH, 'utf8');
+  const known = new Set([...parseProxyNames(text), ...parseProxyGroupNames(text), 'DIRECT', 'REJECT', 'PASS']);
+  for (const m of members) {
+    if (!known.has(m)) bail(`unknown member: ${m} (not a proxy, proxy-group, or DIRECT/REJECT/PASS)`, 4);
+  }
+
+  const existed = parseProxyGroupNames(text).includes(name);
+  let updated = existed ? removeProxyGroupEntry(text, name) : text;
+  const block = `  - name: ${name}\n    type: select\n    proxies:\n${members.map((m) => `      - ${m}`).join('\n')}\n`;
+  const next = appendUnderTopKey(updated, 'proxy-groups', block);
+  if (next === updated) bail('failed to update yaml — no `proxy-groups:` top-level key found', 4);
+
+  writeFileSync(CONFIG_PATH, next, { mode: 0o600 });
+
+  if (json) return ok({ name, type: 'select', members, overwrote: existed, config: CONFIG_PATH });
+  console.log(`✓ ${existed ? 'updated' : 'added'} proxy-group '${name}' (select)`);
+  for (const m of members) console.log(`  - ${m}`);
+  console.log(`  config: ${CONFIG_PATH}`);
+  console.log('');
+  console.log('Reload mihomo to pick up the group:');
+  console.log('  cicy-mihomo reload');
+}
+
+// ── addUser ─────────────────────────────────────────────────────────────
+
+function cmdAddUser(args) {
+  // cicy-mihomo addUser <username> <target> [<password>]
+  // Upsert: replaces any existing authentication entry + IN-USER rule for the
+  // user. Without <password>, generates one and prints it (the only moment
+  // it's visible). The IN-USER rule is inserted ABOVE the first
+  // IN-USER-PREFIX (or MATCH) line so it actually wins the route.
+  if (args.length < 2 || args.length > 3) bail('Usage: cicy-mihomo addUser <username> <target> [<password>]', 2);
+  if (!existsSync(CONFIG_PATH)) bail(`config missing: ${CONFIG_PATH} — run cicy-mihomo gen-config`, 3);
+
+  const [username, target] = args;
+  if (!/^[A-Za-z][\w.-]*$/.test(username)) bail(`invalid username: ${username} (must match [a-zA-Z][\\w.-]*)`, 2);
+  const generated = args.length < 3;
+  const password = generated ? randomBytes(12).toString('base64url') : args[2];
+  if (!password) bail('password must not be empty', 2);
+  if (password.includes('"') || password.includes(':')) bail('password must not contain `"` or `:`', 2);
+
+  const text = readFileSync(CONFIG_PATH, 'utf8');
+  const known = new Set([...parseProxyNames(text), ...parseProxyGroupNames(text), 'DIRECT', 'REJECT']);
+  if (!known.has(target)) bail(`unknown target: ${target} (not a proxy, proxy-group, or DIRECT/REJECT)`, 4);
+
+  const hadAuth = new RegExp(`^\\s*-\\s*["']?${escapeRe(username)}:`, 'm').test(text);
+  const prevRule = parseInUserRules(text).find((r) => r.user === username);
+
+  // upsert authentication entry
+  let updated = removeRuleLineMatching(text, new RegExp(`^\\s*-\\s*["']?${escapeRe(username)}:`));
+  // `authentication: []` (template inline-empty) can't take list items — open it up
+  updated = updated.replace(/^authentication:\s*\[\s*\]\s*(?:#.*)?$/m, 'authentication:');
+  const next = appendUnderTopKey(updated, 'authentication', `  - "${username}:${password}"\n`);
+  if (next === updated) bail('failed to update yaml — no `authentication:` top-level key found', 4);
+  updated = next;
+
+  // upsert IN-USER rule (above IN-USER-PREFIX / MATCH so it takes precedence)
+  updated = removeRuleLineMatching(updated, new RegExp(`^\\s*-\\s*IN-USER,${escapeRe(username)},`));
+  const withRule = insertRuleAbovePrefix(updated, `  - IN-USER,${username},${target}`);
+  if (withRule === updated) bail('failed to update yaml — no `rules:` top-level key found', 4);
+
+  writeFileSync(CONFIG_PATH, withRule, { mode: 0o600 });
+
+  const result = {
+    username, target,
+    rule: `IN-USER,${username},${target}`,
+    password: generated ? password : '***',
+    password_generated: generated,
+    overwrote: { authentication: hadAuth, rule: !!prevRule, previous_target: prevRule ? prevRule.target : null },
+    config: CONFIG_PATH,
+  };
+  if (json) return ok(result);
+  console.log(`✓ ${hadAuth || prevRule ? 'updated' : 'added'} user '${username}'`);
+  console.log(`  auth:     ${username}:${generated ? password : '*** (yours, not echoed)'}`);
+  if (generated) console.log('            ^ generated password — save it now, it is not shown again');
+  console.log(`  rule:     IN-USER,${username},${target}${prevRule && prevRule.target !== target ? `  (was → ${prevRule.target})` : ''}`);
+  console.log(`  config:   ${CONFIG_PATH}`);
+  console.log('');
+  console.log('Reload mihomo to apply:');
+  console.log('  cicy-mihomo reload');
+}
+
+// Parse `- IN-USER,<user>,<target>` rule lines.
+function parseInUserRules(text) {
+  const out = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/#.*/, '').trim();
+    const m = /^-\s*IN-USER\s*,\s*([^,\s]+)\s*,\s*([^,\s]+)/.exec(line);
+    if (m) out.push({ user: m[1], target: m[2] });
+  }
+  return out;
+}
+
+// Insert a rule line inside the rules: block, above the first IN-USER-PREFIX
+// line (specific-user rules must precede the prefix catch-all to win), else
+// above the first MATCH line, else at the end of the block.
+function insertRuleAbovePrefix(text, ruleLine) {
+  const lines = text.split('\n');
+  let rulesIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^rules:\s*(?:#.*)?$/.test(lines[i])) { rulesIdx = i; break; }
+  }
+  if (rulesIdx === -1) return text;
+  let endIdx = lines.length;
+  let insertAt = -1;
+  for (let i = rulesIdx + 1; i < lines.length; i++) {
+    if (/^[A-Za-z]/.test(lines[i])) { endIdx = i; break; }
+    const item = lines[i].replace(/#.*/, '').trim();
+    if (insertAt === -1 && /^-\s*IN-USER-PREFIX\s*,/.test(item)) insertAt = i;
+    if (insertAt === -1 && /^-\s*MATCH\s*,/.test(item)) insertAt = i;
+  }
+  if (insertAt === -1) {
+    insertAt = endIdx;
+    while (insertAt > rulesIdx + 1 && lines[insertAt - 1].trim() === '') insertAt--;
+  }
+  lines.splice(insertAt, 0, ruleLine);
+  return lines.join('\n');
 }
 
 // ── yaml mini-helpers (top-level block append / list-item remove) ──────

@@ -10,7 +10,7 @@ Process manager + thin controller-API client + yaml editor for mihomo's
 | op     | path                                       | mode | when                       |
 |--------|--------------------------------------------|------|----------------------------|
 | write  | `~/.local/bin/mihomo`                      | 0755 | `install`                  |
-| write  | `~/cicy-ai/db/mihomo.yaml`                 | 0600 | `gen-config`, `add-chrome-profile`, `remove-chrome-profile`, `addProxy` |
+| write  | `~/cicy-ai/db/mihomo.yaml`                 | 0600 | `gen-config`, `add-chrome-profile`, `remove-chrome-profile`, `addProxy`, `addGroup`, `addUser` |
 | read   | `~/cicy-ai/db/mihomo.yaml`                 | —    | `show-config`, `listeners` |
 | write  | `~/.local/state/cicy-skills/mihomo/pid`    | 0644 | `start`                    |
 | append | `~/logs/mihomo.log`                        | —    | `start`                    |
@@ -107,6 +107,37 @@ name to a proxy-group's `proxies:` selection — `default_proxy_group` unless
   the user substitute the real secret in an editor afterwards
 
 Follow with `cicy-mihomo reload`.
+
+## addGroup (alias: add-group)
+
+```
+cicy-mihomo addGroup <name> <member1> [member2 ...]
+```
+
+Upserts a `select` group under `proxy-groups:` — same name overwrites the
+existing entry. Members may be proxy nodes, other groups, or
+`DIRECT`/`REJECT`/`PASS`; comma- and space-separated both accepted. Unknown
+members exit 4; self-reference / duplicates exit 2. Follow with
+`cicy-mihomo reload`.
+
+## addUser (alias: add-user)
+
+```
+cicy-mihomo addUser <username> <target> [<password>]
+```
+
+Upserts both halves of a user's config in one shot:
+
+1. `authentication:` — `- "<username>:<password>"` (existing entry for the
+   user is replaced; an inline-empty `authentication: []` is opened up).
+   Without `<password>` a random one is generated and printed **once**;
+   a user-supplied password is never echoed (`***`).
+2. `rules:` — `IN-USER,<username>,<target>` inserted **above** the first
+   `IN-USER-PREFIX` (or `MATCH`) line so the specific rule wins the route;
+   any previous `IN-USER,<username>,…` line is removed.
+
+`<target>` must be an existing proxy, proxy-group, or `DIRECT`/`REJECT`
+(exit 4 otherwise). Follow with `cicy-mihomo reload`.
 
 ## Configuration
 

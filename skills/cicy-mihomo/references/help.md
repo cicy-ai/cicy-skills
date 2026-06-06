@@ -25,6 +25,11 @@ cicy-mihomo addProxy name=<id> type=<adapter> server=<host> port=<n> [k=v ...]
                      [--group <group>|--no-group]
                                          Append a node under proxies: and add it to a
                                          proxy-group (default: default_proxy_group)
+cicy-mihomo addGroup <name> <member...>  Upsert a `select` proxy-group (same name
+                                         overwrites; members = nodes/groups/DIRECT)
+cicy-mihomo addUser <user> <target> [<password>]
+                                         Upsert authentication entry + IN-USER rule
+                                         (no password → generate + print once)
 
 cicy-mihomo --help / -h / help
 cicy-mihomo tools
