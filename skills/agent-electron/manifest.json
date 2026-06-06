@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-electron",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "title": "Agent Electron",
   "description": "Drive cicy-desktop Electron BrowserWindows and per-account sandbox sessions via desktop_event RPC. Each accountIdx = its own session.fromPartition() with proxy. Electron analog of agent-chrome.",
   "category": "dev",
@@ -49,9 +49,14 @@
   },
   "tools": [
     {
-      "name": "open",
-      "example": "agent-electron open 1 --url https://example.com",
-      "description": "Open a BrowserWindow under the given session (accountIdx)"
+      "name": "sessions",
+      "example": "agent-electron sessions",
+      "description": "List sandbox sessions, grouped by accountIdx (each = persist:sandbox-N)"
+    },
+    {
+      "name": "session",
+      "example": "agent-electron session 1",
+      "description": "Show the windows + partition + proxy of one session (accountIdx)"
     },
     {
       "name": "proxy",
@@ -59,14 +64,49 @@
       "description": "Set the upstream proxy on a session — applies to every window opened under that accountIdx"
     },
     {
-      "name": "cdp",
-      "example": "agent-electron cdp 4 Runtime.evaluate '{\"expression\":\"document.title\"}'",
-      "description": "Send a raw Chrome DevTools Protocol command to a BrowserWindow"
+      "name": "open",
+      "example": "agent-electron open 1 --url https://example.com",
+      "description": "Open a BrowserWindow under the given session (accountIdx); --no-reuse forces a fresh window"
+    },
+    {
+      "name": "close",
+      "example": "agent-electron close 4",
+      "description": "Close a BrowserWindow by id"
     },
     {
       "name": "windows",
       "example": "agent-electron windows",
       "description": "List all live Electron BrowserWindows on the host"
+    },
+    {
+      "name": "window",
+      "example": "agent-electron window 4",
+      "description": "Show one BrowserWindow's details (url, title, load state, session)"
+    },
+    {
+      "name": "url",
+      "example": "agent-electron url 4 https://example.com",
+      "description": "Load a new URL in an existing BrowserWindow"
+    },
+    {
+      "name": "cdp",
+      "example": "agent-electron cdp 4 Runtime.evaluate '{\"expression\":\"document.title\"}'",
+      "description": "Send a raw Chrome DevTools Protocol command to a BrowserWindow's webContents"
+    },
+    {
+      "name": "screenshot",
+      "example": "agent-electron screenshot 4 --out shot.png",
+      "description": "Screenshot a window (to clipboard by default, or to a file with --out)"
+    },
+    {
+      "name": "snapshot",
+      "example": "agent-electron snapshot 4",
+      "description": "Capture a DOM/accessibility snapshot of a window's page"
+    },
+    {
+      "name": "sysinfo",
+      "example": "agent-electron sysinfo",
+      "description": "Host system info (platform, electron/chrome versions, screens)"
     }
   ]
 }
