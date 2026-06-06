@@ -25,11 +25,11 @@ agent-electron tools
 
 - The cicy-desktop host must be running and connected to cicy-code.
 - **Before `open`, check `windows` first.** If the target URL is already
-  open in that session, don't open another window by default — bring the
-  existing one to front (`cdp <winId> Page.bringToFront`) and report its
-  winId; refresh only if needed (`url <winId> <url>` or
-  `cdp <winId> Page.reload`). Open a new window only when the user
-  explicitly wants one (`--no-reuse`).
+  open in that session, don't open another window by default — activate it
+  natively (desktop RPC `control_electron_BrowserWindow`, code
+  `(win.isMinimized()&&win.restore(), win.show(), win.focus())`) and report
+  its winId; refresh only if needed (`url <winId> <url>`). Open a new
+  window only when the user explicitly wants one (`--no-reuse`).
 - `sessions` is inferred from live windows — sessions on disk that have no
   open window are not listed (Electron has no enumerate-partitions API).
 - `proxy <idx> "" ` clears the proxy on a session.

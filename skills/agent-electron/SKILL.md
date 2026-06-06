@@ -47,11 +47,13 @@ Use this skill when the task involves:
    `open` for a deterministic result.
 4. **Check before `open` — never double-open a URL.** First run `windows`
    (or `session <idx>`). If the target URL is already open in that session,
-   do NOT open another window by default: bring the existing one to front
-   (`cdp <winId> Page.bringToFront`) and report its winId to the user;
-   refresh it only when needed (`url <winId> <url>` or
-   `cdp <winId> Page.reload`). Only open a fresh window when the user
-   explicitly asks for a new one (`--no-reuse`).
+   do NOT open another window by default: activate the existing one with the
+   native BrowserWindow methods via the desktop RPC
+   `control_electron_BrowserWindow` — code
+   `(win.isMinimized()&&win.restore(), win.show(), win.focus())` — and
+   report its winId to the user; refresh it only when needed
+   (`url <winId> <url>`). Only open a fresh window when the user explicitly
+   asks for a new one (`--no-reuse`).
 5. **`--client <client_id>` targets a specific cicy-desktop host.** With no
    flag, auto-selects the single host whose UA contains `CiCyDesktop` /
    `ElectronMCP`.

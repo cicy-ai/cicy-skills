@@ -57,19 +57,24 @@ service workers, cache, and proxy.
 Before `open <idx> --url <u>`, run `windows` (or `session <idx>`):
 
 1. **URL already open in that session →** do NOT open a new window.
-   Bring the existing one to front and tell the user its winId:
-   `agent-electron cdp <winId> Page.bringToFront '{}'`
+   Activate the existing one with native BrowserWindow methods and tell
+   the user its winId (desktop RPC `control_electron_BrowserWindow`):
+   ```bash
+   agent-desktop rpc control_electron_BrowserWindow \
+     '{"win_id":<winId>,"code":"(win.isMinimized()&&win.restore(), win.show(), win.focus(), {id:win.id, visible:win.isVisible(), focused:win.isFocused()})"}'
+   ```
 2. **Needs fresh content →** refresh in place instead of re-opening:
-   `agent-electron url <winId> <u>` or `agent-electron cdp <winId> Page.reload '{}'`
+   `agent-electron url <winId> <u>`
 3. **User explicitly wants a second window →** only then
    `agent-electron open <idx> --url <u> --no-reuse`
+
+Note: `open` with default reuse does NOT match by URL on the desktop side
+(it only reuses in oneWindow mode) — that's why the check above is the
+agent's job.
 
 ## CDP examples
 
 ```bash
-# bring window 4 to front (activate instead of re-opening)
-agent-electron cdp 4 Page.bringToFront '{}'
-
 # evaluate JS in window 4
 agent-electron cdp 4 Runtime.evaluate '{"expression":"document.title","returnByValue":true}'
 

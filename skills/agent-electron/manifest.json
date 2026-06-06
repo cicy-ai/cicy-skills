@@ -66,7 +66,7 @@
     {
       "name": "open",
       "example": "agent-electron open 1 --url https://example.com",
-      "description": "Open a BrowserWindow under a session. First check windows: if the URL is already open in that session, do not open a new one — bring it to front (cdp Page.bringToFront) and report its winId, refresh only if needed; --no-reuse forces a fresh window"
+      "description": "Open a BrowserWindow under a session. Check windows first: if the URL is already open, win.show()/focus() it and report its winId instead of opening anew; --no-reuse forces a fresh window"
     },
     {
       "name": "close",
