@@ -44,6 +44,7 @@ let CLIENT_ID = null;
       case 'tools':                    printTools();                       break;
       case 'list-tools': case 'list_tools': await cmdListTools();          break;
       case 'snapshot': case 'snap':     await cmdSnapshot(rest);           break;
+      case 'preview':                  await cmdPreview(rest);             break;
       case 'clients':                  await cmdClients();                 break;
       case 'info':                     await cmdSimple('info', []);        break;
       case 'open':                     await cmdOpen(rest);                break;
@@ -482,6 +483,19 @@ async function cmdListTools() {
   } else {
     console.log('webContents 级方法与 CDP 需要 desktop bridge（window.cicy.artifact）— 当前桌面未注入，只有上面的元素级方法可用。');
   }
+}
+
+
+// artifact preview [web|portal|mobile]  — 产物预览视口。无参=读当前；
+// web=填满宿主，portal=768x1024(平板竖屏)，mobile=390x844(手机)。
+async function cmdPreview(args) {
+  const mode = (args[0] || '').toLowerCase();
+  if (!mode) { printResult(await runBridge('getPreview', [])); return; }
+  if (!['web','portal','mobile'].includes(mode)) {
+    throw Object.assign(new Error("Usage: artifact preview [web|portal|mobile]"), { exitCode: 2 });
+  }
+  await runBridge('setPreview', [mode]);
+  printResult(mode);
 }
 
 // JSON arg if parseable, else treat as a plain string.
