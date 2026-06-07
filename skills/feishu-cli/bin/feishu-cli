@@ -81,9 +81,22 @@ function larkEnv() {
   return e;
 }
 
+// Spawn an npm-installed bin cross-platform. On Windows npm exposes bins as
+// .cmd shims, which node refuses to spawn without shell:true (and CreateProcess
+// won't resolve them bare) — on ENOENT, retry via `<name>.cmd` + shell with the
+// args quoted so cmd.exe's re-parse keeps them intact. POSIX path unchanged.
+function spawnNpmBin(name, args, opts) {
+  const r = spawnSync(name, args, opts);
+  if (r.error?.code === 'ENOENT' && process.platform === 'win32') {
+    const q = (a) => (/[\s"^&|<>]/.test(a) ? `"${String(a).replace(/"/g, '\\"')}"` : a);
+    return spawnSync(`${name}.cmd`, args.map(q), { ...opts, shell: true });
+  }
+  return r;
+}
+
 // Return the lark-cli version string, or null if the binary is not on PATH.
 function larkVersion() {
-  const r = spawnSync(BIN, ['--version'], { encoding: 'utf8', timeout: 8000, env: larkEnv() });
+  const r = spawnNpmBin(BIN, ['--version'], { encoding: 'utf8', timeout: 8000, env: larkEnv() });
   if (r.error) {
     if (r.error.code === 'ENOENT') return null;
     return '(unknown)';
@@ -110,7 +123,7 @@ function cmdInstall(extra) {
   // npm registry + the feishu CDN binary download work fine through a proxy, so
   // install keeps the ambient environment (unlike the feishu.cn API calls).
   console.log(`→ installing ${NPM_PKG} (downloads the lark-cli binary) ...`);
-  const r = spawnSync('npx', ['-y', `${NPM_PKG}@latest`, 'install'], { stdio: 'inherit' });
+  const r = spawnNpmBin("npx", ["-y", `${NPM_PKG}@latest`, "install"], { stdio: "inherit" });
   if (r.error) {
     if (r.error.code === 'ENOENT') {
       throw Object.assign(new Error('npx not found — install Node.js (npm) first'), { exitCode: 4 });
@@ -141,7 +154,7 @@ function cmdPassthrough(base, defaultExtra, extra) {
   const passed = extra[0] === '--' ? extra.slice(1) : extra;
   const args = [...base, ...(passed.length ? passed : defaultExtra)];
   const label = base.join(' ');
-  const r = spawnSync(BIN, args, { stdio: 'inherit', env: larkEnv() });
+  const r = spawnNpmBin(BIN, args, { stdio: 'inherit', env: larkEnv() });
   if (r.error) {
     throw Object.assign(new Error(`lark-cli ${label} failed: ${r.error.message}`), { exitCode: 1 });
   }
@@ -163,7 +176,7 @@ function cmdRun(extra) {
   if (args.length === 0) {
     throw Object.assign(new Error('usage: feishu-cli run <lark-cli args...>  (e.g. feishu-cli run calendar +agenda)'), { exitCode: 2 });
   }
-  const r = spawnSync(BIN, args, { stdio: 'inherit', env: larkEnv() });
+  const r = spawnNpmBin(BIN, args, { stdio: 'inherit', env: larkEnv() });
   if (r.error) {
     throw Object.assign(new Error(`lark-cli failed: ${r.error.message}`), { exitCode: 1 });
   }
@@ -184,7 +197,7 @@ function cmdStatus(json) {
   };
 
   if (out.installed) {
-    const r = spawnSync(BIN, ['auth', 'status'], { encoding: 'utf8', timeout: 10000, env: larkEnv() });
+    const r = spawnNpmBin(BIN, ['auth', 'status'], { encoding: 'utf8', timeout: 10000, env: larkEnv() });
     if (!r.error) {
       out.authenticated = r.status === 0;
       out.auth_status = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 6).join('\n');

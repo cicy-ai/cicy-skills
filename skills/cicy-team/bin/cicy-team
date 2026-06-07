@@ -26,6 +26,26 @@ const MASTER_DEFAULT = (process.env.X_AGENT_SHORT_ID || 'w-10001').trim() || 'w-
 
 function die(msg, code = 1) { process.stderr.write(`cicy-team: ${msg}\n`); process.exit(code); }
 
+// win32: skill bins are .cmd shims (cicy-code skill install generates
+// `<interp> "<abs entry>" %*`). Node can't exec a .cmd without shell:true,
+// and shell:true re-parses args (msg text may carry quotes/spaces) — so
+// read the shim, pull out interpreter + entry, and run those directly
+// (quote-safe). POSIX: name + args unchanged.
+function siblingCmd(name, args) {
+  if (process.platform !== 'win32') return [name, args];
+  for (const dir of String(process.env.PATH || '').split(';')) {
+    if (!dir) continue;
+    let text = '';
+    try { text = readFileSync(`${dir}\\${name}.cmd`, 'utf8'); } catch { continue; }
+    const m = /^\s*(\S+)\s+"([^"]+)"\s+%\*/m.exec(text);
+    if (!m) continue;
+    const base = m[1].replace(/^.*[\\\/]/, '');
+    const interp = /^node(\.exe)?$/i.test(base) ? process.execPath : m[1];
+    return [interp, [m[2], ...args]];
+  }
+  return [name, args]; // not found — let the spawn fail with a clear ENOENT
+}
+
 function token() {
   if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
   try { return JSON.parse(readFileSync(GLOBAL_JSON, 'utf8')).api_token || ''; } catch { return ''; }
@@ -115,7 +135,8 @@ async function spawnRole(argv) {
 
   if (task) {
     const a = ['msg', session, task]; if (callback) a.push('--callback');
-    try { execFileSync('cicy-agent', a, { stdio: 'inherit' }); }
+    const [caCmd, caArgs] = siblingCmd('cicy-agent', a);
+    try { execFileSync(caCmd, caArgs, { stdio: 'inherit' }); }
     catch (e) { die(`dispatch failed (need cicy-agent on PATH): ${e.message}`, 1); }
     process.stdout.write(`dispatched task -> ${session}${callback ? ' (callback)' : ''}\n`);
   }

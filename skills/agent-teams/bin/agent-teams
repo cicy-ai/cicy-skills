@@ -7,6 +7,27 @@
 // every time. One subcommand per IPC verb, stable text + --json output.
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+
+// win32: skill bins are .cmd shims (cicy-code skill install generates
+// `<interp> "<abs entry>" %*`). Node can't exec a .cmd without shell:true,
+// and shell:true re-parses args (fatal here — exec-js passes raw JS) — so
+// read the shim, pull out interpreter + entry, and run those directly
+// (quote-safe). POSIX: name + args unchanged.
+function siblingCmd(name, args) {
+  if (process.platform !== 'win32') return [name, args];
+  for (const dir of String(process.env.PATH || '').split(';')) {
+    if (!dir) continue;
+    let text = '';
+    try { text = readFileSync(`${dir}\\${name}.cmd`, 'utf8'); } catch { continue; }
+    const m = /^\s*(\S+)\s+"([^"]+)"\s+%\*/m.exec(text);
+    if (!m) continue;
+    const base = m[1].replace(/^.*[\\\/]/, '');
+    const interp = /^node(\.exe)?$/i.test(base) ? process.execPath : m[1];
+    return [interp, [m[2], ...args]];
+  }
+  return [name, args]; // not found — let the spawn fail with a clear ENOENT
+}
 
 const argv = process.argv.slice(2);
 
@@ -142,7 +163,8 @@ function parseFlags(args, schema) {
 async function pickClient() {
   if (_clientID) return _clientID;
   const out = await new Promise((resolve, reject) => {
-    const child = spawn('agent-webpage', ['clients', '--json'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const [awCmd, awArgs] = siblingCmd('agent-webpage', ['clients', '--json']);
+    const child = spawn(awCmd, awArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     let buf = '', err = '';
     child.stdout.on('data', (c) => { buf += c; });
     child.stderr.on('data', (c) => { err += c; });
@@ -193,7 +215,8 @@ async function pickClient() {
 async function callPage(jsExpr) {
   const clientID = await pickClient();
   return new Promise((resolve, reject) => {
-    const child = spawn('agent-webpage', ['exec-js', jsExpr, clientID, '--json'], {
+    const [awCmd, awArgs] = siblingCmd('agent-webpage', ['exec-js', jsExpr, clientID, '--json']);
+    const child = spawn(awCmd, awArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';

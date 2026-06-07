@@ -20,6 +20,25 @@ import { spawnSync } from 'node:child_process';
 const ACH = 'agent-chrome';
 const DESIGN_URL = 'https://claude.ai/design';
 
+// win32: skill bins are .cmd shims (cicy-code skill install generates
+// `<interp> "<abs entry>" %*`). Node can't exec a .cmd without shell:true,
+// and shell:true re-parses args — so read the shim, pull out interpreter +
+// entry, and run those directly (quote-safe). POSIX: name + args unchanged.
+function siblingCmd(name, args) {
+  if (process.platform !== 'win32') return [name, args];
+  for (const dir of String(process.env.PATH || '').split(';')) {
+    if (!dir) continue;
+    let text = '';
+    try { text = readFileSync(`${dir}\\${name}.cmd`, 'utf8'); } catch { continue; }
+    const m = /^\s*(\S+)\s+"([^"]+)"\s+%\*/m.exec(text);
+    if (!m) continue;
+    const base = m[1].replace(/^.*[\\\/]/, '');
+    const interp = /^node(\.exe)?$/i.test(base) ? process.execPath : m[1];
+    return [interp, [m[2], ...args]];
+  }
+  return [name, args]; // not found — let the spawn fail with a clear ENOENT
+}
+
 // ─── argv parse ───────────────────────────────────────────────────────────
 
 const RAW = process.argv.slice(2);
@@ -138,7 +157,8 @@ function clientFlags() {
 function runAch(subArgs, { json = true, timeout = 60_000, input } = {}) {
   const args = [...clientFlags(), ...subArgs];
   if (json && !args.includes('--json')) args.push('--json');
-  const r = spawnSync(ACH, args, {
+  const [achCmd, achArgs] = siblingCmd(ACH, args);
+  const r = spawnSync(achCmd, achArgs, {
     encoding: 'utf8',
     timeout,
     input,
