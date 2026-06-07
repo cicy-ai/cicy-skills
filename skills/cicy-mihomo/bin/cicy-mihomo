@@ -208,6 +208,11 @@ async function cmdInstall() {
   const isGz = !isTarball && /\.gz$/i.test(url);
   const archive = join(tmp, isTarball ? 'mihomo.tgz' : (isGz ? 'mihomo.gz' : 'mihomo.bin'));
   execFileSync('curl', ['-fsSL', '-o', archive, url], { stdio: 'inherit' });
+  // Verify against the release's SHA256SUMS.txt — a proxy (gh-proxy etc.) can
+  // return a truncated/corrupted 200 that curl happily saves; an unverified
+  // binary then segfaults (0xC0000005) with zero output. Skip only when the
+  // URL was custom-overridden (no sums to compare against).
+  if (!process.env.CICY_MIHOMO_RELEASE_URL) await verifySha256(archive, url);
   if (isTarball) {
     execFileSync('tar', ['-xzf', archive, '-C', tmp], { stdio: 'inherit' });
     // find the mihomo file inside tmp (native walk — `find` via execSync hits
@@ -232,6 +237,29 @@ async function cmdInstall() {
     writeFileSync(BINARY_PATH, readFileSync(archive), { mode: 0o755 });
   }
   console.log(`✓ installed mihomo → ${BINARY_PATH}`);
+}
+
+async function verifySha256(archive, assetURL) {
+  const { createHash } = await import('node:crypto');
+  const sumsURL = assetURL.replace(/\/[^/]+$/, '/SHA256SUMS.txt');
+  let sums = '';
+  try {
+    const r = await fetch(sumsURL, { signal: AbortSignal.timeout(30000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    sums = await r.text();
+  } catch (e) {
+    console.warn(`! SHA256SUMS.txt unavailable (${e.message}) — skipping verification`);
+    return;
+  }
+  const file = decodeURIComponent(assetURL.split('/').pop());
+  const line = sums.split('\n').find((l) => l.trim().endsWith(file));
+  if (!line) { console.warn(`! ${file} not in SHA256SUMS.txt — skipping verification`); return; }
+  const expected = line.trim().split(/\s+/)[0].toLowerCase();
+  const actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
+  if (actual !== expected) {
+    bail(`sha256 mismatch for ${file}\n  expected ${expected}\n  got      ${actual}\n  (corrupted download — likely the GitHub proxy; retry or set GITHUB_PROXY=)`, 4);
+  }
+  console.log(`✓ sha256 verified (${expected.slice(0, 12)}…)`);
 }
 
 function resolveDownloadURL() {
