@@ -110,5 +110,10 @@ msys ssh 看不见;ssh-keygen 生成的 key 也落在 msys home,System32 ssh 找
   mingw64\bin + node 目录)→ shebang 天然可解析,skill 侧不用改。
 - .cmd shim 由 Go 侧 `cicy-code skill install` 生成(`node "%~dp0\<name>" %*`),
   skill 侧 shebang 不动;shim 落地后回归 4 处跨 skill 调用(w-10029)。
+  → **已回归 ✅**(commit 5855ece,win 真机):skill 侧 `siblingCmd()` 解析 shim 取
+  解释器+绝对入口直接 spawn(quote 安全);feishu-cli npm bin 走 ENOENT→.cmd+shell 降级。
+  agent-teams/claude-design 全链路实测通过。遗留 launcher 侧:① symlink 成功时
+  .cmd 未生成(Administrator 盒子实测)——win32 需无条件生成;② ~/.local/bin 不在
+  msys login PATH,exe 前置 PATH 时需补。
 - jq 走 mingw64/bin,w-10026 负责放进捆绑并验证 pane 可见。
 - proxy_ssh、frp install/service 维持 windows-unsupported。
