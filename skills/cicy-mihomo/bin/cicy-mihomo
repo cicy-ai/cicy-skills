@@ -3,10 +3,10 @@
 // Subcommands: install / template / gen-config / show-config / status /
 //              start / stop / restart / reload / logs / test
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync, openSync, closeSync, chmodSync } from 'node:fs';
-import { homedir, platform, arch } from 'node:os';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync, openSync, closeSync, chmodSync, readdirSync } from 'node:fs';
+import { homedir, platform, arch, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { spawn, execFileSync, execSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 
 const argv = process.argv.slice(2);
@@ -22,7 +22,7 @@ const rest = argv.slice(1).filter((a) => a !== '--json');
 
 const HOME = homedir();
 const CONFIG_PATH = process.env.MIHOMO_CONFIG || join(HOME, 'cicy-ai', 'db', 'mihomo.yaml');
-const BINARY_PATH = process.env.MIHOMO_BIN    || join(HOME, '.local', 'bin', 'mihomo');
+const BINARY_PATH = process.env.MIHOMO_BIN    || join(HOME, '.local', 'bin', platform() === 'win32' ? 'mihomo.exe' : 'mihomo');
 const STATE_DIR   = join(HOME, '.local', 'state', 'cicy-skills', 'mihomo');
 const PID_FILE    = join(STATE_DIR, 'pid');
 const LOG_FILE    = process.env.MIHOMO_LOG    || join(HOME, 'logs', 'mihomo.log');
@@ -178,6 +178,10 @@ function readPID() {
 
 function ensureDir(p) { if (!existsSync(p)) mkdirSync(p, { recursive: true }); }
 
+// Portable synchronous sleep — `execSync('sleep …')` breaks on Windows (cmd.exe
+// has no sleep, and execSync never uses bash there).
+function msleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+
 // ── install ─────────────────────────────────────────────────────────────
 
 async function cmdInstall() {
@@ -192,7 +196,8 @@ async function cmdInstall() {
   const url = process.env.CICY_MIHOMO_RELEASE_URL || resolveDownloadURL();
   console.log(`→ downloading ${url} ...`);
   ensureDir(dirname(BINARY_PATH));
-  const tmp = `/tmp/cicy-mihomo-${process.pid}`;
+  // OS temp dir, not hardcoded /tmp (msys /tmp ≠ %TEMP% under native Windows node)
+  const tmp = join(tmpdir(), `cicy-mihomo-${process.pid}`);
   ensureDir(tmp);
   // Classify the asset by URL suffix. cicy-ai/cicy-mihomo ships a RAW binary
   // (mihomo-<os>-<arch>, no compression), while upstream MetaCubeX ships .gz /
@@ -205,8 +210,16 @@ async function cmdInstall() {
   execFileSync('curl', ['-fsSL', '-o', archive, url], { stdio: 'inherit' });
   if (isTarball) {
     execFileSync('tar', ['-xzf', archive, '-C', tmp], { stdio: 'inherit' });
-    // find the mihomo file inside tmp
-    const out = execSync(`find "${tmp}" -type f -name 'mihomo*' -not -name '*.gz' -not -name '*.tgz' -not -name '*.tar*' | head -1`, { encoding: 'utf8' }).trim();
+    // find the mihomo file inside tmp (native walk — `find` via execSync hits
+    // cmd.exe on Windows, where C:\Windows\System32\find.exe is a string filter)
+    const out = (function walk(dir) {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, ent.name);
+        if (ent.isDirectory()) { const r = walk(p); if (r) return r; }
+        else if (/^mihomo/i.test(ent.name) && !/\.(gz|tgz|tar)/i.test(ent.name)) return p;
+      }
+      return '';
+    })(tmp);
     if (!out) throw Object.assign(new Error('mihomo binary not found in archive'), { exitCode: 4 });
     writeFileSync(BINARY_PATH, readFileSync(out), { mode: 0o755 });
   } else if (isGz) {
@@ -313,7 +326,7 @@ function cmdStop() {
   while (Date.now() < deadline) {
     try { process.kill(pid, 0); }
     catch { try { unlinkSync(PID_FILE); } catch {}; if (json) return ok({ stopped: pid }); console.log(`✓ stopped pid=${pid}`); return; }
-    execSync('sleep 0.1');
+    msleep(100);
   }
   // force kill
   try { process.kill(pid, 'SIGKILL'); } catch {}

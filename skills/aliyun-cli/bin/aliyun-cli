@@ -4,13 +4,13 @@
 // Zero npm dependencies. Pure ESM. Node 18+.
 
 import { readFileSync, writeFileSync, existsSync, statSync, chmodSync, mkdirSync, unlinkSync } from 'node:fs';
-import { homedir, platform, arch } from 'node:os';
+import { homedir, platform, arch, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 
 const ALIYUN_CONFIG = process.env.CICY_ALIYUN_CONFIG || join(homedir(), '.aliyun', 'config.json');
 const LOCAL_BIN = join(homedir(), '.local', 'bin');
-const ALIYUN_BIN = join(LOCAL_BIN, 'aliyun');
+const ALIYUN_BIN = join(LOCAL_BIN, platform() === 'win32' ? 'aliyun.exe' : 'aliyun');
 
 const argv = process.argv.slice(2);
 
@@ -67,8 +67,9 @@ async function cmdInstall() {
   console.log(`→ downloading ${url} ...`);
   mkdirSync(LOCAL_BIN, { recursive: true });
 
-  // download to /tmp, extract, copy into ~/.local/bin
-  const tmpDir = `/tmp/aliyun-cli-${process.pid}`;
+  // download to the OS temp dir, extract, copy into ~/.local/bin
+  // (hardcoded /tmp is wrong under native Windows node — msys /tmp ≠ %TEMP%)
+  const tmpDir = join(tmpdir(), `aliyun-cli-${process.pid}`);
   mkdirSync(tmpDir, { recursive: true });
   const archivePath = join(tmpDir, url.endsWith('.zip') ? 'aliyun.zip' : 'aliyun.tgz');
 
@@ -93,8 +94,8 @@ async function cmdInstall() {
     throw Object.assign(new Error(`extracted file not found at ${extracted}`), { exitCode: 1 });
   }
 
-  // move into ~/.local/bin and chmod +x
-  const target = platform() === 'win32' ? ALIYUN_BIN + '.exe' : ALIYUN_BIN;
+  // move into ~/.local/bin and chmod +x (ALIYUN_BIN already carries .exe on win32)
+  const target = ALIYUN_BIN;
   const buf = readFileSync(extracted);
   writeFileSync(target, buf, { mode: 0o755 });
 

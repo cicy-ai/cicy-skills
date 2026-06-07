@@ -26,7 +26,9 @@ import https from "node:https";
 
 const CONFIG_PATH = path.join(homedir(), "cicy-ai", "db", "r2.json");
 // wrangler is invoked from a dir that has node_modules/wrangler installed.
-const WRANGLER_CWD = "/home/cicy/projects/cicy-desktop/workers/render";
+// Overridable via env — the default only exists on the original dev host.
+const WRANGLER_CWD = process.env.CICY_R2_WRANGLER_CWD
+  || path.join(homedir(), "projects", "cicy-desktop", "workers", "render");
 
 function die(msg, code = 1) {
   console.error(msg);
@@ -53,8 +55,16 @@ function redact(s, keep = 4) {
 }
 
 function wrangler(cfg, args) {
-  const r = spawnSync("npx", ["wrangler", ...args], {
+  if (!fs.existsSync(WRANGLER_CWD)) {
+    die(`wrangler dir not found: ${WRANGLER_CWD}\nset CICY_R2_WRANGLER_CWD to a dir with node_modules/wrangler installed`);
+  }
+  // Windows: npx is npx.cmd — .cmd files need shell:true to spawn (Node 18.20+
+  // refuses them without it). Quote args so the cmd.exe re-parse stays intact.
+  const isWin = process.platform === "win32";
+  const argv = ["wrangler", ...args];
+  const r = spawnSync("npx", isWin ? argv.map((a) => (/[\s"^&|<>]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : argv, {
     cwd: WRANGLER_CWD,
+    shell: isWin,
     stdio: "inherit",
     env: {
       ...process.env,

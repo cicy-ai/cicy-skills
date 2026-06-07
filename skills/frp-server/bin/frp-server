@@ -3,7 +3,7 @@
 //   start / stop / restart / status / reload / logs / connections / clients / raw
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, openSync, closeSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, platform } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 
@@ -106,12 +106,19 @@ function saveState(s) {
 
 function shQuote(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
 
+// Portable synchronous sleep — `execSync('sleep …')` breaks on Windows (cmd.exe
+// has no sleep, and execSync never uses bash there).
+function msleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+
 // Find a running frps/frpc that uses OUR config but isn't tracked in PID_FILE —
 // e.g. an orphan whose parent (a previous shell/session) died and got reparented
 // to init. Without this, start() can't see it and spawns a duplicate that
 // instantly dies on the already-bound port ("process died on launch"). Returns
 // pid or 0. Works on Linux and macOS (pgrep + ps, no /proc dependency).
+// On Windows pgrep/ps -o are unavailable — skip orphan adoption (PID file
+// tracking still works; worst case a manual orphan must be killed by hand).
 function findOrphanPid() {
+  if (platform() === 'win32') return 0;
   let out = '';
   try { out = execSync(`pgrep -f ${shQuote(CONFIG_PATH)} 2>/dev/null || true`, { encoding: 'utf8' }); }
   catch { return 0; }
@@ -238,7 +245,7 @@ function cmdStop() {
   while (Date.now() < deadline) {
     try { process.kill(pid, 0); }
     catch { try { unlinkSync(PID_FILE); } catch {}; if (json) return ok({ stopped: pid }); console.log(`✓ stopped pid=${pid}`); return; }
-    execSync('sleep 0.1');
+    msleep(100);
   }
   try { process.kill(pid, 'SIGKILL'); } catch {}
   try { unlinkSync(PID_FILE); } catch {}
