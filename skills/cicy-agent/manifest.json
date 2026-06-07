@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "title": "Cicy Agent (tmux)",
   "description": "Operate tmux panes and windows on this host. Wraps cicy-code's /api/tmux/* endpoints (list, capture, send-keys, msg, create, restart, clear).",
   "category": "dev",
@@ -65,6 +65,16 @@
       "name": "tmux msg",
       "example": "cicy-agent msg <worker> <message>",
       "description": "Send a message to an agent worker"
+    },
+    {
+      "name": "broadcast",
+      "example": "cicy-agent broadcast --online <text>",
+      "description": "Group-send a message. --online (default) targets only live agents; --all hits the whole db. Per-send timeout so dead panes cannot stall; prints delivered/failed stats; skips the sender."
+    },
+    {
+      "name": "agents online/offline/all",
+      "example": "cicy-agent get_online_agents --json",
+      "description": "List agents by liveness: get_online_agents (live tmux session), get_offline_agents (in db, session gone), get_all_agents (whole db). online + offline = all."
     }
   ]
 }

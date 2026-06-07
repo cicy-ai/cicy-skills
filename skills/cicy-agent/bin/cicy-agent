@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
-// Subcommands: list / ls / tree / windows / capture / reply / msg /
+// Subcommands: list / ls / tree / windows / capture / reply / msg / broadcast /
+//              get_online_agents / get_offline_agents / get_all_agents /
 //              send-keys / restart / clear / fork
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -35,6 +36,10 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'capture':            await cmdCapture(r2, node); break;
       case 'reply':              await cmdReply(r2, node); break;
       case 'msg':                await cmdMsg(r2, node); break;
+      case 'broadcast':          await cmdBroadcast(r2, node); break;
+      case 'get_online_agents': case 'get-online-agents':   await cmdAgents('online', node); break;
+      case 'get_offline_agents': case 'get-offline-agents': await cmdAgents('offline', node); break;
+      case 'get_all_agents': case 'get-all-agents':         await cmdAgents('all', node); break;
       case 'send-keys':          await cmdSendKeys(r2, node); break;
       case 'restart':            await cmdRestart(r2, node); break;
       case 'clear':               await cmdClear(r2, node); break;
@@ -102,7 +107,7 @@ function resolveTarget(node) {
   return { api: found.api.replace(/\/+$/, ''), token: found.api_token };
 }
 
-async function api(method, path, payload, node) {
+async function api(method, path, payload, node, timeoutMs) {
   const { api: base, token } = resolveTarget(node);
   const headers = { 'Authorization': `Bearer ${token}` };
   const init = { method, headers };
@@ -110,6 +115,8 @@ async function api(method, path, payload, node) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(payload);
   }
+  // Per-call timeout (broadcast uses it so one dead pane can't stall the run).
+  if (timeoutMs > 0) init.signal = AbortSignal.timeout(timeoutMs);
   let res;
   try { res = await fetch(base + path, init); }
   catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${base} — is it running? (${e.message})`), { exitCode: 3 }); }
@@ -211,6 +218,86 @@ async function cmdMsg(args, node) {
   const data = await api('POST', '/api/tmux/send', payload, node);
   if (json) return ok(data);
   console.log(typeof data === 'string' ? data : JSON.stringify(data));
+}
+
+// ── online / offline / broadcast (todo #81) ─────────────────────────────
+//
+// Online judgment: the master semantics is "managed under the w-10001 cluster",
+// but the real tmux topology is one session per agent (sessions are NOT nested
+// under w-10001). The executable criterion — equivalent in meaning — is:
+//   online  = the agent's session exists in the live tmux tree
+//   offline = present in the panes db but its session is gone from the tree
+//   all     = the panes db, verbatim
+// online ∪ offline = all by construction (both sides filter the same db list).
+
+function sessionOf(paneId) { return String(paneId || '').split(':')[0]; }
+
+async function fetchAgentSets(node) {
+  const [panesData, treeData] = await Promise.all([
+    api('GET', '/api/tmux/panes', undefined, node),
+    api('GET', '/api/tmux/tree', undefined, node),
+  ]);
+  const panes = panesData?.panes || panesData?.data?.panes || [];
+  const tree = treeData?.tree || treeData?.data?.tree || [];
+  const live = new Set(tree.map((s) => s.session));
+  const online = panes.filter((p) => live.has(sessionOf(p.pane_id)));
+  const offline = panes.filter((p) => !live.has(sessionOf(p.pane_id)));
+  return { panes, online, offline };
+}
+
+async function cmdAgents(kind, node) {
+  const { panes, online, offline } = await fetchAgentSets(node);
+  const sel = kind === 'online' ? online : kind === 'offline' ? offline : panes;
+  if (json) return ok({ kind, count: sel.length, online: online.length, offline: offline.length, all: panes.length, agents: sel });
+  console.log(`${kind}: ${sel.length}  (online ${online.length} + offline ${offline.length} = all ${panes.length})`);
+  console.log('pane_id\tagent_type\ttitle');
+  console.log('-------\t----------\t-----');
+  for (const p of sel) console.log(`${p.pane_id}\t${p.agent_type || ''}\t${p.title || ''}`);
+}
+
+// broadcast [--online|--all] [--timeout <ms>] <text>
+// Default --online: only live agents get the message, so the run never stalls
+// on dead panes. --all targets the whole db (each send still has the timeout,
+// so dead panes fail fast and land in `failed`). Skips the sender itself.
+// No callback_to on purpose — N agents replying to one pane is spam.
+async function cmdBroadcast(args, node) {
+  let mode = 'online', timeoutMs = 8000;
+  const pos = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--online')  { mode = 'online'; continue; }
+    if (args[i] === '--all')     { mode = 'all'; continue; }
+    if (args[i] === '--timeout') { timeoutMs = parseInt(args[++i], 10) || 8000; continue; }
+    pos.push(args[i]);
+  }
+  if (pos.length < 1) throw Object.assign(new Error('Usage: cicy-agent broadcast [--online|--all] [--timeout <ms>] <text>'), { exitCode: 2 });
+  const { text } = stampSender(pos.join(' '));
+  const { panes, online, offline } = await fetchAgentSets(node);
+  const self = (process.env.X_AGENT_SHORT_ID || '').trim();
+  const targets = (mode === 'online' ? online : panes).filter((p) => sessionOf(p.pane_id) !== self);
+
+  // /api/tmux/send answers 200 even when tmux send fails ({"detail":"failed
+  // to send text: ..."}); success is {"success":true}. Surface both shapes.
+  const results = await Promise.allSettled(targets.map((p) =>
+    api('POST', '/api/tmux/send', { pane_id: p.pane_id, text }, node, timeoutMs)
+      .then((r) => {
+        if (!r || r.success !== true) throw new Error(r?.detail || r?.error || 'send failed');
+        return r;
+      })
+  ));
+  const failed = [];
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') failed.push({ pane_id: targets[i].pane_id, error: String(r.reason?.message || r.reason) });
+  });
+  const stats = {
+    mode, timeout_ms: timeoutMs,
+    targets: targets.length,
+    delivered: targets.length - failed.length,
+    failed,
+    skipped_offline: mode === 'online' ? offline.length : 0,
+  };
+  if (json) return ok(stats);
+  console.log(`delivered ${stats.delivered}/${stats.targets} (${mode}${mode === 'online' ? `, skipped ${stats.skipped_offline} offline` : ''}, timeout ${timeoutMs}ms)`);
+  for (const f of failed) console.log(`  ✗ ${f.pane_id}: ${f.error}`);
 }
 
 async function cmdSendKeys(args, node) {
