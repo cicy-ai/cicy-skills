@@ -75,9 +75,40 @@ gemini-ask, globalApiToken, google, gpt-chat, telegram-web, tg, cicy-skill-spec*
 | feishu-cli | `spawnSync('npx', …)` 装 lark-cli;BIN 本体若是 native exe 则运行没问题,install 路径需 win32 shell:true | 待真机有 node 后实测 lark-cli 的 npm 包在 win 的落盘形态再修,盲改有引号风险 |
 | cicy-mihomo `logs -f` / frp `logs -f` | spawn('tail') | ✓ msys tail 在 PATH 即可,无需改(已实测 /usr/bin/tail 存在) |
 
+### ⚠️ ~/.ssh 路径语义分叉(ssh / ssh-keygen / cicy-ssh)
+
+三个角色读写 `.ssh` 的基准目录可能不同:
+
+| 角色 | 基准 |
+|---|---|
+| cicy-ssh(node 写 config) | `os.homedir()` = `%USERPROFILE%\.ssh` |
+| System32 OpenSSH(ssh.exe) | `%USERPROFILE%\.ssh` ✓ 与 cicy-ssh 一致 |
+| **msys ssh / ssh-keygen**(捆绑 openssh 包) | `$HOME/.ssh` —— msys HOME 默认是 `<msys64>\home\<user>`,**不是** %USERPROFILE% |
+
+后果:若捆绑 msys 的 HOME 不映射到 Windows profile,`cicy-ssh add` 写的 config
+msys ssh 看不见;ssh-keygen 生成的 key 也落在 msys home,System32 ssh 找不到。
+另外 PATH inherit + msys usr\bin 前置后,**msys ssh 会遮蔽 System32 ssh**,
+所以不能靠「反正用的是 System32 ssh」回避。
+
+**修法(launcher 侧一行)**:捆绑 msys 镜像里 `/etc/nsswitch.conf` 设
+`db_home: windows`(或 exe 启动 shell 时 export `HOME=%USERPROFILE%`),
+两个世界即收敛为同一目录。真机 `win` 实测 bash -l 的 HOME 已是
+`/c/Users/Administrator`(即 %USERPROFILE%),说明该机已收敛——捆绑镜像需保证同配置。
+
 ## 3. 给 cicy-code(w-10084)侧的输入
 
 1. **node.exe 必须进捆绑**(或装机依赖检查):测试机整机无 node,34/34 skill 不可用。
 2. **skill bin 的 .cmd shim**:决定「skill 调 skill」能否工作的关键;建议 launcher 安装 skill 时按 npm 模式生成 `<name>.cmd`(内容 `@node "%~dp0\..\skills\<name>\bin\<name>" %*` 之类)。定了我来改 skill 侧调用点。
 3. msys 捆绑确认含 **tail、install、nano**(coreutils 全集)—— frp/mihomo logs、$EDITOR 缺省依赖它们;**pgrep 不用补**(代码已绕开)。
 4. 测试机 `win` 的 msys 没有 jq/ssh(skill 侧不依赖,但 cicy-code statusline 的 jq 依赖要确认捆绑版本里真的有)。
+5. **msys home 必须映射 %USERPROFILE%**(nsswitch `db_home: windows` 或 export HOME)——否则 ~/.ssh 语义分叉,见 §2 末节。
+
+## 4. 拍板记录(2026-06-07,w-10084)
+
+- 捆绑最终包 = cicy-code.exe + msys-min + portable node(node.exe+npm);exe 设
+  `MSYS2_PATH_TYPE=inherit`,pane bash 直接继承 exe 前置好的 PATH(msys usr\bin +
+  mingw64\bin + node 目录)→ shebang 天然可解析,skill 侧不用改。
+- .cmd shim 由 Go 侧 `cicy-code skill install` 生成(`node "%~dp0\<name>" %*`),
+  skill 侧 shebang 不动;shim 落地后回归 4 处跨 skill 调用(w-10029)。
+- jq 走 mingw64/bin,w-10026 负责放进捆绑并验证 pane 可见。
+- proxy_ssh、frp install/service 维持 windows-unsupported。
