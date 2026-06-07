@@ -22,7 +22,24 @@ const rest = argv.slice(1).filter((a) => a !== '--json');
 
 const HOME = homedir();
 const CONFIG_PATH = process.env.MIHOMO_CONFIG || join(HOME, 'cicy-ai', 'db', 'mihomo.yaml');
-const BINARY_PATH = process.env.MIHOMO_BIN    || join(HOME, '.local', 'bin', platform() === 'win32' ? 'mihomo.exe' : 'mihomo');
+// Binary resolution (Runtime Bundle v1 — 指定目录优先):
+//   1. MIHOMO_BIN env (cicy-desktop injects its runtime path)
+//   2. ~/cicy-ai/runtime/mihomo/<versions.json current>/mihomo(.exe)
+//   3. legacy ~/.local/bin/mihomo(.exe)  (docker base image / old installs)
+const RUNTIME_DIR = join(HOME, 'cicy-ai', 'runtime');
+const RT_VERSIONS = join(RUNTIME_DIR, 'versions.json');
+const BIN_NAME = platform() === 'win32' ? 'mihomo.exe' : 'mihomo';
+function rtCurrent() {
+  try { return JSON.parse(readFileSync(RT_VERSIONS, 'utf8'))?.mihomo?.current || null; } catch { return null; }
+}
+function rtBinPath(ver) { return join(RUNTIME_DIR, 'mihomo', ver, BIN_NAME); }
+function resolveBinary() {
+  if (process.env.MIHOMO_BIN) return process.env.MIHOMO_BIN;
+  const cur = rtCurrent();
+  if (cur && existsSync(rtBinPath(cur))) return rtBinPath(cur);
+  return join(HOME, '.local', 'bin', BIN_NAME);
+}
+const BINARY_PATH = resolveBinary();
 const STATE_DIR   = join(HOME, '.local', 'state', 'cicy-skills', 'mihomo');
 const PID_FILE    = join(STATE_DIR, 'pid');
 const LOG_FILE    = process.env.MIHOMO_LOG    || join(HOME, 'logs', 'mihomo.log');
@@ -184,12 +201,76 @@ function msleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 
 
 // ── install ─────────────────────────────────────────────────────────────
 
+// npm is the PRIMARY distribution channel (cicy-mihomo-<os>-<arch> subpackages,
+// published by the cicy-mihomo release CI): npmmirror keeps CN fast and npm's
+// own integrity checking (pacote sha512) ends the corrupted-proxy-download
+// class of failures. GitHub releases remain the fallback.
+function npmPlatformPkg() {
+  const os = platform();
+  const osStr = os === 'win32' ? 'windows' : os === 'darwin' ? 'darwin' : 'linux'; // npm spam filter 403s names containing 'win32'
+  const archStr = arch() === 'arm64' ? 'arm64' : 'x64';
+  return `cicy-mihomo-${osStr}-${archStr}`;
+}
+
+// Install <target> (npm semver, no leading v) into the runtime store and
+// return true. npm pack verifies pacote sha512 integrity end-to-end.
+async function installFromNpm(target) {
+  const pkg = npmPlatformPkg();
+  const registry = process.env.CICY_NPM_REGISTRY || 'https://registry.npmmirror.com';
+  const tmp = join(tmpdir(), `cicy-mihomo-npm-${process.pid}`);
+  ensureDir(tmp);
+  try {
+    console.log(`→ npm pack ${pkg}@${target} (${registry}) ...`);
+    const out = execFileSync('npm', ['pack', `${pkg}@${target}`, `--registry=${registry}`, '--pack-destination', tmp],
+      { encoding: 'utf8', shell: platform() === 'win32', timeout: 300000 }).trim();
+    const tgz = join(tmp, out.split('\n').pop().trim());
+    execFileSync('tar', ['-xzf', tgz, '-C', tmp], { stdio: 'inherit' });
+    const bin = join(tmp, 'package', BIN_NAME);
+    if (!existsSync(bin)) throw new Error('binary missing in npm package');
+    const dst = rtBinPath(target);
+    ensureDir(dirname(dst));
+    writeFileSync(dst, readFileSync(bin), { mode: 0o755 });
+    rtSwitch(target);
+    console.log(`✓ installed mihomo ${target} from npm → ${dst}`);
+    return true;
+  } catch (e) {
+    console.warn(`! npm install failed (${e.message.split('\n')[0]}) — falling back to GitHub release`);
+    return false;
+  }
+}
+
+// npm registry latest for this platform package (null on network failure).
+async function npmLatest() {
+  const registry = process.env.CICY_NPM_REGISTRY || 'https://registry.npmmirror.com';
+  try {
+    return execFileSync('npm', ['view', npmPlatformPkg(), 'version', `--registry=${registry}`],
+      { encoding: 'utf8', shell: platform() === 'win32', timeout: 30000 }).trim() || null;
+  } catch { return null; }
+}
+
+function rtSwitch(ver) {
+  ensureDir(RUNTIME_DIR);
+  let v = {}; try { v = JSON.parse(readFileSync(RT_VERSIONS, 'utf8')); } catch {}
+  v.mihomo = { ...(v.mihomo || {}), previous: v.mihomo?.current || undefined, current: ver, switched_at: new Date().toISOString() };
+  writeFileSync(RT_VERSIONS, JSON.stringify(v, null, 2));
+}
+
 async function cmdInstall() {
-  if (existsSync(BINARY_PATH) && !rest.includes('--force')) {
-    let v = '?';
-    try { v = execFileSync(BINARY_PATH, ['-v'], { encoding: 'utf8' }).split('\n')[0].trim(); } catch {}
-    console.log(`✓ already installed: ${BINARY_PATH} (${v})`);
-    console.log('  use --force to reinstall');
+  // 主人定的安装语义:先看指定目录(runtime store)——
+  //   不存在 → npm 下载;存在 → 比版本,落后 → npm 更新到目标版。
+  // 目标版 = CICY_MIHOMO_VERSION(钉死)否则 npm registry latest(否则内置默认)。
+  const pinned = process.env.CICY_MIHOMO_VERSION ? process.env.CICY_MIHOMO_VERSION.replace(/^v/, '') : null;
+  const cur = rtCurrent();
+  if (!process.env.CICY_MIHOMO_RELEASE_URL) {
+    const target = pinned || (await npmLatest()) || MIHOMO_VERSION.replace(/^v/, '');
+    if (cur === target && existsSync(rtBinPath(cur)) && !rest.includes('--force')) {
+      console.log(`✓ already current: mihomo ${cur} (${rtBinPath(cur)})`);
+      return;
+    }
+    if (cur && cur !== target) console.log(`→ update: ${cur} → ${target}`);
+    if (await installFromNpm(target)) return;
+  } else if (existsSync(BINARY_PATH) && !rest.includes('--force')) {
+    console.log(`✓ already installed: ${BINARY_PATH} (use --force to reinstall)`);
     return;
   }
 
@@ -236,6 +317,16 @@ async function cmdInstall() {
     // raw binary (cicy-ai/cicy-mihomo): install directly, no extraction
     writeFileSync(BINARY_PATH, readFileSync(archive), { mode: 0o755 });
   }
+  // GitHub-fallback installs also land in the runtime store so the version
+  // pointer stays truthful (BINARY_PATH already resolves through it).
+  try {
+    const ver = MIHOMO_VERSION.replace(/^v/, '');
+    if (BINARY_PATH !== rtBinPath(ver)) {
+      ensureDir(dirname(rtBinPath(ver)));
+      writeFileSync(rtBinPath(ver), readFileSync(BINARY_PATH), { mode: 0o755 });
+    }
+    rtSwitch(ver);
+  } catch {}
   console.log(`✓ installed mihomo → ${BINARY_PATH}`);
 }
 
