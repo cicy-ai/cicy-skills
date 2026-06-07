@@ -28,7 +28,7 @@ const PID_FILE    = join(STATE_DIR, 'pid');
 const LOG_FILE    = process.env.MIHOMO_LOG    || join(HOME, 'logs', 'mihomo.log');
 const CTRL_BASE   = process.env.MIHOMO_CTRL   || 'http://127.0.0.1:19001';
 
-const MIHOMO_VERSION = process.env.CICY_MIHOMO_VERSION || 'v1.10.3';
+const MIHOMO_VERSION = process.env.CICY_MIHOMO_VERSION || 'v1.10.4';
 const GH_PROXY = process.env.GITHUB_PROXY || 'https://gh-proxy.com/';
 
 const TEMPLATE = `# cicy-mihomo config (mihomo / clash-meta)
@@ -241,7 +241,8 @@ function resolveDownloadURL() {
   const isArm64 = a === 'arm64';
   const os = platform();
   const archStr = isArm64 ? 'arm64' : (a === 'x64' ? 'amd64' : a);
-  const osStr = os === 'darwin' ? 'darwin' : (os === 'linux' ? 'linux' : os);
+  // node reports 'win32' but the release assets are named mihomo-windows-*.exe
+  const osStr = os === 'darwin' ? 'darwin' : os === 'linux' ? 'linux' : os === 'win32' ? 'windows' : os;
   const ext = os === 'win32' ? '.exe' : '';
   const file = 'mihomo-' + osStr + '-' + archStr + ext;
   return GH_PROXY + 'https://github.com/cicy-ai/cicy-mihomo/releases/download/' + v + '/' + file;
