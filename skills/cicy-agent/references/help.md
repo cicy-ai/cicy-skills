@@ -19,9 +19,17 @@ cicy-agent get_online_agents                  Roster: agents with a live tmux se
 cicy-agent get_offline_agents                 Roster: in db but no live session
 cicy-agent get_all_agents                     Roster: whole db (online ∪ offline = all)
                                               Roster rows carry {id, title, duty,
-                                              agent_type, online}; duty resolves from
-                                              role_template → cicy-team role charter
-                                              description → falls back to title.
+                                              agent_type, online, model, provider,
+                                              local_gateway, context_usage, cost, idle}.
+                                              duty: role_template → cicy-team charter →
+                                              title. Runtime fields read the agent's
+                                              ~/cicy-ai/workers/<id>/.cicy/history/
+                                              (reply.json → idle+model, context.json →
+                                              context_usage, usage.jsonl → Σcost +
+                                              provider); unavailable → null / "n/a"
+                                              (always n/a with --node — files are remote).
+                                              idle is a heuristic: "thinking" or request
+                                              activity <45s ago = busy.
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
 cicy-agent restart                            Restart all panes
 cicy-agent clear <pane>                       Clear pane

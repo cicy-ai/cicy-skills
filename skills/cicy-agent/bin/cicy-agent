@@ -274,28 +274,85 @@ function dutyOf(p) {
   return String(p.title || '').trim();
 }
 
-function rosterRow(p, liveSet) {
+// Runtime enrichment (todo #91) — read straight from the agent's gateway
+// history dir (~/cicy-ai/workers/<id>/.cicy/history/):
+//   reply.json   → idle ("thinking" = in-turn) + exact model id
+//   context.json → context_usage (used_pct, written by the claude statusline)
+//   usage.jsonl  → cumulative cost (Σ cost_credit) + provider
+// Local-only: with --node these files live on the remote host, so runtime
+// fields degrade to null (rendered n/a) instead of lying.
+function runtimeOf(id, isRemote) {
+  const out = { model: null, provider: null, context_usage: null, cost: null, idle: null };
+  if (isRemote) return out;
+  const dir = join(homedir(), 'cicy-ai', 'workers', id, '.cicy', 'history');
+  try {
+    const r = JSON.parse(readFileSync(join(dir, 'reply.json'), 'utf8'));
+    // reply.json flips per gateway REQUEST, not per logical turn — between a
+    // turn's requests (tool execution windows) it briefly reads "completed".
+    // Heuristic: "thinking" OR any request activity in the last 45s = busy.
+    // Known gap: a turn stuck >45s in one long tool call reads idle.
+    if (r.status) {
+      const recentMs = Date.now() - Date.parse(r.updated_at || 0);
+      out.idle = r.status !== 'thinking' && !(recentMs >= 0 && recentMs < 45_000);
+    }
+    if (r.model) out.model = r.model;
+  } catch { /* no gateway snapshot — official-login or never ran */ }
+  try {
+    const c = JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8'));
+    if (c.used_pct != null) out.context_usage = `${c.used_pct}%`;
+    if (!out.model && c.model) out.model = c.model;
+  } catch { /* statusline never wrote it */ }
+  try {
+    let cost = 0, seen = 0, provider = '';
+    for (const line of readFileSync(join(dir, 'usage.jsonl'), 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const u = JSON.parse(line);
+        if (typeof u.cost_credit === 'number') { cost += u.cost_credit; seen++; }
+        if (u.provider) provider = u.provider;
+      } catch { /* skip torn line */ }
+    }
+    if (seen) out.cost = Math.round(cost * 1e4) / 1e4;
+    if (provider) out.provider = provider;
+  } catch { /* no usage log */ }
+  return out;
+}
+
+function rosterRow(p, liveSet, isRemote) {
+  const id = sessionOf(p.pane_id);
+  const rt = runtimeOf(id, isRemote);
   return {
-    id: sessionOf(p.pane_id),
+    id,
     title: p.title || '',
     duty: dutyOf(p),
     agent_type: p.agent_type || '',
-    online: liveSet.has(sessionOf(p.pane_id)),
+    online: liveSet.has(id),
+    model: rt.model || p.default_model || null,
+    provider: rt.provider,
+    local_gateway: !!p.use_custom_gateway,
+    context_usage: rt.context_usage,
+    cost: rt.cost,
+    idle: rt.idle,
     pane_id: p.pane_id,
     workspace: p.workspace || '',
   };
 }
 
+const na = (v) => (v === null || v === undefined || v === '' ? 'n/a' : v);
+
 async function cmdAgents(kind, node) {
   const { panes, online, offline } = await fetchAgentSets(node);
   const liveSet = new Set(online.map((p) => sessionOf(p.pane_id)));
   const sel = kind === 'online' ? online : kind === 'offline' ? offline : panes;
-  const agents = sel.map((p) => rosterRow(p, liveSet));
+  const agents = sel.map((p) => rosterRow(p, liveSet, !!node));
   if (json) return ok({ kind, count: agents.length, online: online.length, offline: offline.length, all: panes.length, agents });
   console.log(`${kind}: ${agents.length}  (online ${online.length} + offline ${offline.length} = all ${panes.length})`);
-  console.log('id      \tonline\tagent_type\ttitle\tduty');
-  console.log('--------\t------\t----------\t-----\t----');
-  for (const a of agents) console.log(`${a.id}\t${a.online ? '✓' : '✗'}\t${a.agent_type}\t${a.title}\t${a.duty}`);
+  console.log('id      \ton\tidle\tctx\tcost\tmodel\tgw\tduty');
+  console.log('--------\t--\t----\t---\t----\t-----\t--\t----');
+  for (const a of agents) {
+    const idle = a.idle === null ? 'n/a' : (a.idle ? '✓' : 'busy');
+    console.log(`${a.id}\t${a.online ? '✓' : '✗'}\t${idle}\t${na(a.context_usage)}\t${na(a.cost)}\t${na(a.model)}\t${a.local_gateway ? '✓' : '✗'}\t${a.duty}`);
+  }
 }
 
 // broadcast [--timeout <ms>] <text> — online-only by definition (主人定:
