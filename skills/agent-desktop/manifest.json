@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-desktop",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "title": "Agent Desktop",
-  "description": "Control a connected cicy-desktop (Electron) client on this host. Screenshot, clipboard, exec shell, list windows, raw electronRPC via desktop_event over WebSocket.",
+  "description": "Control a connected cicy-desktop (Electron) client on this host. Exec shell, system info, live tool discovery, raw electronRPC via desktop_event over WebSocket.",
   "category": "dev",
   "tags": [
     "cicy-desktop",
@@ -43,14 +43,24 @@
   "i18n": {
     "zh-CN": {
       "title": "Agent Desktop",
-      "description": "\u901a\u8fc7 WebSocket \u8c03\u7528\u5df2\u8fde\u63a5\u7684 cicy-desktop (Electron) \u5ba2\u6237\u7aef\uff0c\u652f\u6301\u622a\u56fe\u3001\u526a\u8d34\u677f\u3001shell \u6267\u884c\u3001\u7a97\u53e3\u5217\u8868\u3001raw electronRPC \u7b49\u3002"
+      "description": "通过 WebSocket 调用已连接的 cicy-desktop (Electron) 客户端,支持 shell 执行、系统信息、实时工具发现、raw electronRPC 等。"
     }
   },
   "tools": [
     {
-      "name": "screenshot",
-      "example": "agent-desktop screenshot",
-      "description": "Take a screenshot of the Electron desktop"
+      "name": "clients",
+      "example": "agent-desktop clients",
+      "description": "List connected cicy-desktop clients (client_id, platform, master)"
+    },
+    {
+      "name": "ping",
+      "example": "agent-desktop ping",
+      "description": "Round-trip liveness check against the connected client"
+    },
+    {
+      "name": "tools",
+      "example": "agent-desktop tools --names",
+      "description": "Query the client's live tool set via list_tools (--schema/--names/--tag); falls back to static reference"
     },
     {
       "name": "exec",
@@ -58,14 +68,19 @@
       "description": "Run a shell command on the desktop host"
     },
     {
-      "name": "clipboard",
-      "example": "agent-desktop clipboard",
-      "description": "Get current clipboard content"
+      "name": "exec-file",
+      "example": "agent-desktop exec-file ./setup.sh",
+      "description": "Upload a local script and run it on the desktop (.sh/.py/.js runner picked by extension)"
     },
     {
-      "name": "list-windows",
-      "example": "agent-desktop list-windows",
-      "description": "List all open windows on the desktop"
+      "name": "sysinfo",
+      "example": "agent-desktop sysinfo",
+      "description": "Full system info: platform, arch, os version, cpu, memory, disk, loadavg, network"
+    },
+    {
+      "name": "rpc",
+      "example": "agent-desktop rpc get_system_info '{}'",
+      "description": "Raw electronRPC call to any Electron-main tool with JSON args"
     }
   ]
 }

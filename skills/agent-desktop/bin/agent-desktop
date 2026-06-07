@@ -44,11 +44,9 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 30000);
       case 'tools':       await cmdTools(rest); return;
       case 'clients':     await cmdClients(); return;
       case 'ping':        await cmdPing(); return;
-      case 'screenshot':  await cmdScreenshot(); return;
-      case 'clipboard':   await cmdClipboard(rest); return;
       case 'exec':        await cmdExec(rest); return;
-      case 'windows':     await cmdSimpleRPC('get_system_windows'); return;
-      case 'sysinfo':     await cmdSimpleRPC('get_system_info'); return;
+      case 'exec-file':   await cmdExecFile(rest); return;
+      case 'sysinfo':     await cmdSysinfo(); return;
       case 'rpc':         await cmdRPC(rest); return;
       default: bail(`unknown command: ${cmd}. Try agent-desktop --help.`, 2);
     }
@@ -68,7 +66,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: agent-desktop <ping|screenshot|clipboard|exec|windows|sysinfo|rpc|clients> [...] [--client ID]\n'); }
+  catch { process.stdout.write('Usage: agent-desktop <ping|exec|exec-file|sysinfo|rpc|clients|tools> [...] [--client ID]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -131,7 +129,24 @@ async function chatClients() {
   return raw.filter((c) => c?.client_id);
 }
 
-// auto-select the single ElectronMCP client; explicit --client wins
+// probe: does this client's page actually expose window.electronRPC?
+// isElectron only means the UA contains "electron" — preload-less sandbox
+// windows (agent-electron open_window pages) carry it too but cannot serve
+// rpc_call. A quick exec_js typeof check separates the real bridge windows.
+async function hasElectronRPC(cid) {
+  try {
+    const resp = await api('POST', '/api/chat/push', {
+      client_id: cid,
+      type: 'exec_js',
+      wait_ack: true,
+      timeout_ms: 5000,
+      data: { code: 'typeof window.electronRPC' },
+    });
+    return resp?.data?.result === 'function';
+  } catch { return false; }
+}
+
+// auto-select the single rpc-capable cicy-desktop client; explicit --client wins
 async function resolveDesktop() {
   const clients = await chatClients();
   if (clientID) {
@@ -144,8 +159,17 @@ async function resolveDesktop() {
     return c?.isElectron === true || ua.includes('electronmcp') || ua.includes('cicydesktop');
   });
   if (matches.length === 0) throw Object.assign(new Error('no cicy-desktop client connected'), { exitCode: 3 });
-  if (matches.length > 1)  throw Object.assign(new Error('multiple cicy-desktop clients connected; pass --client <id>'), { exitCode: 2 });
-  return { clientID: matches[0].client_id };
+  const flags = await Promise.all(matches.map((c) => hasElectronRPC(c.client_id)));
+  const capable = matches.filter((_, i) => flags[i]);
+  if (capable.length === 0) {
+    const ids = matches.map((c) => c.client_id).join(', ');
+    throw Object.assign(new Error(`cicy-desktop window(s) connected (${ids}) but none exposes electronRPC — open the cicy-desktop main window, or pass --client <id>`), { exitCode: 3 });
+  }
+  if (capable.length > 1) {
+    const ids = capable.map((c) => c.client_id).join(', ');
+    throw Object.assign(new Error(`multiple rpc-capable cicy-desktop clients (${ids}); pass --client <id>`), { exitCode: 2 });
+  }
+  return { clientID: capable[0].client_id };
 }
 
 // rpc: HTTP push with wait_ack=true; the server's sync mode keys solely on
@@ -200,33 +224,6 @@ async function cmdPing() {
   console.log(`✅ cicy-desktop online (client=${target.clientID}, latency=${ms}ms)`);
 }
 
-async function cmdScreenshot() {
-  const { result } = await rpc('webpage_screenshot_to_clipboard', {});
-  if (json) return ok(result);
-  if (typeof result === 'string') console.log(result);
-  else console.log(JSON.stringify(result));
-}
-
-async function cmdClipboard(args) {
-  const op = args[0];
-  if (op === 'get') {
-    const { result } = await rpc('clipboard_read_text', {});
-    if (json) return ok(result);
-    process.stdout.write(typeof result === 'string' ? result : JSON.stringify(result));
-    process.stdout.write('\n');
-    return;
-  }
-  if (op === 'set') {
-    if (args.length < 2) throw Object.assign(new Error('Usage: agent-desktop clipboard set <text>'), { exitCode: 2 });
-    const text = args.slice(1).join(' ');
-    const { result } = await rpc('clipboard_write_text', { text });
-    if (json) return ok(result);
-    console.log('✓ clipboard set');
-    return;
-  }
-  throw Object.assign(new Error('Usage: agent-desktop clipboard get|set ...'), { exitCode: 2 });
-}
-
 async function cmdExec(args) {
   if (args.length < 1) throw Object.assign(new Error('Usage: agent-desktop exec <shell_cmd>'), { exitCode: 2 });
   const command = args.join(' ');
@@ -236,11 +233,64 @@ async function cmdExec(args) {
   else console.log(JSON.stringify(result, null, 2));
 }
 
-async function cmdSimpleRPC(tool) {
-  const { result } = await rpc(tool, {});
+// Upload a local script and execute it on the desktop. Runner is picked by
+// extension (.py → exec_python_file, .js/.mjs/.cjs → exec_node_file,
+// anything else → exec_shell_file); the desktop saves `content` to a temp
+// file and runs it.
+async function cmdExecFile(args) {
+  let cwd = '';
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--cwd') { cwd = args[++i] || ''; continue; }
+    rest.push(args[i]);
+  }
+  if (rest.length < 1) throw Object.assign(new Error('Usage: agent-desktop exec-file <local_script> [--cwd DIR]'), { exitCode: 2 });
+  const file = rest[0];
+  if (!existsSync(file)) throw Object.assign(new Error(`local file not found: ${file}`), { exitCode: 2 });
+  const content = readFileSync(file, 'utf8');
+  const ext = (file.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase() || '';
+  const tool = ext === 'py' ? 'exec_python_file'
+    : ['js', 'mjs', 'cjs'].includes(ext) ? 'exec_node_file'
+    : 'exec_shell_file';
+  const { result } = await rpc(tool, cwd ? { content, cwd } : { content });
   if (json) return ok(result);
   if (typeof result === 'string') console.log(result);
   else console.log(JSON.stringify(result, null, 2));
+}
+
+// sysinfo = get_system_info + gap fill. The desktop tool lacks `os version`
+// everywhere and `disk` / `cpu.usage` outside Linux, so one extra exec_shell
+// fills those in client-side — works against already-deployed desktops.
+async function cmdSysinfo() {
+  let { result } = await rpc('get_system_info', {});
+  if (typeof result === 'string') { try { result = JSON.parse(result); } catch { /* keep raw */ } }
+  const info = (result && typeof result === 'object') ? result : { raw: result };
+
+  const plat = info.platform || '';
+  const needDisk = !(info.disk && info.disk.total);
+  if ((plat === 'darwin' || plat === 'linux') && (!info.os_version || needDisk)) {
+    try {
+      const script = plat === 'darwin'
+        ? `echo "OSV:$(sw_vers -productName) $(sw_vers -productVersion) ($(uname -r))"; df -h / | tail -1`
+        : `echo "OSV:$(. /etc/os-release 2>/dev/null; echo "$PRETTY_NAME") ($(uname -r))"; df -h / | tail -1`;
+      const { result: out } = await rpc('exec_shell', { command: script });
+      // exec_shell output may arrive with newlines as literal \n escapes —
+      // normalize before line-based parsing.
+      const text = (typeof out === 'string' ? out : JSON.stringify(out)).replace(/\\n/g, '\n');
+      const osv = text.match(/OSV:([^\n]+)/);
+      if (osv) info.os_version = osv[1].replace(/[\\",]+\s*$/, '').trim();
+      if (needDisk) {
+        const dfLine = text.split('\n').find((l) => /^\/|^\S+\s+\d/.test(l) && /%/.test(l));
+        if (dfLine) {
+          const p = dfLine.trim().split(/\s+/);
+          if (p.length >= 5) info.disk = { total: p[1], used: p[2], available: p[3], usePercent: p[4] };
+        }
+      }
+    } catch { /* enrichment is best-effort; base info still printed */ }
+  }
+
+  if (json) return ok(info);
+  console.log(JSON.stringify(info, null, 2));
 }
 
 async function cmdTools(rest) {

@@ -5,16 +5,24 @@
 ```
 agent-desktop clients [--json]
 agent-desktop ping [--client ID] [--json]
-agent-desktop screenshot [--client ID] [--json]
-agent-desktop clipboard get [--client ID] [--json]
-agent-desktop clipboard set <text> [--client ID] [--json]
 agent-desktop exec <shell_cmd> [--client ID] [--json]
-agent-desktop windows [--client ID] [--json]
+agent-desktop exec-file <local_script> [--cwd DIR] [--client ID] [--json]
 agent-desktop sysinfo [--client ID] [--json]
 agent-desktop rpc <tool> [json_args] [--client ID] [--json]
 agent-desktop --help / -h / help
 agent-desktop tools [--schema] [--names] [--tag <Tag>] [--static] [--client ID] [--json]
 ```
+
+`exec-file` reads a **local** script, uploads its content to the desktop and
+executes it there (desktop saves to a temp file). Runner by extension:
+`.py` → `exec_python_file`, `.js`/`.mjs`/`.cjs` → `exec_node_file`, anything
+else → `exec_shell_file` (bash; `.bat` on Windows).
+
+`sysinfo` returns platform, arch, **os_version**, hostname, uptime, cpu
+(model/cores/usage), memory, loadavg, **disk** (total/used/available/use%)
+and network IPs. The desktop's `get_system_info` lacks os_version everywhere
+and disk outside Linux, so `sysinfo` fills those via one extra `exec_shell`
+(`sw_vers`/`os-release` + `df -h /`) — best-effort, works on deployed clients.
 
 `tools` queries the connected cicy-desktop **live** via the `list_tools`
 meta-tool (name/description/tag; `--schema` adds each inputSchema, `--names`

@@ -22,12 +22,9 @@
 | subcmd          | tool                                |
 |-----------------|-------------------------------------|
 | `ping`          | `get_system_info` (any responsive call) |
-| `screenshot`    | `webpage_screenshot_to_clipboard`   |
-| `clipboard get` | `clipboard_read_text`               |
-| `clipboard set` | `clipboard_write_text`              |
 | `exec`          | `exec_shell`                        |
-| `windows`       | `get_system_windows`                |
-| `sysinfo`       | `get_system_info`                   |
+| `exec-file`     | `exec_shell_file` / `exec_python_file` / `exec_node_file` (by ext, content upload) |
+| `sysinfo`       | `get_system_info` + `exec_shell` gap fill (os_version, disk on darwin) |
 | `rpc <tool>`    | `<tool>` (passthrough)              |
 | `clients`       | (no rpc — GET `/api/chat/clients`)  |
 

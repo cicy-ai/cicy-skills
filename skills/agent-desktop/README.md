@@ -1,6 +1,6 @@
 # agent-desktop
 
-> Source-only Node.js, 262 LOC. Read [`bin/agent-desktop`](./bin/agent-desktop).
+> Source-only Node.js, 324 LOC. Read [`bin/agent-desktop`](./bin/agent-desktop).
 > Requires Node **22+** for native WebSocket.
 
 Talks to a connected cicy-desktop (Electron) client through cicy-code's chat
@@ -18,12 +18,9 @@ cicy-code skill install agent-desktop
 ```bash
 agent-desktop clients                    # list connected clients
 agent-desktop ping                       # round-trip via get_system_info
-agent-desktop clipboard get
-agent-desktop clipboard set 'hello'
-agent-desktop screenshot                 # → base64 PNG (also written to clipboard)
 agent-desktop exec 'uname -a'
-agent-desktop windows                    # system window list (JSON)
-agent-desktop sysinfo                    # OS / hw summary (JSON)
+agent-desktop exec-file ./setup.sh       # upload local script, run on desktop (.py/.js auto-detected)
+agent-desktop sysinfo                    # platform/arch/os version/cpu/mem/disk (JSON)
 agent-desktop rpc <tool_name> '{"json":"args"}'
 agent-desktop --client mcp-1 ...
 ```
