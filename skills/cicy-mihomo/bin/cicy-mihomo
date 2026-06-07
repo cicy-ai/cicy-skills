@@ -369,14 +369,24 @@ function resolveDownloadURL() {
 
 // ── template / gen-config / show-config ─────────────────────────────────
 
-function cmdTemplate() { process.stdout.write(TEMPLATE); }
+// Windows: 127.0.0.1:53 is practically always taken by the ICS service
+// (svchost holds 0.0.0.0:53 — verified on the win test box), so the DNS
+// listener fails to bind (non-fatal: mihomo keeps running, DNS server dead).
+// Render the template with an unprivileged alternate port there.
+function renderTemplate() {
+  return platform() === 'win32'
+    ? TEMPLATE.replace('listen: 127.0.0.1:53', 'listen: 127.0.0.1:1053')
+    : TEMPLATE;
+}
+
+function cmdTemplate() { process.stdout.write(renderTemplate()); }
 
 function cmdGenConfig() {
   if (existsSync(CONFIG_PATH) && !rest.includes('--force')) {
     bail(`config exists at ${CONFIG_PATH}; pass --force to overwrite`, 4);
   }
   ensureDir(dirname(CONFIG_PATH));
-  writeFileSync(CONFIG_PATH, TEMPLATE, { mode: 0o600 });
+  writeFileSync(CONFIG_PATH, renderTemplate(), { mode: 0o600 });
   try { chmodSync(CONFIG_PATH, 0o600); } catch {}
   console.log(`✓ wrote ${CONFIG_PATH}`);
   console.log(`  edit the file then: cicy-mihomo start (or reload if running)`);
