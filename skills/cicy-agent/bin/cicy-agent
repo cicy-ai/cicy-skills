@@ -245,35 +245,77 @@ async function fetchAgentSets(node) {
   return { panes, online, offline };
 }
 
-async function cmdAgents(kind, node) {
-  const { panes, online, offline } = await fetchAgentSets(node);
-  const sel = kind === 'online' ? online : kind === 'offline' ? offline : panes;
-  if (json) return ok({ kind, count: sel.length, online: online.length, offline: offline.length, all: panes.length, agents: sel });
-  console.log(`${kind}: ${sel.length}  (online ${online.length} + offline ${offline.length} = all ${panes.length})`);
-  console.log('pane_id\tagent_type\ttitle');
-  console.log('-------\t----------\t-----');
-  for (const p of sel) console.log(`${p.pane_id}\t${p.agent_type || ''}\t${p.title || ''}`);
+// Resolve an agent's one-line duty (职责) for the roster:
+//   1. role_template, when it names a cicy-team role charter
+//      (~/cicy-ai/skills/cicy-team/roles/<rt>/SKILL.md) → the charter
+//      frontmatter description's first sentence;
+//   2. role_template verbatim (the db holds free text like 测试工程师);
+//   3. fall back to title.
+// NB: /api/tmux/panes does not expose role_template yet (column exists in
+// agent_config but isn't selected) — until cicy-code ships that, 1–2 only
+// fire for rows that carry it, everything else falls back to title.
+function dutyOf(p) {
+  const rt = String(p.role_template || '').trim();
+  if (rt) {
+    const roots = [
+      process.env.CICY_ROLES_DIR,
+      join(homedir(), 'cicy-ai', 'skills', 'cicy-team', 'roles'),
+      join(homedir(), 'projects', 'cicy-skills', 'skills', 'cicy-team', 'roles'),
+    ].filter(Boolean);
+    for (const root of roots) {
+      try {
+        const charter = readFileSync(join(root, rt, 'SKILL.md'), 'utf8');
+        const m = /^description:\s*(.+)$/m.exec(charter);
+        if (m) return m[1].split(/[。.]/)[0].trim();
+      } catch { /* try next root */ }
+    }
+    return rt; // free text (db holds strings like 测试工程师) or unknown charter
+  }
+  return String(p.title || '').trim();
 }
 
-// broadcast [--online|--all] [--timeout <ms>] <text>
-// Default --online: only live agents get the message, so the run never stalls
-// on dead panes. --all targets the whole db (each send still has the timeout,
-// so dead panes fail fast and land in `failed`). Skips the sender itself.
-// No callback_to on purpose — N agents replying to one pane is spam.
+function rosterRow(p, liveSet) {
+  return {
+    id: sessionOf(p.pane_id),
+    title: p.title || '',
+    duty: dutyOf(p),
+    agent_type: p.agent_type || '',
+    online: liveSet.has(sessionOf(p.pane_id)),
+    pane_id: p.pane_id,
+    workspace: p.workspace || '',
+  };
+}
+
+async function cmdAgents(kind, node) {
+  const { panes, online, offline } = await fetchAgentSets(node);
+  const liveSet = new Set(online.map((p) => sessionOf(p.pane_id)));
+  const sel = kind === 'online' ? online : kind === 'offline' ? offline : panes;
+  const agents = sel.map((p) => rosterRow(p, liveSet));
+  if (json) return ok({ kind, count: agents.length, online: online.length, offline: offline.length, all: panes.length, agents });
+  console.log(`${kind}: ${agents.length}  (online ${online.length} + offline ${offline.length} = all ${panes.length})`);
+  console.log('id      \tonline\tagent_type\ttitle\tduty');
+  console.log('--------\t------\t----------\t-----\t----');
+  for (const a of agents) console.log(`${a.id}\t${a.online ? '✓' : '✗'}\t${a.agent_type}\t${a.title}\t${a.duty}`);
+}
+
+// broadcast [--timeout <ms>] <text> — online-only by definition (主人定:
+// offline agents can't receive, broadcasting to them is meaningless; there is
+// deliberately no --all). Per-send timeout so a stuck pane can't stall the
+// run. Skips the sender itself. No callback_to on purpose — N agents replying
+// to one pane is spam. (--online is accepted as a no-op for compatibility.)
 async function cmdBroadcast(args, node) {
-  let mode = 'online', timeoutMs = 8000;
+  let timeoutMs = 8000;
   const pos = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--online')  { mode = 'online'; continue; }
-    if (args[i] === '--all')     { mode = 'all'; continue; }
+    if (args[i] === '--online')  continue; // always online — flag kept as no-op
     if (args[i] === '--timeout') { timeoutMs = parseInt(args[++i], 10) || 8000; continue; }
     pos.push(args[i]);
   }
-  if (pos.length < 1) throw Object.assign(new Error('Usage: cicy-agent broadcast [--online|--all] [--timeout <ms>] <text>'), { exitCode: 2 });
+  if (pos.length < 1) throw Object.assign(new Error('Usage: cicy-agent broadcast [--timeout <ms>] <text>'), { exitCode: 2 });
   const { text } = stampSender(pos.join(' '));
-  const { panes, online, offline } = await fetchAgentSets(node);
+  const { online, offline } = await fetchAgentSets(node);
   const self = (process.env.X_AGENT_SHORT_ID || '').trim();
-  const targets = (mode === 'online' ? online : panes).filter((p) => sessionOf(p.pane_id) !== self);
+  const targets = online.filter((p) => sessionOf(p.pane_id) !== self);
 
   // /api/tmux/send answers 200 even when tmux send fails ({"detail":"failed
   // to send text: ..."}); success is {"success":true}. Surface both shapes.
@@ -289,14 +331,14 @@ async function cmdBroadcast(args, node) {
     if (r.status === 'rejected') failed.push({ pane_id: targets[i].pane_id, error: String(r.reason?.message || r.reason) });
   });
   const stats = {
-    mode, timeout_ms: timeoutMs,
+    timeout_ms: timeoutMs,
     targets: targets.length,
     delivered: targets.length - failed.length,
     failed,
-    skipped_offline: mode === 'online' ? offline.length : 0,
+    skipped_offline: offline.length,
   };
   if (json) return ok(stats);
-  console.log(`delivered ${stats.delivered}/${stats.targets} (${mode}${mode === 'online' ? `, skipped ${stats.skipped_offline} offline` : ''}, timeout ${timeoutMs}ms)`);
+  console.log(`delivered ${stats.delivered}/${stats.targets} (online-only, skipped ${stats.skipped_offline} offline, timeout ${timeoutMs}ms)`);
   for (const f of failed) console.log(`  ✗ ${f.pane_id}: ${f.error}`);
 }
 

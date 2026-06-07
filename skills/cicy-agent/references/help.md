@@ -10,15 +10,18 @@ cicy-agent windows                            Window list (JSON)
 cicy-agent capture <pane>                     Capture raw pane text
 cicy-agent reply <pane> [--full]              Last reply text from pane (parsed)
 cicy-agent msg <pane> <text> [--callback]     Send chat message (fire-and-forget)
-cicy-agent broadcast [--online|--all] [--timeout <ms>] <text>
-                                              Group-send. --online (default) targets live
-                                              agents only; --all hits the whole db. Every
-                                              send has a per-pane timeout (default 8000ms)
-                                              so dead panes can't stall the run. Skips the
-                                              sender. Prints delivered/failed stats.
-cicy-agent get_online_agents                  Agents with a live tmux session
-cicy-agent get_offline_agents                 In db but no live session
-cicy-agent get_all_agents                     Whole db (online ∪ offline = all)
+cicy-agent broadcast [--timeout <ms>] <text>  Group-send to ONLINE agents only (offline
+                                              agents can't receive — there is no --all).
+                                              Every send has a per-pane timeout (default
+                                              8000ms) so dead panes can't stall the run.
+                                              Skips the sender. Prints delivered/failed.
+cicy-agent get_online_agents                  Roster: agents with a live tmux session
+cicy-agent get_offline_agents                 Roster: in db but no live session
+cicy-agent get_all_agents                     Roster: whole db (online ∪ offline = all)
+                                              Roster rows carry {id, title, duty,
+                                              agent_type, online}; duty resolves from
+                                              role_template → cicy-team role charter
+                                              description → falls back to title.
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
 cicy-agent restart                            Restart all panes
 cicy-agent clear <pane>                       Clear pane
