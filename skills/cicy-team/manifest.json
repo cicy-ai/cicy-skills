@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-team",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "title": "Cicy Team",
   "description": "Team-builder for cicy-code: spawn one-shot gateway worker agents from a role library (qa/dev/reviewer/release/security/ops) and compose each worker's CLAUDE.md/AGENTS.md from its charter.",
   "category": "dev",

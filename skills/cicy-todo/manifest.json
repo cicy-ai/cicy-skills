@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-todo",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "title": "Cicy Todo",
   "description": "Per-workspace todo list (todo/doing/done/dropped) backed by /api/todo on the local cicy-code server.",
   "category": "dev",
@@ -41,7 +41,7 @@
   "i18n": {
     "zh-CN": {
       "title": "Cicy Todo",
-      "description": "\u901a\u8fc7 /api/todo/* \u7ba1\u7406\u6bcf\u4e2a\u5de5\u4f5c\u533a\u7684\u5f85\u529e\u4e8b\u9879\uff08todo/doing/done/dropped\uff09\u3002\u652f\u6301 list/add/show/start/done/drop/back/edit/rm\u3002"
+      "description": "通过 /api/todo/* 管理每个工作区的待办事项（todo/doing/done/dropped）。支持 list/add/show/start/done/drop/back/edit/rm。"
     }
   },
   "tools": [
@@ -52,7 +52,7 @@
     },
     {
       "name": "todo add",
-      "example": "cicy-todo add '\u4efb\u52a1\u63cf\u8ff0'",
+      "example": "cicy-todo add '任务描述'",
       "description": "Add a new todo item"
     },
     {
