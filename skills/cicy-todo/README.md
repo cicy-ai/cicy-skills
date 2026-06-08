@@ -5,7 +5,7 @@
 ## What it does
 
 A thin client for cicy-code's `/api/todo/*`. All todos live in **one** store
-inside the master pane (`w-10001`) workspace at `<master-ws>/.cicy/todos.yaml`.
+inside the master pane (`w-1001`) workspace at `<master-ws>/.cicy/todos.yaml`.
 Each todo carries a `pane_id` recording the worker that owns it.
 
 - Workers only see / modify their own todos (server enforces this).
@@ -33,7 +33,7 @@ cicy-todo back  <id>                # → todo
 cicy-todo edit  <id> "<new title>"
 cicy-todo rm    <id>
 
-# In the master pane (w-10001).
+# In the master pane (w-1001).
 cicy-todo                           # all workers' active todos
 cicy-todo --pane w-10025            # scope to one worker
 cicy-todo --pane w-10025 add "ship it"

@@ -1,6 +1,6 @@
 # cicy-team
 
-Team-builder for the cicy-code AI org. The master/architect agent (`w-10001`)
+Team-builder for the cicy-code AI org. The master/architect agent (`w-1001`)
 uses it to staff a project with **one-shot, gateway-routed worker agents** drawn
 from a bundled **role library**.
 

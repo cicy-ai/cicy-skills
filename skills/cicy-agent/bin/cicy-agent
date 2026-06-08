@@ -222,9 +222,9 @@ async function cmdMsg(args, node) {
 
 // ── online / offline / broadcast (todo #81) ─────────────────────────────
 //
-// Online judgment: the master semantics is "managed under the w-10001 cluster",
+// Online judgment: the master semantics is "managed under the w-1001 cluster",
 // but the real tmux topology is one session per agent (sessions are NOT nested
-// under w-10001). The executable criterion — equivalent in meaning — is:
+// under w-1001). The executable criterion — equivalent in meaning — is:
 //   online  = the agent's session exists in the live tmux tree
 //   offline = present in the panes db but its session is gone from the tree
 //   all     = the panes db, verbatim

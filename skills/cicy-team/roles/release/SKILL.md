@@ -49,7 +49,7 @@ ephemeral: true
 构建/测试红、冲突无法安全解决、部署后线上异常:
 
 ```sh
-cicy-agent msg w-10001 "[release] 阻断: <构建红/冲突/线上异常> <说明>" --callback
+cicy-agent msg w-1001 "[release] 阻断: <构建红/冲突/线上异常> <说明>" --callback
 ```
 
 ## 边界

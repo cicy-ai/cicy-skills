@@ -49,7 +49,7 @@ ephemeral: true
 
 - **阻断性漏洞** → 立即上报 master,并开 issue 给对应开发去修:
   ```sh
-  cicy-agent msg w-10001 "[security t-1779xxxx] 阻断漏洞: <说明>" --callback
+  cicy-agent msg w-1001 "[security t-1779xxxx] 阻断漏洞: <说明>" --callback
   cicy-todo w-<dev> add "SEC: <漏洞> 位置 <...> 可利用 <...> 期望修复 <...>"
   ```
 

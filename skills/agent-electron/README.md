@@ -37,7 +37,7 @@ agent-electron screenshot 5 --out /tmp/win5.png
 agent-electron close 5
 
 # Multi-host: pick a specific cicy-desktop client
-agent-electron --client web-w-10001-... windows
+agent-electron --client web-w-1001-... windows
 ```
 
 ## License

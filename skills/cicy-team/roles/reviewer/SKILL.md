@@ -55,7 +55,7 @@ ephemeral: true
 发现**阻断性 / 架构性**问题,或不确定该不该改:
 
 ```sh
-cicy-agent msg w-10001 "[review t-1779xxxx] 阻断问题: <说明>" --callback
+cicy-agent msg w-1001 "[review t-1779xxxx] 阻断问题: <说明>" --callback
 ```
 
 ## 边界

@@ -2,7 +2,7 @@
 // cicy-todo — central todo list, calls cicy-code /api/todo/*.
 // Zero npm dependencies. Pure ESM. Node 18+.
 //
-// All todos live in the master pane (w-10001) workspace. Each todo carries
+// All todos live in the master pane (w-1001) workspace. Each todo carries
 // a pane_id marking which worker owns it. Workers can only see/mutate
 // their own todos; master sees everything and can filter by --pane.
 
@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
 const API_PORT = process.env.CICY_API_PORT || '8008';
-const MASTER_PANE = 'w-10001';
+const MASTER_PANE = 'w-1001';
 
 const args = process.argv.slice(2);
 
@@ -42,7 +42,7 @@ if (!SELF_PANE_RAW) {
   process.stderr.write(
     'cicy-todo: no agent identity found (X_AGENT_SHORT_ID / CICY_PANE_ID / X_AGENT_ID).\n' +
     '  Inside a cicy-code pane these are set automatically by the tmux boot script.\n' +
-    '  To run as the master pane explicitly: CICY_PANE_ID=w-10001 cicy-todo ...\n',
+    '  To run as the master pane explicitly: CICY_PANE_ID=w-1001 cicy-todo ...\n',
   );
   process.exit(2);
 }
@@ -61,7 +61,7 @@ for (let i = 0; i < args.length; i++) {
   rest.push(a);
 }
 if (paneFilter && !isMaster) {
-  bail('--pane is only available from the master pane (w-10001)', 2);
+  bail('--pane is only available from the master pane (w-1001)', 2);
 }
 
 const cmd = rest.find((a) => !a.startsWith('--')) || 'list';

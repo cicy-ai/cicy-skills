@@ -26,6 +26,6 @@ agent-webpage tools
 
 - `CICY_API_TOKEN`        — bearer token override
 - `CICY_API_PORT`         — server port (default 8008)
-- `CICY_PANE_ID`          — default agent pane (e.g. `w-10001`)
+- `CICY_PANE_ID`          — default agent pane (e.g. `w-1001`)
 - `CICY_GLOBAL_JSON`      — global.json path override
 - `CICY_AGENT_TIMEOUT_MS` — default RPC timeout (default 15000)

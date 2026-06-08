@@ -38,10 +38,10 @@ ephemeral: true
 自测: `<命令>` → 退出码 0 / 输出 <片段>
 ```
 
-## 升级规则(给 master `w-10001`)
+## 升级规则(给 master `w-1001`)
 
 ```sh
-cicy-agent msg w-10001 "[dev-junior t-1779xxxx] spec 不明确: <缺什么/哪点要拍板>" --callback
+cicy-agent msg w-1001 "[dev-junior t-1779xxxx] spec 不明确: <缺什么/哪点要拍板>" --callback
 ```
 
 ## 边界

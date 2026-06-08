@@ -51,7 +51,7 @@ ephemeral: true
 指令不明、要做破坏性操作、或执行中遇到预期外状态:
 
 ```sh
-cicy-agent msg w-10001 "[ops t-1779xxxx] <不明确/需确认危险操作/异常>: <说明>" --callback
+cicy-agent msg w-1001 "[ops t-1779xxxx] <不明确/需确认危险操作/异常>: <说明>" --callback
 ```
 
 ## 边界

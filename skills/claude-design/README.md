@@ -6,7 +6,7 @@ Share → Export downloads.
 
 ```sh
 export CLAUDE_DESIGN_IDX=6
-export CLAUDE_DESIGN_CLIENT=web-w-10001-mphqbqi5-aronzx   # omit for local
+export CLAUDE_DESIGN_CLIENT=web-w-1001-mphqbqi5-aronzx   # omit for local
 
 claude-design open
 echo "Design a dark-mode landing page" | claude-design prompt - --wait

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // cicy-team — team-builder for the cicy-code AI org.
 //
-// The master/architect (w-10001, Opus) uses this to staff a project with
+// The master/architect (w-1001, Opus) uses this to staff a project with
 // one-shot, gateway-routed worker agents drawn from the bundled role library
 // (roles/<role>/SKILL.md). For each worker it:
 //   1) POST /api/panes/create  (use_custom_gateway=true, bound to master)
@@ -22,7 +22,7 @@ const ROLES_DIR = process.env.CICY_ROLES_DIR || join(SKILL_DIR, 'roles');
 const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
 const API_PORT = process.env.CICY_API_PORT || '8008';
 const API = `http://127.0.0.1:${API_PORT}`;
-const MASTER_DEFAULT = (process.env.X_AGENT_SHORT_ID || 'w-10001').trim() || 'w-10001';
+const MASTER_DEFAULT = (process.env.X_AGENT_SHORT_ID || 'w-1001').trim() || 'w-1001';
 
 function die(msg, code = 1) { process.stderr.write(`cicy-team: ${msg}\n`); process.exit(code); }
 
@@ -152,7 +152,7 @@ USAGE
 spawn-role options
   --model M        gateway model (default: role's frontmatter model)
   --title T        pane title (default: role name)
-  --master w-x     master pane to bind under (default: $X_AGENT_SHORT_ID or w-10001)
+  --master w-x     master pane to bind under (default: $X_AGENT_SHORT_ID or w-1001)
   --task "..."     dispatch this task to the new worker via cicy-agent (self-contained: context + task + acceptance criteria)
   --no-callback    dispatch without --callback
 

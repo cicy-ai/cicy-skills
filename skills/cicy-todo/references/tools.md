@@ -37,7 +37,7 @@ The token is also accepted from `CICY_API_TOKEN` env (overrides file).
 {
   "ok": true,
   "data": {
-    "pane": "w-10001",
+    "pane": "w-1001",
     "todos": [
       { "id": "abc-123", "title": "...", "status": "todo", "created_at": "...", "updated_at": "..." }
     ]

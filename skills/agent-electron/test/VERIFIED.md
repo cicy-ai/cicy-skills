@@ -4,12 +4,12 @@
 
 ## v1.0.6 — 2026-06-06,w-10064 实测通过 ✅
 
-环境:darwin cicy-desktop(client `web-w-10001-mphqbqi5-aronzx`),本机经
+环境:darwin cicy-desktop(client `web-w-1001-mphqbqi5-aronzx`),本机经
 `cicy-code skill install` 更新到 1.0.6。
 
 - **新用法**:`open <url>` 位置参数 + `--idx` + `--client` 均 OK
 - **查重纪律走通**:先 `windows` 查重(2 个 client 都报 `isElectron=true`,
-  UA 均为 CiCyDesktop;darwin desktop = `web-w-10001-mphqbqi5-aronzx`),
+  UA 均为 CiCyDesktop;darwin desktop = `web-w-1001-mphqbqi5-aronzx`),
   `app-1001.cicy-ai.com` 无在开窗 → `open` 新窗 win6
 - **dispatcher webui**(https://app-1001.cicy-ai.com/)正常:
   登录页渲染 → 注入 api_token 登录 → 进 dispatcher 聊天界面

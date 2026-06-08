@@ -7,13 +7,13 @@ description: Per-workspace todo list (todo/doing/done/dropped) backed by /api/to
 
 A minimal todo list shared between every cicy-code agent / pane and the
 Workspace "Todo" tab. There is **one** store, located in the master pane
-(`w-10001`) workspace at `<master-ws>/.cicy/todos.yaml`.
+(`w-1001`) workspace at `<master-ws>/.cicy/todos.yaml`.
 
 Each todo carries a `pane_id` recording which worker owns it. The server
 enforces:
 
 - A worker pane only sees / modifies todos with `pane_id == self`.
-- The master pane (`w-10001`) sees every todo and may filter via `--pane`.
+- The master pane (`w-1001`) sees every todo and may filter via `--pane`.
 
 ## Quick start
 
@@ -28,7 +28,7 @@ cicy-todo back  <id-prefix>            # → todo
 cicy-todo edit  <id-prefix> "<new title>"
 cicy-todo rm    <id-prefix>
 
-# In the master pane (w-10001) — sees every worker's todos.
+# In the master pane (w-1001) — sees every worker's todos.
 cicy-todo                              # all workers' active todos (PANE col)
 cicy-todo --pane w-10025               # filter to one worker
 cicy-todo --pane w-10025 add "ship it" # create on behalf of w-10025
@@ -72,7 +72,7 @@ conversations and be visible in the Workspace UI tab.
 
 The per-worker isolation is **honor-system, not a security boundary**. All
 panes share the same `api_token`, so a malicious caller with the token can
-trivially set `X-Agent-Show-Id: w-10001` and impersonate the master. Treat
+trivially set `X-Agent-Show-Id: w-1001` and impersonate the master. Treat
 the worker scope as a UI/UX guard rail, not a privilege boundary.
 
 ## References

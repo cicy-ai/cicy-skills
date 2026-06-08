@@ -64,13 +64,13 @@ cicy-todo w-10026 add "FAIL t-1779xxxx: <一句话问题>. 复现: <步骤/命�
 
 ## 升级规则(给 Opus / master)
 
-遇到下面情况,**不要硬判**,升级给 master(`w-10001`):
+遇到下面情况,**不要硬判**,升级给 master(`w-1001`):
 - 验收标准本身有歧义 / 缺失 / 无法机检。
 - 失败牵涉架构决策(不是改个 bug 能解决的)。
 - 同一任务反复 FAIL(开发改了 N 次还过不了)。
 
 ```sh
-cicy-agent msg w-10001 "[QA t-1779xxxx] 需要决策: <说明>" --callback
+cicy-agent msg w-1001 "[QA t-1779xxxx] 需要决策: <说明>" --callback
 ```
 
 ## 边界(硬约束)

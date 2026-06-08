@@ -10,10 +10,10 @@ All todos live in a single store under the **master pane** workspace
 (`<master-ws>/.cicy/todos.yaml`). Each todo is stamped with the
 `pane_id` of the worker that owns it.
 
-- **Workers** (`X_AGENT_SHORT_ID=w-xxxxx`, ≠ `w-10001`) only see and
+- **Workers** (`X_AGENT_SHORT_ID=w-xxxxx`, ≠ `w-1001`) only see and
   modify their own todos. The server enforces this regardless of CLI
   flags.
-- **Master pane** (`w-10001`) sees every todo by default; pass
+- **Master pane** (`w-1001`) sees every todo by default; pass
   `--pane <w-xxxxx>` to scope a command to one worker, or to add a todo
   on behalf of that worker.
 
@@ -60,7 +60,7 @@ cicy-todo start #1                # by positional ref
 cicy-todo done 1                  # `#` is optional
 cicy-todo done abcd               # by UUID prefix (works for any status)
 
-# From master pane (w-10001).
+# From master pane (w-1001).
 cicy-todo                          # every worker's active todos (PANE col shown)
 cicy-todo --pane w-10025           # scope to one worker
 cicy-todo --pane w-10025 add "Coordinate handoff"

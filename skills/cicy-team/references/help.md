@@ -12,7 +12,7 @@ cicy-team --help | help               This help
 |------|---------|---------|
 | `--model M` | role frontmatter `model` | gateway model for the worker |
 | `--title T` | `<role>` | pane title |
-| `--master w-x` | `$X_AGENT_SHORT_ID` or `w-10001` | master pane to bind under |
+| `--master w-x` | `$X_AGENT_SHORT_ID` or `w-1001` | master pane to bind under |
 | `--task "..."` | — | dispatch this self-contained task (context + task + acceptance criteria) to the new worker via `cicy-agent` |
 | `--no-callback` | (callback on) | dispatch without `--callback` |
 

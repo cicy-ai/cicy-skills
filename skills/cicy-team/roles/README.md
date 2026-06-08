@@ -1,10 +1,10 @@
 # 角色库(role library)
 
 cicy-code"AI 公司"里**网关 worker 的岗位说明书**。每个角色一份 `SKILL.md` = 一份
-charter(人格 + 职责 + 边界 + 升级规则)。Opus(master `w-10001`)按项目 brief 从这个库
+charter(人格 + 职责 + 边界 + 升级规则)。Opus(master `w-1001`)按项目 brief 从这个库
 挑角色,现造**一次性 agent** 来干活,做完销毁。
 
-> 设计背景见 w-10001 workspace 的 `AI-COMPANY-ARCHITECTURE.md`。
+> 设计背景见 w-1001 workspace 的 `AI-COMPANY-ARCHITECTURE.md`。
 
 ## 花名册
 
@@ -18,7 +18,7 @@ charter(人格 + 职责 + 边界 + 升级规则)。Opus(master `w-10001`)按项�
 | 发布工程 | `release` | opencode | deepseek-v4-pro | 同步→构建/测试→PR/部署→验证 |
 | 运维 / 打杂 | `ops` | opencode | deepseek-v4-pro | 环境、脚本、迁移、provisioning |
 
-> 架构师 = master `w-10001`(Opus 4.7,常驻、官方 auth),不在本库——本库只装**可现造的网关 worker**。
+> 架构师 = master `w-1001`(Opus 4.7,常驻、官方 auth),不在本库——本库只装**可现造的网关 worker**。
 > 上表 model 是默认档,可按任务难度上调(如难活的 reviewer/security 临时换 gpt-5.5)。
 
 ## frontmatter 契约(团队组建 skill 读这个)
@@ -54,5 +54,5 @@ workspace 的注入文件:
 
 - **状态机**(借 cicy-todo 现有状态模拟):`todo → (dev) doing → (QA) done|back`。dev **不自己标 done**,QA PASS 才 done、FAIL 用 `back` 退回。
 - **issue = QA/安全 创建的 todo**:`cicy-todo w-<dev> add "FAIL/SEC: 复现 / 期望 / 实际"`。
-- **升级**:遇歧义 / 架构决策 / 反复失败 → `cicy-agent msg w-10001 --callback` 给 master。
+- **升级**:遇歧义 / 架构决策 / 反复失败 → `cicy-agent msg w-1001 --callback` 给 master。
 - **QA/reviewer 独立**:刻意用 ≠ dev 的模型。

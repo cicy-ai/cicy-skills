@@ -86,7 +86,7 @@ function loadToken() {
 function currentAgentID() {
   if (process.env.CICY_PANE_ID) return process.env.CICY_PANE_ID;
   const m = /(w-\d+)/.exec(process.cwd());
-  return m ? m[1] : 'w-10001';
+  return m ? m[1] : 'w-1001';
 }
 
 function randomID(prefix) { return `${prefix}-${Date.now()}-${randomBytes(4).toString('hex')}`; }

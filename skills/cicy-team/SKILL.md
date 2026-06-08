@@ -5,7 +5,7 @@ description: Team-builder for cicy-code: spawn one-shot gateway worker agents fr
 
 # Cicy Team — 团队组建 / 调度
 
-给 **master / architect**(`w-10001`,Opus)用。你不写产品代码;你把项目拆成带验收标准的
+给 **master / architect**(`w-1001`,Opus)用。你不写产品代码;你把项目拆成带验收标准的
 任务,从**角色库**现造**一次性 agent** 去做,收口验收,推到上线。
 
 > 完整设计见 cicy-code 仓库工作区的 `AI-COMPANY-ARCHITECTURE.md`。

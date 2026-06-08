@@ -33,15 +33,15 @@ with `--node NAME`. When omitted, the local cicy-code server is used.
 ```jsonc
 // msg
 POST /api/tmux/send
-{ "pane_id": "w-10002", "text": "hello", "callback_to": "w-10001" }
+{ "pane_id": "w-10002", "text": "hello", "callback_to": "w-1001" }
 // NB: answers HTTP 200 in both outcomes — success is {"success":true,...},
 // failure is {"detail":"failed to send text: ..."} (broadcast checks this).
 
 // send-keys
 POST /api/tmux/send-keys
-{ "pane_id": "w-10001", "keys": "ls -la Enter" }
+{ "pane_id": "w-1001", "keys": "ls -la Enter" }
 
 // capture
 POST /api/tmux/capture_pane
-{ "pane_id": "w-10001" }
+{ "pane_id": "w-1001" }
 ```
