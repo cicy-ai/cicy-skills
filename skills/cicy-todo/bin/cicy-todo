@@ -75,7 +75,7 @@ const cmdArgs = rest.filter((a) => !a.startsWith('--') && a !== cmd);
       case 'list': case 'ls':  await cmdList(rest); break;
       case 'add':              await cmdAdd(rest); break;
       case 'show':             await cmdShow(cmdArgs); break;
-      case 'start':            await cmdSetStatus('doing', cmdArgs); break;
+      case 'test':             await cmdSetStatus('test', cmdArgs); break;
       case 'done':             await cmdSetStatus('done', cmdArgs); break;
       case 'drop':             await cmdSetStatus('dropped', cmdArgs); break;
       case 'back':             await cmdSetStatus('todo', cmdArgs); break;
@@ -99,7 +99,7 @@ function printHelp() {
   try {
     process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
   } catch {
-    process.stdout.write(`cicy-todo <list|add|show|start|done|drop|back|edit|rm> [--pane <w-xxxxx>] [--json]\n`);
+    process.stdout.write(`cicy-todo <list|add|show|test|done|drop|back|edit|rm> [--pane <w-xxxxx>] [--json]\n`);
   }
 }
 
@@ -153,15 +153,16 @@ async function api(method, path, body) {
 }
 
 // ── id resolution ───────────────────────────────────────────────────────
-// Two forms are accepted:
-//   • #N or N — positional index into the *default active view* (status
-//     todo|doing), sorted by created_at ascending. This is the same order
-//     `cicy-todo list` prints, so #1/#2/... map directly to the rows the
-//     user just saw. Indices shift when the active set changes (add, done,
-//     drop, etc.), as is standard for sequential todo refs.
-//   • <uuid-prefix> — first-N chars of the UUID, for done/dropped todos
-//     that aren't in the active view, or when stability across status
-//     transitions matters.
+// Ids are stable auto-incrementing integers (assigned server-side, shown in
+// the ID column of `cicy-todo list` and never reused or shifted). Accepted:
+//   • N — the stable todo id. This is the primary form: it's what the list
+//     prints, what the UI shows, and what survives status changes. Falls back
+//     to a positional index into the active view only when no todo has id N
+//     (keeps old muscle-memory working).
+//   • #N — explicit positional index into the *active view* (status
+//     todo|test), sorted by created_at ascending. Shifts when the active set
+//     changes, so prefer the bare id N for anything you want to be stable.
+//   • <prefix> — leading chars of the id (rarely needed now ids are short).
 
 async function fetchActiveTodos() {
   const params = [];
@@ -170,31 +171,46 @@ async function fetchActiveTodos() {
   const qs = params.length ? '?' + params.join('&') : '';
   const resp = await api('GET', '/list' + qs);
   return (resp.todos || [])
-    .filter((t) => t.status === 'todo' || t.status === 'doing')
+    .filter((t) => t.status === 'todo' || t.status === 'test')
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 }
 
 async function resolveId(prefix) {
-  // Inlined to avoid TDZ — this function may be called synchronously from
-  // the dispatch IIFE before module-top const declarations resolve.
-  const seq = /^#?(\d+)$/.exec(prefix);
-  if (seq) {
-    const n = parseInt(seq[1], 10);
-    const active = await fetchActiveTodos();
-    if (n < 1 || n > active.length) {
-      throw Object.assign(new Error(`#${n} out of range (1..${active.length}); run 'cicy-todo' to see current numbering`), { exitCode: 2 });
-    }
-    return active[n - 1];
-  }
+  const explicitPos = /^#(\d+)$/.exec(prefix); // "#N" → always positional
+  const bareNum = /^(\d+)$/.exec(prefix); //       "N"  → stable id, positional fallback
 
   const params = [];
   if (paneFilter) params.push(`pane_id=${encodeURIComponent(paneFilter)}`);
   if (isMaster && !paneFilter) params.push('all_agents=true');
   const qs = params.length ? '?' + params.join('&') : '';
   const resp = await api('GET', '/list' + qs);
-  const matches = (resp.todos || []).filter(
-    (t) => t.id === prefix || t.id.startsWith(prefix),
-  );
+  const all = resp.todos || [];
+  const activeSorted = () => all
+    .filter((t) => t.status === 'todo' || t.status === 'test')
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  // "#N" — positional index into the active view.
+  if (explicitPos) {
+    const n = parseInt(explicitPos[1], 10);
+    const active = activeSorted();
+    if (n < 1 || n > active.length) {
+      throw Object.assign(new Error(`#${n} out of range (1..${active.length}); run 'cicy-todo' to see current numbering`), { exitCode: 2 });
+    }
+    return active[n - 1];
+  }
+
+  // "N" — stable stored id (exact). Positional fallback only when no id matches.
+  if (bareNum) {
+    const exact = all.find((t) => t.id === prefix);
+    if (exact) return exact;
+    const active = activeSorted();
+    const n = parseInt(bareNum[1], 10);
+    if (n >= 1 && n <= active.length) return active[n - 1];
+    throw Object.assign(new Error(`no todo with id ${prefix} (and #${n} out of range 1..${active.length}); run 'cicy-todo' to see ids`), { exitCode: 2 });
+  }
+
+  // Non-numeric → id prefix match.
+  const matches = all.filter((t) => t.id === prefix || t.id.startsWith(prefix));
   if (matches.length === 0) {
     throw Object.assign(new Error(`no todo matches '${prefix}'`), { exitCode: 2 });
   }
@@ -208,7 +224,7 @@ async function resolveId(prefix) {
 
 // ── pretty printing ─────────────────────────────────────────────────────
 
-const GLYPH = { todo: '○', doing: '◐', done: '✓', dropped: '✗' };
+const GLYPH = { todo: '○', test: '◓', done: '✓', dropped: '✗' };
 
 function humanTime(iso) {
   if (!iso) return '-';
@@ -221,26 +237,19 @@ function humanTime(iso) {
   return iso.slice(0, 10);
 }
 
-function shortId(id) { return id.slice(0, 10); }
-
-// Active rows (status todo|doing) get a positional `#N` that mirrors what
-// `resolveId('#N')` will resolve to. Rows in other statuses get the short
-// UUID instead — they're outside the active set, so #N would be ambiguous.
+// The ID column shows the stable, server-assigned integer id. It never shifts
+// when todos are completed/dropped, so `cicy-todo done <id>` always refers to
+// exactly the row you read — unlike the old positional `#N`.
 function printTable(todos, { withPane = false } = {}) {
   if (todos.length === 0) {
     console.log('(no todos)');
     return;
   }
   const sorted = [...todos].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-  let seq = 0;
-  const rows = sorted.map((t) => {
-    const isActive = t.status === 'todo' || t.status === 'doing';
-    const ref = isActive ? `#${++seq}` : shortId(t.id);
-    return { t, ref };
-  });
-  const refWidth = Math.max(4, ...rows.map((r) => r.ref.length));
+  const rows = sorted.map((t) => ({ t, ref: String(t.id) }));
+  const refWidth = Math.max(2, ...rows.map((r) => r.ref.length));
   const paneCol = withPane ? ` ${'PANE'.padEnd(8)}` : '';
-  console.log(`     ${'REF'.padEnd(refWidth)} ${'STATUS'.padEnd(7)} ${'UPDATED'.padEnd(10)}${paneCol} TITLE`);
+  console.log(`     ${'ID'.padEnd(refWidth)} ${'STATUS'.padEnd(7)} ${'UPDATED'.padEnd(10)}${paneCol} TITLE`);
   for (const { t, ref } of rows) {
     const g = GLYPH[t.status] || '?';
     const paneCell = withPane ? ` ${(t.pane_id || '-').padEnd(8)}` : '';
@@ -274,7 +283,7 @@ async function cmdList(restArgs) {
   const resp = await api('GET', '/list' + qs);
   let todos = resp.todos || [];
   if (!all && !status) {
-    todos = todos.filter((t) => t.status === 'todo' || t.status === 'doing');
+    todos = todos.filter((t) => t.status === 'todo' || t.status === 'test');
   }
   // Show the pane column whenever results may span multiple workers.
   const withPane = isMaster && !paneFilter;
@@ -307,7 +316,7 @@ async function cmdShow(args) {
     // currently in the active set — saves the user another `cicy-todo`
     // call to look up its positional ref.
     let ref = '';
-    if (t.status === 'todo' || t.status === 'doing') {
+    if (t.status === 'todo' || t.status === 'test') {
       try {
         const active = await fetchActiveTodos();
         const idx = active.findIndex((x) => x.id === t.id);
@@ -325,7 +334,7 @@ async function cmdShow(args) {
 
 async function cmdSetStatus(newStatus, args) {
   const id = args[0];
-  if (!id) bail(`usage: cicy-todo <start|done|drop|back> <id>`, 2);
+  if (!id) bail(`usage: cicy-todo <test|done|drop|back> <id>`, 2);
   const target = await resolveId(id);
   const resp = await api('PATCH', `/${target.id}`, { status: newStatus });
   if (json) console.log(JSON.stringify({ ok: true, data: resp }));
