@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-mihomo",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "title": "Cicy Mihomo Proxy",
   "description": "Manage the local Cicy Mihomo proxy with start/stop/reload/status/logs, node speed-testing, and per-Chrome-profile listeners (multi-port + IN-NAME rules).",
   "category": "network",
