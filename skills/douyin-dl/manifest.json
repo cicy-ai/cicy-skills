@@ -1,0 +1,57 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "douyin-dl",
+  "version": "0.1.0",
+  "title": "Douyin Downloader/Transcribe",
+  "description": "Download audio or video from a Douyin share link (yt-dlp via proxy to bypass anti-scraping); optionally transcribe to text via the cicy gateway STT or local Whisper.",
+  "category": "ai",
+  "tags": [
+    "douyin",
+    "抖音",
+    "yt-dlp",
+    "whisper",
+    "transcribe",
+    "audio"
+  ],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "yt-dlp",
+    "ffmpeg",
+    "ffprobe",
+    "curl"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/douyin-dl",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "filesystem:tmp",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Douyin 下载/转写",
+      "description": "从抖音分享链接下载音频或视频(yt-dlp 走代理绕反爬),可选用 cicy 网关 STT 或本地 Whisper 转写为文字。"
+    }
+  },
+  "tools": [
+    {
+      "name": "douyin-dl",
+      "example": "douyin-dl <抖音链接> -t",
+      "description": "Download a Douyin video/audio (bypasses anti-scraping via proxy) and optionally transcribe to text"
+    }
+  ]
+}
