@@ -33,6 +33,7 @@ function detect() {
   const remote =
     'echo "IOS:$(idevice_id -l 2>/dev/null | tr \'\\n\' \',\')"; ' +
     'echo "AND:$(adb devices 2>/dev/null | sed -n \'2,$p\' | grep -w device | cut -f1 | tr \'\\n\' \',\')"; ' +
+    'echo "UNAUTH:$(adb devices 2>/dev/null | sed -n \'2,$p\' | grep -w unauthorized | cut -f1 | tr \'\\n\' \',\')"; ' +
     'echo "TOOLS:adb=$(command -v adb >/dev/null && echo 1 || echo 0),' +
     'altserver=$([ -d /Applications/AltServer.app ] && echo 1 || echo 0),' +
     'idev=$(command -v ideviceinstaller >/dev/null && echo 1 || echo 0)"';
@@ -42,6 +43,7 @@ function detect() {
     reachable: r.ok,
     ios: grab('IOS').split(',').filter(Boolean),
     android: grab('AND').split(',').filter(Boolean),
+    androidUnauth: grab('UNAUTH').split(',').filter(Boolean),
     tools: Object.fromEntries(grab('TOOLS').split(',').filter(Boolean).map((kv) => kv.split('='))),
     err: r.err,
   };
@@ -55,7 +57,10 @@ function installAndroid(version) {
   const d = detect();
   requireReachable(d);
   if (d.tools.adb !== '1') die(`adb is not installed on ${SSH_HOST} (brew install android-platform-tools)`);
-  if (!d.android.length) die(`no Android device connected to ${SSH_HOST}. Enable Developer options → USB debugging, plug in, accept the prompt.`);
+  if (!d.android.length) {
+    if (d.androidUnauth.length) die(`Android device ${d.androidUnauth[0]} is unauthorized — on the phone, accept the "Allow USB debugging?" prompt (tick "Always allow from this computer"), then re-run.`);
+    die(`no Android device connected to ${SSH_HOST}. Enable Developer options → USB debugging, plug in, accept the prompt.`);
+  }
   const file = version ? `cicy-${version}.apk` : 'cicy-latest.apk';
   const url = `${R2_BASE}/${file}`;
   const serial = d.android[0];
