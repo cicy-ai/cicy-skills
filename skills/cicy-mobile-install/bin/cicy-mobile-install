@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+// cicy-mobile-install — install the latest cicy-mobile build onto a USB-connected
+// phone through the Mac build host. The phone plugs into the Mac; this runs on
+// the host and drives the Mac over ssh.
+//   Android → pull the APK from R2 and `adb install` (zero account).
+//   iOS     → AltServer re-sign with a free Apple ID (unsigned IPA).
+// Zero deps, Node 18+.
+import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const CFG_PATH = join(homedir(), 'cicy-ai', 'db', 'cicy-mobile-install.json');
+const cfg = existsSync(CFG_PATH) ? JSON.parse(readFileSync(CFG_PATH, 'utf8')) : {};
+const SSH_HOST = process.env.CICY_INSTALL_SSH_HOST || cfg.ssh_host || 'mac';
+const R2_BASE = (cfg.r2_base || 'https://r2.deepfetch.de5.net/cicy-mobile').replace(/\/+$/, '');
+
+const die = (m) => { process.stderr.write(`✗ ${m}\n`); process.exit(1); };
+const log = (m) => process.stdout.write(`${m}\n`);
+
+function ssh(remote, { stream = false } = {}) {
+  try {
+    const out = execFileSync('ssh', ['-o', 'ConnectTimeout=12', SSH_HOST, remote],
+      { encoding: 'utf8', stdio: stream ? 'inherit' : ['ignore', 'pipe', 'pipe'], timeout: 600000 });
+    return { ok: true, out: (out || '').trim() };
+  } catch (e) {
+    return { ok: false, out: (e.stdout || '').toString().trim(), err: (e.stderr || e.message || '').toString().trim() };
+  }
+}
+
+// One round-trip probe: connected devices + which tools the Mac has.
+function detect() {
+  const remote =
+    'echo "IOS:$(idevice_id -l 2>/dev/null | tr \'\\n\' \',\')"; ' +
+    'echo "AND:$(adb devices 2>/dev/null | sed -n \'2,$p\' | grep -w device | cut -f1 | tr \'\\n\' \',\')"; ' +
+    'echo "TOOLS:adb=$(command -v adb >/dev/null && echo 1 || echo 0),' +
+    'altserver=$([ -d /Applications/AltServer.app ] && echo 1 || echo 0),' +
+    'idev=$(command -v ideviceinstaller >/dev/null && echo 1 || echo 0)"';
+  const r = ssh(remote);
+  const grab = (k) => (r.out.match(new RegExp(`${k}:([^\\n]*)`))?.[1] || '');
+  return {
+    reachable: r.ok,
+    ios: grab('IOS').split(',').filter(Boolean),
+    android: grab('AND').split(',').filter(Boolean),
+    tools: Object.fromEntries(grab('TOOLS').split(',').filter(Boolean).map((kv) => kv.split('='))),
+    err: r.err,
+  };
+}
+
+function requireReachable(d) {
+  if (!d.reachable) die(`cannot reach Mac host '${SSH_HOST}' over ssh${d.err ? ` — ${d.err}` : ''}`);
+}
+
+function installAndroid(version) {
+  const d = detect();
+  requireReachable(d);
+  if (d.tools.adb !== '1') die(`adb is not installed on ${SSH_HOST} (brew install android-platform-tools)`);
+  if (!d.android.length) die(`no Android device connected to ${SSH_HOST}. Enable Developer options → USB debugging, plug in, accept the prompt.`);
+  const file = version ? `cicy-${version}.apk` : 'cicy-latest.apk';
+  const url = `${R2_BASE}/${file}`;
+  const serial = d.android[0];
+  log(`▶ Android → ${serial}: ${url}`);
+  const r = ssh(`set -e; curl -fsSL "${url}" -o /tmp/cicy-mobile-install.apk && adb -s ${serial} install -r -d /tmp/cicy-mobile-install.apk`, { stream: true });
+  if (!r.ok) die('adb install failed (see output above)');
+  log('✓ installed on Android');
+}
+
+function installIos(version) {
+  const d = detect();
+  requireReachable(d);
+  if (!d.ios.length) die(`no iOS device connected to ${SSH_HOST}. Plug in the iPhone and tap "Trust This Computer".`);
+  if (d.tools.altserver !== '1') {
+    die(`AltServer is not installed on ${SSH_HOST}.\n`
+      + `iOS installs need a free Apple ID re-sign (the IPA is unsigned). To enable:\n`
+      + `  1. install AltServer on the Mac (https://altstore.io) and run it once (Apple ID login),\n`
+      + `  2. put the Apple ID in ${CFG_PATH}: {"apple_id":"…","apple_password":"…"},\n`
+      + `then re-run. (Free Apple ID certs expire after 7 days; AltStore auto-renews over WiFi.)`);
+  }
+  // TODO: drive AltServer once it's installed + Apple ID configured.
+  die('iOS install path not wired yet — AltServer present but the re-sign step is still TODO.');
+}
+
+function status() {
+  const d = detect();
+  if (!d.reachable) die(`Mac host '${SSH_HOST}' unreachable${d.err ? ` — ${d.err}` : ''}`);
+  log(`host:    ${SSH_HOST}`);
+  log(`r2:      ${R2_BASE}`);
+  log(`tools:   adb=${d.tools.adb === '1' ? '✓' : '✗'}  AltServer=${d.tools.altserver === '1' ? '✓' : '✗'}  ideviceinstaller=${d.tools.idev === '1' ? '✓' : '✗'}`);
+  log(`android: ${d.android.length ? d.android.join(', ') : '(none connected)'}`);
+  log(`ios:     ${d.ios.length ? d.ios.join(', ') : '(none connected)'}`);
+}
+
+function auto(version) {
+  const d = detect();
+  requireReachable(d);
+  if (d.android.length) return installAndroid(version);
+  if (d.ios.length) return installIos(version);
+  die(`no device connected to ${SSH_HOST} (plug an Android with USB-debugging, or an iPhone)`);
+}
+
+const HELP = `cicy-mobile-install — install the latest cicy-mobile build onto a USB-connected phone via the Mac host.
+
+usage:
+  cicy-mobile-install auto            auto-detect the connected device and install latest
+  cicy-mobile-install android [ver]   pull APK from R2 and adb install (ver defaults to latest)
+  cicy-mobile-install ios     [ver]   AltServer re-sign + install (needs AltServer + Apple ID)
+  cicy-mobile-install status          show host reachability, tools, connected devices
+  cicy-mobile-install help
+
+config (optional): ${CFG_PATH}
+  { "ssh_host": "mac", "r2_base": "https://r2.deepfetch.de5.net/cicy-mobile",
+    "apple_id": "…", "apple_password": "…" }
+env: CICY_INSTALL_SSH_HOST overrides ssh_host.`;
+
+const [cmd, arg] = process.argv.slice(2);
+switch (cmd) {
+  case undefined: case 'help': case '--help': case '-h': log(HELP); break;
+  case 'auto': auto(arg); break;
+  case 'android': installAndroid(arg); break;
+  case 'ios': installIos(arg); break;
+  case 'status': status(); break;
+  default: die(`unknown command '${cmd}'\n\n${HELP}`);
+}
