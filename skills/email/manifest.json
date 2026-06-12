@@ -1,14 +1,15 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "email",
-  "version": "1.0.3",
-  "title": "Email (Resend)",
-  "description": "Send transactional email from this host via Resend. Subcommands: config / status / send.",
+  "version": "2.0.0",
+  "title": "Email (SMTP/IMAP/POP3)",
+  "description": "Self-hosted email over standard protocols: send via SMTP, receive via IMAP or POP3. Subcommands: config / status / send / list / read.",
   "category": "productivity",
   "tags": [
     "email",
-    "resend",
-    "smtp"
+    "smtp",
+    "imap",
+    "pop3"
   ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/email",
@@ -23,7 +24,9 @@
     "path": "~/cicy-ai/db/email.json",
     "permissions": "0600",
     "secret_fields": [
-      "api_key"
+      "smtp.pass",
+      "imap.pass",
+      "pop3.pass"
     ]
   },
   "permissions": [
@@ -41,25 +44,35 @@
   },
   "i18n": {
     "zh-CN": {
-      "title": "Email (Resend)",
-      "description": "通过 Resend 从本机发送事务邮件。子命令：config / status / send。"
+      "title": "Email (SMTP/IMAP/POP3)",
+      "description": "用标准协议自托管邮件:SMTP 发信,IMAP/POP3 收信。子命令:config / status / send / list / read。"
     }
   },
   "tools": [
     {
       "name": "email send",
-      "example": "email send --to user@example.com --subject 'Hello'",
+      "example": "email send --to user@example.com --subject 'Hello' --body 'hi'",
       "description": "Send an email via configured SMTP"
+    },
+    {
+      "name": "email list",
+      "example": "email list --n 10",
+      "description": "List recent inbox messages via IMAP or POP3"
+    },
+    {
+      "name": "email read",
+      "example": "email read 1",
+      "description": "Read a message by index via IMAP or POP3"
     },
     {
       "name": "email config",
       "example": "email config",
-      "description": "Show or edit email configuration"
+      "description": "Create/open the email configuration in $EDITOR"
     },
     {
       "name": "email status",
-      "example": "email status",
-      "description": "Check email service status"
+      "example": "email status --json",
+      "description": "Show config state (passwords masked)"
     }
   ]
 }

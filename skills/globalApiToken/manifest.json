@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "globalApiToken",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "title": "Global API Token",
-  "description": "Show or refresh the api_token in ~/cicy-ai/global.json on this host.",
+  "description": "Show or refresh the api_token in ~/cicy-ai/global.json on this host. Refresh delivers the new token by email (SMTP) since it is never stored off-host.",
   "category": "system",
   "tags": [
     "token",
@@ -53,8 +53,8 @@
     },
     {
       "name": "globalApiToken refresh",
-      "example": "globalApiToken refresh",
-      "description": "Rotate and save a new API token"
+      "example": "globalApiToken refresh --to me@example.com",
+      "description": "Rotate the API token and email the new one (requires the email skill; --no-email to skip)"
     }
   ]
 }

@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 
 const PATH = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
 
@@ -56,6 +57,38 @@ function newToken() {
   return randomBytes(32).toString('base64url');
 }
 
+function flagValue(name) {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
+}
+
+// Delivery of a rotated token goes through the `email` skill (SMTP). We never
+// store the user's token server-side — it only lives in this VM's global.json —
+// so after a refresh the only way the user (e.g. on a remote UI) learns the new
+// token is this out-of-band email. Hence refresh REQUIRES email to be configured
+// unless --no-email is passed.
+function emailStatus() {
+  const r = spawnSync('email', ['status', '--json'], { encoding: 'utf8' });
+  if (r.error || r.status !== 0) return null;
+  try { const j = JSON.parse(r.stdout); return j && j.ok ? j.data : null; } catch { return null; }
+}
+
+function emailSend(to, token) {
+  const subject = 'CiCy API token rotated';
+  const body = [
+    'Your CiCy api_token on this host was just rotated.',
+    '',
+    'New token: ' + token,
+    '',
+    'Stored at ' + PATH + ' (mode 0600). The previous token is now invalid.',
+    'Keep this private — anyone with this token can control this host’s API.',
+  ].join('\n');
+  const r = spawnSync('email', ['send', '--to', to, '--subject', subject, '--body', body], { encoding: 'utf8' });
+  if (r.error) return { ok: false, error: r.error.code === 'ENOENT' ? 'email skill not found' : r.error.message };
+  if (r.status !== 0) return { ok: false, error: (r.stderr || '').trim() || ('exit ' + r.status) };
+  return { ok: true };
+}
+
 switch (cmd) {
   case 'show': {
     const g = readGlobal();
@@ -66,9 +99,40 @@ switch (cmd) {
   }
   case 'refresh': {
     const g = readGlobal() || {};
-    g.api_token = newToken();
+    const noEmail = argv.includes('--no-email') || argv.includes('--local');
+
+    if (noEmail) {
+      // Explicit opt-out: rotate without delivering. The caller accepts that a
+      // remote client without the new token will be locked out.
+      g.api_token = newToken();
+      writeGlobal(g);
+      emit({ api_token: g.api_token, path: PATH, refreshed_at: new Date().toISOString(), emailed_to: null });
+      break;
+    }
+
+    // Require email delivery so the user actually receives the new token.
+    const st = emailStatus();
+    if (!st) {
+      bail('EMAIL_NOT_INSTALLED', "email skill not available — install + configure it before rotating (the new token can only reach you by email). Run: cicy-code skill install email && email config. Or pass --no-email to rotate anyway (you may lock yourself out).", 3);
+    }
+    if (!st.send_ready) {
+      bail('EMAIL_NOT_CONFIGURED', "email skill has no working SMTP config — run 'email config' first. Refusing to rotate so the new token can be delivered and you aren't locked out. (--no-email to override.)", 3);
+    }
+    const to = flagValue('--to') || st.default_to;
+    if (!to) {
+      bail('NO_RECIPIENT', "no recipient address — pass --to <addr>, or set default_to via 'email config'.", 2);
+    }
+
+    // Generate, EMAIL FIRST, then persist only on a successful send. If the email
+    // fails we do NOT write the new token, so the current token keeps working.
+    const tok = newToken();
+    const sent = emailSend(to, tok);
+    if (!sent.ok) {
+      bail('EMAIL_SEND_FAILED', `failed to email the new token (${sent.error}); NOT rotating, your current token still works.`, 4);
+    }
+    g.api_token = tok;
     writeGlobal(g);
-    emit({ api_token: g.api_token, path: PATH, refreshed_at: new Date().toISOString() });
+    emit({ api_token: g.api_token, path: PATH, refreshed_at: new Date().toISOString(), emailed_to: to });
     break;
   }
   case '--help':
