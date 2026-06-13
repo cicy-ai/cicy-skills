@@ -1,0 +1,75 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "agent-creator",
+  "version": "0.1.0",
+  "title": "Agent Creator",
+  "description": "Create and manage custom cicy agents (persona + tools + model) via /api/custom-agents on the local cicy-code server. Subcommands: list/create/show/delete/tools.",
+  "category": "agent",
+  "tags": [
+    "agent",
+    "custom-agent",
+    "persona",
+    "cicy"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-creator",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/agent-creator",
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "permissions": "0600",
+    "secret_fields": [
+      "api_token"
+    ]
+  },
+  "permissions": [
+    "network:cicy-code"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "自定义 Agent 创建器",
+      "description": "通过本机 cicy-code 的 /api/custom-agents 创建和管理自定义 cicy agent(人设 + 工具 + 模型)。创建后会作为一个 agent 类型出现在「新建员工」里。子命令:list/create/show/delete/tools。"
+    }
+  },
+  "tools": [
+    {
+      "name": "list",
+      "example": "agent-creator list",
+      "description": "List all custom agents"
+    },
+    {
+      "name": "tools",
+      "example": "agent-creator tools",
+      "description": "List selectable tool groups"
+    },
+    {
+      "name": "create",
+      "example": "agent-creator create 销售助手 --tools coordinate,shell --model claude-opus-4-8 --prompt \"你是销售助手\"",
+      "description": "Create or overwrite a custom agent"
+    },
+    {
+      "name": "show",
+      "example": "agent-creator show 销售助手",
+      "description": "Show one agent's persona, tools and model"
+    },
+    {
+      "name": "delete",
+      "example": "agent-creator delete 销售助手",
+      "description": "Delete a custom agent"
+    }
+  ]
+}
