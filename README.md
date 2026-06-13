@@ -116,30 +116,49 @@ node tools/test-skill.js skills/<name>
 
 ---
 
-## 删除 skill
+## 删除 / 下架 skill（从线上 market 拿掉）
+
+> **`git rm skills/<name>/` 不会把它从 market 下架。** 发布是单向只增
+> （tag → CI → POST registry），删 repo 目录不触发任何反向操作。registry 是
+> 独立存储，每个 `(name, version)` 发布后永久驻留,必须**显式 yank** 才会从
+> market（`skill list` / 安装页）消失。删了 repo 却没 yank = 线上残留 ghost skill。
+
+下架用 `tools/yank.js`（publish.js 的逆操作，省去手搓 curl 循环）。admin token 在本机
+`~/cicy-ai/db/skills-registry-admin.json` 的 `admin_token`，**读进 env、别贴到命令行**：
 
 ```bash
-# 1. Yank（下架）registry 里的所有版本
-ADMIN_TOKEN=$(jq -r .admin_token ~/cicy-ai/db/skills-registry-admin.json)
+TOKEN_FILE=~/cicy-ai/db/skills-registry-admin.json
 
-# 获取所有版本
-curl -s "https://skills.cicy-ai.com/v1/skills/<name>/versions" \
-  | python3 -c "import sys,json; [print(v['version']) for v in json.load(sys.stdin)['data']['versions']]"
+# 下架某个 skill 的全部版本 → 从 market 彻底消失（最常用）
+ADMIN_TOKEN=$(jq -r .admin_token $TOKEN_FILE) node tools/yank.js <name> --all
 
-# 逐版本 yank
-curl -X DELETE "https://skills.cicy-ai.com/v1/admin/skills/<name>/1.0.0" \
-     -H "Authorization: Bearer $ADMIN_TOKEN"
+# 只下架单个版本（其余版本还在，latest 会回落到次高的非 yanked 版本）
+ADMIN_TOKEN=$(jq -r .admin_token $TOKEN_FILE) node tools/yank.js <name> <version>
 
-# 2. 删除源码
-rm -rf skills/<name>/
-
-# 3. 提交
-git add skills/<name>/
-git commit -m "chore: remove <name> skill"
-git push origin main
+# 下架后再删源码（顺序无所谓，但 yank 必须做，否则 market 残留）
+git rm -r skills/<name>/ && git commit -m "chore: remove <name> skill" && git push origin main
 ```
 
-> Yank 只是从 list API 中隐藏该版本，不会真正删除 GitHub Release 资产（用户仍可直接用 URL 下载已安装的版本）。
+机制要点：
+
+- yank 是**软标记**（`yanked: true`），不是物理删除：版本仍在 KV 里，但不再当
+  `latest`、不进 catalog、`download` 返回 **410 Gone**；GitHub Release 资产也还在
+  （知道 URL 的人仍能直接下到已发布的 zip）。
+- 要让 skill 从 market **彻底消失，必须 yank 它的每一个版本**（`--all` 一次搞定）。
+  只 yank latest，`latest` 会自动回落到次高的非 yanked 版本，skill 继续显示。
+- **可逆**：重新 publish 同一个 `(name, version)` 即清除 yank 标记、复活。
+- **没有公开/用户级下架命令**——只有这条 admin 路径。`cicy-code skill remove` 是
+  本地卸载、`skill registry remove` 删的是源列表，都**不动 registry**。
+- 转**私有**：把 skill 目录移到 `~/cicy-ai/skills/private/<name>` 保留本地副本，
+  再 `yank --all` 从公开 market 拿掉即可。
+
+| 工具 | 作用 |
+|------|------|
+| `yank.js` | **手动跑**：拉版本列表 → 逐个 `DELETE /v1/admin/skills/:name/:version` → 校验 |
+
+> yank 直接打 registry，不碰 GitHub asset，所以没有 publish 那种 sha 漂移问题，
+> 本机手动跑是安全的（与 publish.js 不同）。也可用 GitHub Action 手动触发
+> （`.github/workflows/yank.yml`，走 CI 的 admin secret、留审计、不用碰本机 token）。
 
 ---
 

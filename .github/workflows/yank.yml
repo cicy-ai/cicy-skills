@@ -1,0 +1,62 @@
+name: Yank skill
+
+# Take a skill off skills.cicy-ai.com (the inverse of publish.yml).
+#
+# Deleting a skill's directory from the repo does NOT remove it from the
+# registry — publishing is one-way. This workflow yanks it instead, using the
+# CI admin secret (no local admin token needed; the run is audited).
+#
+# Yank is a per-version SOFT delete: the version is marked { yanked: true },
+# drops out of `latest` and the public catalog, and download returns 410.
+# `--all` (default) yanks every published version so the skill leaves the
+# market entirely. Re-publishing the same (name, version) reverses a yank.
+#
+# Manual trigger only — there is intentionally no tag/push trigger for yanks.
+#
+# Required repo secret:
+#   SKILLS_REGISTRY_ADMIN_TOKEN   value of the Worker's ADMIN_TOKEN secret
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "skill name to yank, e.g. cping"
+        required: true
+      version:
+        description: "single version to yank (leave blank to yank ALL versions = off the market)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  yank:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Yank from skills.cicy-ai.com
+        env:
+          ADMIN_TOKEN: ${{ secrets.SKILLS_REGISTRY_ADMIN_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ADMIN_TOKEN:-}" ]; then
+            echo "::error::SKILLS_REGISTRY_ADMIN_TOKEN not set — cannot yank" >&2
+            exit 1
+          fi
+          NAME="${{ github.event.inputs.name }}"
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -n "$VERSION" ]; then
+            echo "→ yanking $NAME@$VERSION"
+            node tools/yank.js "$NAME" "$VERSION" --registry "https://skills.cicy-ai.com"
+          else
+            echo "→ yanking ALL versions of $NAME (off the market)"
+            node tools/yank.js "$NAME" --all --registry "https://skills.cicy-ai.com"
+          fi
