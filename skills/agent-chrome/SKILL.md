@@ -26,10 +26,10 @@ Use this skill when the task involves:
 
 ## Rules
 
-1. Each profile maps to `~/cicy-ai/db/chrome.json` on the cicy-desktop host, keyed by `account_<N>`. The CLI accepts the numeric `accountIdx` (the `<N>`).
+1. Each profile maps to `~/cicy-ai/db/chrome.json` on the cicy-desktop host, keyed by `profile_<N>`. The CLI accepts the numeric `accountIdx` (the `<N>`).
 2. Per-profile proxy: `agent-chrome proxy <idx> <url>` writes the proxy into chrome.json. The next `launch` picks it up via `--proxy-server=<url>`. Pass `""` to clear. **The proxy URL must point to a port that is actually listening** — Chrome refuses creds in URLs and fails silently on ECONNREFUSED. The intended pairing is with cicy-mihomo's per-profile listeners (one listener per Chrome profile, routed by IN-NAME). See [proxy.md](./references/proxy.md) for the full topology, setup flow, and known pitfalls.
 3. `launch` resolves system Chrome (Mac: `/Applications/Google Chrome.app`, Windows: `%PROGRAMFILES%\Google\Chrome\Application\chrome.exe`, Linux: `google-chrome / chromium`). On missing binary it errors with "Chrome/Chromium binary not found" — the user must install Chrome / Chromium first.
-4. Default profile layout: user-data-dir `~/chrome/account_<N>`, debugger port `11000 + N` (or chrome.json override). Profiles run concurrently with independent state.
+4. Default profile layout: user-data-dir `~/chrome/profile_<N>`, debugger port `11000 + N` (or chrome.json override). Profiles run concurrently with independent state.
 5. `--client <client_id>` targets a specific cicy-desktop client. With no flag, auto-selects the single `ElectronMCP` client (refuses to guess if multiple are connected).
 
 ## References

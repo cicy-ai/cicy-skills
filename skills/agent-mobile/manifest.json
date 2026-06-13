@@ -1,0 +1,42 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "agent-mobile",
+  "version": "0.1.0",
+  "title": "Agent Mobile",
+  "description": "Control USB-connected Android/iOS phones through a cicy-desktop client — adb / libimobiledevice over desktop_event RPC. Screenshot, info, app list, install; Android also tap/swipe/text/key/exec.",
+  "category": "dev",
+  "tags": ["android", "ios", "adb", "libimobiledevice", "mobile", "agent-bridge", "cicy-desktop"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/agent-mobile",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=22"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/agent-mobile",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": ["api_token"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "tools": [
+    { "name": "devices", "example": "agent-mobile devices", "description": "List connected Android/iOS phones" },
+    { "name": "screenshot", "example": "agent-mobile screenshot <device> [--out p]", "description": "Capture a screenshot (saved as JPEG)" },
+    { "name": "info", "example": "agent-mobile info <device>", "description": "Device model / OS version" },
+    { "name": "applist", "example": "agent-mobile applist <device>", "description": "Installed third-party apps" },
+    { "name": "install", "example": "agent-mobile install <device> <apk|ipa|URL>", "description": "Install an app (auto-detect platform)" },
+    { "name": "tap", "example": "agent-mobile tap <device> 500 1000", "description": "Android: tap at x y" },
+    { "name": "swipe", "example": "agent-mobile swipe <device> x1 y1 x2 y2 [ms]", "description": "Android: swipe" },
+    { "name": "text", "example": "agent-mobile text <device> 'hello'", "description": "Android: type text" },
+    { "name": "key", "example": "agent-mobile key <device> home", "description": "Android: key event (home/back/enter/…)" },
+    { "name": "exec", "example": "agent-mobile exec <device> 'pm list packages'", "description": "Android: raw adb shell command" }
+  ]
+}

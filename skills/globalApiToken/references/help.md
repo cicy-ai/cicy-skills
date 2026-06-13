@@ -19,14 +19,25 @@ Print the current `api_token` from `~/cicy-ai/global.json`.
 
 ### `refresh`
 
-Replace `api_token` with a new 32-byte random token (base64url, length 43).
-The file is created if missing. Permissions are forced to 0600.
+Replace `api_token` with a new 32-byte random token (base64url, length 43) and
+**email the new token** via the `email` skill (SMTP). The file is created if
+missing; permissions are forced to 0600. The new token is emailed BEFORE it is
+written, and only written if the send succeeds — so a failed delivery never
+rotates (your current token keeps working).
 
-- exit 0  → printed (new token)
+- exit 0  → rotated + emailed (prints new token)
+- exit 2  → no recipient (no `--to` and no email `default_to`)
+- exit 3  → email skill not installed / SMTP not configured (NOT rotated)
+- exit 4  → email send failed (NOT rotated)
 
 ## Options
 
 - `--json` — emit `{ ok, data }` envelope instead of plain text
+- `--to <addr>` — (refresh) recipient for the new token; defaults to the email
+  skill's `default_to`
+- `--no-email` / `--local` — (refresh) rotate WITHOUT emailing. Skips the email
+  requirement; use only if you accept being locked out when you don't have the
+  new token.
 
 ## Environment
 

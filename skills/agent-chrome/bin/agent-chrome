@@ -41,6 +41,7 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000); // Ch
   try {
     switch (cmd) {
       case 'tools':     printTools(); return;
+      case 'list':      await cmdProfiles(rest); return;
       case 'profiles':  await cmdProfiles(rest); return;
       case 'profile':   await cmdProfile(rest); return;
       case 'add':       await cmdAdd(rest); return;
@@ -58,6 +59,10 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000); // Ch
       case 'cdp':       await cmdCDP(rest); return;
       case 'gmails':    await cmdSimpleRPC('chrome_list_gmails'); return;
       case 'github':    await cmdSimpleRPC('chrome_list_github_accounts'); return;
+      case 'detect-logins': await cmdDetectLogins(rest); return;
+      case 'probe-ip':  await cmdProbeIp(rest); return;
+      case 'login':     await cmdLogin(rest); return;
+      case 'logins':    await cmdLoginsList(rest); return;
       default: bail(`unknown command: ${cmd}. Try agent-chrome --help.`, 2);
     }
   } catch (e) {
@@ -180,6 +185,12 @@ function intArg(s, name) {
   return n;
 }
 
+// Accept the unified profile id ("chrome-3") or a bare accountIdx ("3").
+function profileIdx(s) {
+  const m = /^chrome-(\d+)$/.exec(String(s || '').trim());
+  return intArg(m ? m[1] : s, 'profileId');
+}
+
 // ── commands ────────────────────────────────────────────────────────────
 
 async function cmdProfiles(args) {
@@ -229,9 +240,8 @@ async function cmdAdd(args) {
 }
 
 async function cmdProxy(args) {
-  if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome proxy <accountIdx> <url|"">'), { exitCode: 2 });
-  const idx = intArg(args[0], 'accountIdx');
-  emit(await rpc('chrome_set_profile_proxy', { accountIdx: idx, proxy: args[1] }));
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome proxy <id> <url|"">'), { exitCode: 2 });
+  emit(await rpc('chrome_set_profile_proxy', { accountIdx: profileIdx(args[0]), proxy: args[1] }));
 }
 
 // note <idx> <text...> — set a free-form note on the profile (chrome.json).
@@ -276,6 +286,50 @@ async function cmdAccounts(args) {
   emit({ accountIdx: idx, note: p?.note || '', accounts });
 }
 
+// detect-logins <idx> — infer which sites this profile's LIVE session is logged
+// into, from its cookies (vs. `logins`, which is the manual rich ledger).
+async function cmdDetectLogins(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome detect-logins <accountIdx>'), { exitCode: 2 });
+  emit(await rpc('chrome_detect_logins', { accountIdx: intArg(args[0], 'accountIdx') }));
+}
+
+// probe-ip <idx> — probe egress IP + area through the profile's proxy and STORE
+// to config (vs `ip`, which is a live read from a running Chrome and doesn't persist).
+async function cmdProbeIp(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome probe-ip <accountIdx>'), { exitCode: 2 });
+  emit(await rpc('chrome_probe_ip', { accountIdx: intArg(args[0], 'accountIdx') }));
+}
+
+// parse `--name x --url y --2fa z ...` into a rich-login payload object.
+function parseLoginFlags(args, base = {}) {
+  const MAP = { '--name': 'name', '--url': 'url', '--username': 'username', '--email': 'email',
+    '--mobile': 'mobile', '--2fa': 'twofa', '--second-email': 'secondEmail', '--note': 'note', '--login-at': 'loginAt' };
+  const out = { ...base };
+  for (let i = 0; i < args.length; i++) { const k = MAP[args[i]]; if (k) out[k] = args[++i] || ''; }
+  return out;
+}
+
+// login set/rm — manage this profile's rich login ledger (地址/名称/用户名/邮箱/手机/2FA/备用邮箱/备注).
+async function cmdLogin(args) {
+  const sub = args[0];
+  if (sub === 'set') {
+    if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome login set <idx> --name <名称> [--url --username --email --mobile --2fa --second-email --note]'), { exitCode: 2 });
+    const payload = parseLoginFlags(args.slice(2), { accountIdx: intArg(args[1], 'accountIdx') });
+    if (!payload.name) throw Object.assign(new Error('login set 需要 --name <名称>'), { exitCode: 2 });
+    emit(await rpc('chrome_profile_login_set', payload));
+  } else if (sub === 'rm') {
+    if (args.length < 3) throw Object.assign(new Error('usage: agent-chrome login rm <idx> <name>'), { exitCode: 2 });
+    emit(await rpc('chrome_profile_login_rm', { accountIdx: intArg(args[1], 'accountIdx'), platform: args[2] }));
+  } else {
+    throw Object.assign(new Error('usage: agent-chrome login <set|rm> ...'), { exitCode: 2 });
+  }
+}
+
+async function cmdLoginsList(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome logins <accountIdx>'), { exitCode: 2 });
+  emit(await rpc('chrome_profile_logins', { accountIdx: intArg(args[0], 'accountIdx') }));
+}
+
 // otp <idx> <service> — generate the current TOTP (2FA) code from the stored
 // secret for that service. Prints just the 6-digit code (and seconds left).
 async function cmdOtp(args) {
@@ -285,7 +339,7 @@ async function cmdOtp(args) {
   const p = await rpc('chrome_get_profile', { accountIdx: idx });
   const info = p?.accounts?.[service];
   const secret = (info && typeof info === 'object') ? info.totp : null;
-  if (!secret) throw Object.assign(new Error(`no 2FA secret stored for ${service} on account_${idx} (set one: agent-chrome 2fa ${idx} ${service} <base32-secret>)`), { exitCode: 4 });
+  if (!secret) throw Object.assign(new Error(`no 2FA secret stored for ${service} on profile_${idx} (set one: agent-chrome 2fa ${idx} ${service} <base32-secret>)`), { exitCode: 4 });
   const step = 30;
   const code = totp(secret, { step });
   const secondsLeft = step - (Math.floor(Date.now() / 1000) % step);

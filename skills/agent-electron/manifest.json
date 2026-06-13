@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-electron",
-  "version": "1.0.7",
+  "version": "1.0.10",
   "title": "Agent Electron",
   "description": "Drive cicy-desktop Electron BrowserWindows and per-account sandbox sessions via desktop_event RPC. Each accountIdx = its own session.fromPartition() with proxy. Electron analog of agent-chrome.",
   "category": "dev",
@@ -49,64 +49,134 @@
   },
   "tools": [
     {
+      "name": "list",
+      "example": "agent-electron list",
+      "description": "列出所有 Electron profile(name/proxy/logins/ip)——与 agent-chrome 统一的 list"
+    },
+    {
+      "name": "profile",
+      "example": "agent-electron profile electron-1",
+      "description": "看单个 profile 的统一视图(name/proxy/logins/partition);id = electron-N 或 N"
+    },
+    {
+      "name": "add",
+      "example": "agent-electron add [name]",
+      "description": "新建一个 Electron profile(下一个 account-N.json)"
+    },
+    {
       "name": "sessions",
       "example": "agent-electron sessions",
-      "description": "List sandbox sessions, grouped by accountIdx (each = persist:sandbox-N)"
+      "description": "列出所有 sandbox session(每个 accountIdx 一个 persist:sandbox-N partition)"
     },
     {
       "name": "session",
       "example": "agent-electron session 1",
-      "description": "Show the windows + partition + proxy of one session (accountIdx)"
+      "description": "看单个 session 详情(partition/proxy)"
     },
     {
       "name": "proxy",
-      "example": "agent-electron proxy 1 socks5://127.0.0.1:9001",
-      "description": "Set the upstream proxy on a session — applies to every window opened under that accountIdx"
+      "example": "agent-electron proxy 1 socks5://127.0.0.1:1080",
+      "description": "给某 profile 设置/清除代理(留空清除,下次启动生效)"
+    },
+    {
+      "name": "login",
+      "example": "agent-electron login set electron-1 --name 抖音 --username u --email e",
+      "description": "富登记:新增/更新一条登录记录(地址/名称/用户名/邮箱/手机/2FA/备用邮箱/备注);login rm <id> <name> 删除"
+    },
+    {
+      "name": "logins",
+      "example": "agent-electron logins electron-1",
+      "description": "列出该 profile 的登录记录"
+    },
+    {
+      "name": "detect-logins",
+      "example": "agent-electron detect-logins 1",
+      "description": "按 cookie 推断该 profile 当前登录了哪些站点(按可注册域名分组)"
+    },
+    {
+      "name": "probe-ip",
+      "example": "agent-electron probe-ip 1",
+      "description": "经该 profile 的代理探测出口 IP + 地区,并写入配置(带探测时间)"
     },
     {
       "name": "open",
-      "example": "agent-electron open https://example.com",
-      "description": "Open <url> in a BrowserWindow (--idx selects the session, default 1). Check windows first: if the URL is already open, win.show()/focus() it and report its winId; --no-reuse forces a fresh window"
+      "example": "agent-electron open <url> [--idx N]",
+      "description": "在某 profile 打开窗口/标签(idx 默认 1)"
     },
     {
       "name": "close",
-      "example": "agent-electron close 4",
-      "description": "Close a BrowserWindow by id"
+      "example": "agent-electron close <accountIdx>",
+      "description": "关闭某 profile 的窗口"
     },
     {
       "name": "windows",
       "example": "agent-electron windows",
-      "description": "List all live Electron BrowserWindows on the host"
+      "description": "列出所有 Electron 窗口"
     },
     {
       "name": "window",
-      "example": "agent-electron window 4",
-      "description": "Show one BrowserWindow's details (url, title, load state, session)"
+      "example": "agent-electron window <id>",
+      "description": "看单个窗口详情"
     },
     {
       "name": "url",
-      "example": "agent-electron url 4 https://example.com",
-      "description": "Load a new URL in an existing BrowserWindow"
+      "example": "agent-electron url <id> <url>",
+      "description": "导航某窗口到 url"
     },
     {
       "name": "cdp",
-      "example": "agent-electron cdp 4 Runtime.evaluate '{\"expression\":\"document.title\"}'",
-      "description": "Send a raw Chrome DevTools Protocol command to a BrowserWindow's webContents"
+      "example": "agent-electron cdp <id> <Method> [paramsJson]",
+      "description": "对窗口发原始 CDP 命令"
     },
     {
       "name": "screenshot",
-      "example": "agent-electron screenshot 4 --out shot.png",
-      "description": "Screenshot a window (clipboard by default, --out for file). Only with explicit user permission — default to snapshot for inspecting page state"
+      "example": "agent-electron screenshot <id> [--out path]",
+      "description": "对窗口截图(吃 token,需用户明确许可;优先用 snapshot)"
     },
     {
       "name": "snapshot",
-      "example": "agent-electron snapshot 4",
-      "description": "Capture a DOM/accessibility snapshot of a window page — the default way to inspect/verify page state (no screenshot needed)"
+      "example": "agent-electron snapshot <id>",
+      "description": "DOM 快照(不吃 token,读页面元素的首选)"
     },
     {
       "name": "sysinfo",
       "example": "agent-electron sysinfo",
-      "description": "Host system info (platform, electron/chrome versions, screens)"
+      "description": "设备系统信息"
+    },
+    {
+      "name": "tabs",
+      "example": "agent-electron tabs <accountIdx>",
+      "description": "列出该 profile 标签浏览器的标签(BrowserView,按 webContentsId 寻址)"
+    },
+    {
+      "name": "tab-open",
+      "example": "agent-electron tab-open <accountIdx> [url]",
+      "description": "在该 profile 的标签浏览器新开一个标签"
+    },
+    {
+      "name": "tab-nav",
+      "example": "agent-electron tab-nav <webContentsId> <url>",
+      "description": "导航某标签到 url"
+    },
+    {
+      "name": "tab-eval",
+      "example": "agent-electron tab-eval <webContentsId> <code>",
+      "description": "在某标签里跑 JS 取数据/操作"
+    },
+    {
+      "name": "tab-screenshot",
+      "example": "agent-electron tab-screenshot <webContentsId> [--out path]",
+      "description": "对某标签截图"
+    },
+    {
+      "name": "tab-activate",
+      "example": "agent-electron tab-activate <webContentsId>",
+      "description": "前置/激活某标签"
+    },
+    {
+      "name": "tab-close",
+      "example": "agent-electron tab-close <webContentsId>",
+      "description": "关闭某标签"
     }
   ]
 }

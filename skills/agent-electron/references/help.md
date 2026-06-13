@@ -3,9 +3,19 @@
 ## Commands
 
 ```
-agent-electron sessions [--json]
+agent-electron list [--json]                         # profiles from config (name/proxy/logins)
+agent-electron profile <id> [--json]                 # one profile (id = electron-N or N)
+agent-electron add [name]                             # create a new profile (next account-N.json)
+agent-electron login set <id> --name <名称> [--url --username --email --mobile --2fa --second-email --note]   # rich login record
+agent-electron login rm <id> <name>
+agent-electron logins <id>
+agent-electron detect-logins <id>                     # infer signed-in sites from cookies
+agent-electron probe-ip <id>                          # egress IP+area via the profile's proxy (stored)
+agent-electron tabs <accountIdx>                      # tab-browser tabs (BrowserView, by webContentsId)
+agent-electron tab-open <accountIdx> [url]            # tab-nav/tab-eval/tab-screenshot/tab-activate/tab-close <wcId>
+agent-electron sessions [--json]                      # live windows grouped by session
 agent-electron session <accountIdx> [--json]
-agent-electron proxy <accountIdx> <url|"">
+agent-electron proxy <id> <url|"">                    # set + PERSIST proxy (auto-applied to new windows)
 agent-electron open <url> [--idx 1] [--no-reuse] [--json]
 agent-electron close <winId>
 agent-electron windows [--json]
@@ -30,9 +40,33 @@ agent-electron tools
   `(win.isMinimized()&&win.restore(), win.show(), win.focus())`) and report
   its winId; refresh only if needed (`url <winId> <url>`). Open a new
   window only when the user explicitly wants one (`--no-reuse`).
-- `sessions` is inferred from live windows — sessions on disk that have no
-  open window are not listed (Electron has no enumerate-partitions API).
-- `proxy <idx> "" ` clears the proxy on a session.
+- **`list` vs `sessions`:** `list` reads persisted profiles from config
+  (`~/data/electron/account-N.json`) — name, proxy, logins — and is the
+  unified verb shared with `agent-chrome`. `sessions` is the live-window
+  view (inferred from open windows; partitions with no open window aren't
+  listed — Electron has no enumerate-partitions API).
+- **account 0 is the reserved system slot.** Account 0 = the platform's own
+  system windows (the desktop homepage / platform pages). They run on
+  Electron's **default session** (no `persist:sandbox-N` partition) and are
+  reported as accountIdx 0 — **not** a user browsing profile. **User profiles
+  start at account-1** (`electron-1`, `electron-2`, …), each on its own
+  `persist:sandbox-N` partition. So `list` shows user profiles only
+  (account-1+), while `windows` / `sessions` also surface the account-0 system
+  windows — account-0 in `windows` but not in `list` is expected, not a bug.
+- **Agents must open windows with an explicit accountIdx > 0** so they never
+  land in the system slot. `agent-electron open` defaults to `--idx 1`, and the
+  desktop `open_window` tool now defaults accountIdx to 1 as well. Pass 0 only
+  for a genuine platform/system window.
+- **`proxy` is persisted now.** `proxy <id> <url>` writes `{url,enabled}`
+  into `account-N.json` AND applies it to the live session; newly opened
+  windows for that profile auto-apply it (no manual re-apply). `proxy <id> ""`
+  clears it.
+- **`logins`** are rich manual records of which sites a profile signed
+  into — `login set <id> --name <名称> [--url --username --email --mobile
+  --2fa --second-email --note]` (keyed by name; re-setting merges non-empty
+  fields). `login rm <id> <name>` deletes. Stored in `account-N.json`.
+  Use `detect-logins <id>` to infer signed-in sites from cookies.
+- Cookies/storage persist in `<userData>/Partitions/sandbox-N/` — unchanged.
 - `screenshot --out path` writes a PNG to `path`; with no `--out` it puts
   the image on the host's clipboard (avoids large WebSocket payloads).
 - **Default to `snapshot`, not `screenshot`.** Screenshots capture the

@@ -4,9 +4,17 @@
 
 | subcmd                          | tool                              | args                                       |
 |---------------------------------|-----------------------------------|--------------------------------------------|
+| `list` / `profiles`             | `electron_list_profiles`          | `{}` — from config (name/proxy/logins)     |
+| `profile <id>`                  | `electron_get_profile`            | `{ accountIdx }`                           |
+| `add [name]`                    | `electron_add_profile`            | `{ name? }` — create next account-N.json   |
+| `login set <id> --name N ...`   | `electron_profile_login_set`      | rich: `{ accountIdx, name, url?, username?, email?, mobile?, twofa?, secondEmail?, note? }` |
+| `login rm <id> <name>`          | `electron_profile_login_rm`       | `{ accountIdx, name }`                     |
+| `logins <id>`                   | `electron_profile_logins`         | `{ accountIdx }`                           |
+| `detect-logins <id>`            | `electron_detect_logins`          | `{ accountIdx }` — infer signed-in sites from cookies |
+| `probe-ip <id>`                 | `electron_probe_ip`               | `{ accountIdx }` — egress IP+area via proxy, stored |
 | `sessions`                      | `get_windows` (grouped)           | `{}` — derived from window list            |
 | `session <idx>`                 | `get_windows` (filtered)          | `{}` — filtered by accountIdx              |
-| `proxy <idx> <url>`             | `set_account_proxy`               | `{ accountIdx, proxy }`                    |
+| `proxy <id> <url>`              | `set_account_proxy`               | `{ accountIdx, proxy }` — persists + applies |
 | `open <url> [--idx 1]`          | `open_window`                     | `{ url, accountIdx, reuseWindow }`         |
 | `close <winId>`                 | `close_window`                    | `{ win_id }`                               |
 | `windows`                       | `get_windows`                     | `{}`                                       |
@@ -17,6 +25,13 @@
 | `screenshot <winId> --out P`    | `cdp_sendcmd Page.captureScreenshot` | `{ win_id, method, params:{format:"png"} }` |
 | `snapshot <winId>`              | `webpage_snapshot`                | `{ win_id }`                               |
 | `sysinfo`                       | `get_system_info`                 | `{}`                                       |
+| `tabs <accountIdx>`             | `electron_tabs`                   | `{ accountIdx }` — list tab-browser tabs (BrowserView) |
+| `tab-open <accountIdx> [url]`   | `electron_tab_open`               | `{ accountIdx, url? }`                      |
+| `tab-nav <wcId> <url>`          | `electron_tab_eval`/nav           | `{ webContentsId, url }`                    |
+| `tab-eval <wcId> <code>`        | `electron_tab_eval`               | `{ webContentsId, code }`                   |
+| `tab-screenshot <wcId> [--out]` | `electron_tab_screenshot`         | `{ webContentsId }`                         |
+| `tab-activate <wcId>`           | `electron_tab_activate`           | `{ webContentsId }`                         |
+| `tab-close <wcId>`              | `electron_tab_close`              | `{ webContentsId }`                         |
 
 ## Wire protocol
 
