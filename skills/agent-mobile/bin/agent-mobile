@@ -1,0 +1,390 @@
+#!/usr/bin/env node
+// agent-mobile — control USB-connected Android / iOS phones through a connected
+// cicy-desktop (Electron) client. The phones plug into the desktop machine (a
+// Mac); this skill runs `adb` / libimobiledevice commands on that machine by
+// pushing `desktop_event { rpc_call, tool:'exec_shell' }` over the chat bridge —
+// the exact transport `agent-desktop` uses. Requires Node 22+ (native fetch/WS).
+//
+//   Android (adb): full control — screenshot / tap / swipe / text / key / exec / install
+//   iOS (libimobiledevice): screenshot / info / applist / install only (no input control)
+//
+// Zero deps. Auth: api_token from ~/cicy-ai/global.json (or CICY_API_TOKEN).
+
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+// extract flags: --client/-c <id>, --out <path>, --base64, --json
+let clientID = '';
+let outPath = '';
+let wantBase64 = false;
+let lossless = false;     // screenshot: PNG, full resolution, no quality loss
+let quality = 50;         // screenshot: JPEG quality % (default 50 — half compression)
+const args = [];
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--client' || argv[i] === '-c') { clientID = argv[++i] || ''; continue; }
+  if (argv[i] === '--out') { outPath = argv[++i] || ''; continue; }
+  if (argv[i] === '--base64') { wantBase64 = true; continue; }
+  if (argv[i] === '--lossless') { lossless = true; continue; }
+  if (argv[i] === '--quality') { quality = Math.max(1, Math.min(100, parseInt(argv[++i], 10) || 50)); continue; }
+  args.push(argv[i]);
+}
+const json = args.includes('--json');
+const cmd = args[0];
+const rest = args.slice(1).filter((a) => a !== '--json');
+
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+const HTTP_BASE = `http://127.0.0.1:${API_PORT}`;
+const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 45000);
+
+let __target = null; // resolved desktop client, cached for the whole invocation
+
+(async () => {
+  try {
+    switch (cmd) {
+      case 'devices':    await cmdDevices(); return;
+      case 'screenshot': await cmdScreenshot(rest); return;
+      case 'info':       await cmdInfo(rest); return;
+      case 'applist':    await cmdApplist(rest); return;
+      case 'install':    await cmdInstall(rest); return;
+      case 'tap':        await cmdTap(rest); return;
+      case 'swipe':      await cmdSwipe(rest); return;
+      case 'text':       await cmdText(rest); return;
+      case 'key':        await cmdKey(rest); return;
+      case 'exec':       await cmdExec(rest); return;
+      default: bail(`unknown command: ${cmd}. Try agent-mobile --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
+  }
+})();
+
+// ── output helpers ────────────────────────────────────────────────────────
+function bail(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message: msg } }) + '\n');
+  else process.stderr.write(`agent-mobile: ${msg}\n`);
+  process.exit(code);
+}
+function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('Usage: agent-mobile <devices|screenshot|info|applist|install|tap|swipe|text|key|exec> [...] [--client ID]\n'); }
+}
+
+// ── transport (mirrors agent-desktop) ──────────────────────────────────────
+function loadToken() {
+  if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
+  if (!existsSync(GLOBAL_JSON)) throw Object.assign(new Error(`api_token not found: set CICY_API_TOKEN or create ${GLOBAL_JSON}`), { exitCode: 3 });
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(GLOBAL_JSON, 'utf8')); }
+  catch (e) { throw Object.assign(new Error(`failed to parse ${GLOBAL_JSON}: ${e.message}`), { exitCode: 3 }); }
+  if (!cfg.api_token) throw Object.assign(new Error(`api_token not found in ${GLOBAL_JSON}`), { exitCode: 3 });
+  return cfg.api_token;
+}
+function randomID(prefix) { return `${prefix}-${Date.now()}-${randomBytes(4).toString('hex')}`; }
+
+async function api(method, path, payload) {
+  const token = loadToken();
+  const headers = { 'Authorization': `Bearer ${token}` };
+  const init = { method, headers };
+  if (payload !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(payload); }
+  let res;
+  try { res = await fetch(HTTP_BASE + path, init); }
+  catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${HTTP_BASE} (${e.message})`), { exitCode: 3 }); }
+  const text = await res.text();
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error(`auth failed (${res.status})`), { exitCode: 3 });
+  if (res.status >= 400) {
+    let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
+    throw Object.assign(new Error(`api error (${res.status}): ${body?.error || body?.message || text}`), { exitCode: 4 });
+  }
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function chatClients() {
+  const data = await api('GET', '/api/chat/clients');
+  let raw = data?.clients || data?.data?.clients || data?.data || data || [];
+  if (!Array.isArray(raw)) {
+    const flat = [];
+    for (const [aid, m] of Object.entries(raw)) {
+      for (const [cid, info] of Object.entries(m || {})) flat.push({ client_id: cid, non_routing_master_agent_id_display_only: aid, ...info });
+    }
+    raw = flat;
+  }
+  return raw.filter((c) => c?.client_id);
+}
+
+// probe: does this client expose window.electronRPC (real desktop bridge)?
+async function hasElectronRPC(cid) {
+  try {
+    const resp = await api('POST', '/api/chat/push', {
+      client_id: cid, type: 'exec_js', wait_ack: true, timeout_ms: 5000,
+      data: { code: 'typeof window.electronRPC' },
+    });
+    return resp?.data?.result === 'function';
+  } catch { return false; }
+}
+
+async function resolveDesktop() {
+  if (__target) return __target;
+  const clients = await chatClients();
+  if (clientID) {
+    const c = clients.find((x) => x?.client_id === clientID);
+    if (!c) throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
+    return (__target = { clientID: c.client_id });
+  }
+  const matches = clients.filter((c) => {
+    const ua = String(c?.user_agent || '').toLowerCase();
+    return c?.isElectron === true || ua.includes('electronmcp') || ua.includes('cicydesktop');
+  });
+  if (matches.length === 0) throw Object.assign(new Error('no cicy-desktop client connected — open cicy-desktop on the machine the phones are plugged into'), { exitCode: 3 });
+  const flags = await Promise.all(matches.map((c) => hasElectronRPC(c.client_id)));
+  const capable = matches.filter((_, i) => flags[i]);
+  if (capable.length === 0) {
+    const ids = matches.map((c) => c.client_id).join(', ');
+    throw Object.assign(new Error(`cicy-desktop window(s) connected (${ids}) but none exposes electronRPC — open the main window or pass --client <id>`), { exitCode: 3 });
+  }
+  if (capable.length > 1) {
+    const ids = capable.map((c) => c.client_id).join(', ');
+    throw Object.assign(new Error(`multiple rpc-capable cicy-desktop clients (${ids}); pass --client <id>`), { exitCode: 2 });
+  }
+  return (__target = { clientID: capable[0].client_id });
+}
+
+async function rpc(tool, toolArgs) {
+  const target = await resolveDesktop();
+  const resp = await api('POST', '/api/chat/push', {
+    client_id: target.clientID, type: 'desktop_event', wait_ack: true, timeout_ms: RPC_TIMEOUT_MS,
+    data: { type: 'rpc_call', tool, args: toolArgs ?? {}, requestId: randomID('mrpc') },
+  });
+  const data = resp?.data || {};
+  if (data.error) throw Object.assign(new Error(String(data.error)), { exitCode: 4 });
+  return data.result;
+}
+
+// Run a shell command ON THE DESKTOP MACHINE; return {stdout,stderr,exitCode}.
+// exec_shell's result arrives as a JSON string (or already-parsed object); the
+// older bridge may hand back a plain string — tolerate both.
+async function shell(command) {
+  let r = await rpc('exec_shell', { command });
+  if (typeof r === 'string') {
+    const s = r;
+    try { r = JSON.parse(s); } catch { return { stdout: s, stderr: '', exitCode: 0 }; }
+  }
+  return { stdout: String(r?.stdout ?? ''), stderr: String(r?.stderr ?? ''), exitCode: Number(r?.exitCode ?? 0) };
+}
+
+// ── device discovery ────────────────────────────────────────────────────────
+// One round-trip: adb device table + iOS udid→name. Mirrors cicy-mobile-install
+// detect() parsing. Returns [{id, platform, model, status}].
+async function listDevices() {
+  const script =
+    'echo "===ADB==="; adb devices -l 2>/dev/null; ' +
+    'echo "===IOS==="; for u in $(idevice_id -l 2>/dev/null); do ' +
+    'n=$(ideviceinfo -u "$u" -k DeviceName 2>/dev/null); echo "${u}|${n}"; done';
+  const out = (await shell(script)).stdout.replace(/\\n/g, '\n');
+  const lines = out.split('\n');
+  const devices = [];
+  let section = '';
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === '===ADB===') { section = 'adb'; continue; }
+    if (line === '===IOS===') { section = 'ios'; continue; }
+    if (!line) continue;
+    if (section === 'adb') {
+      if (/^list of devices/i.test(line)) continue;
+      const m = line.match(/^(\S+)\s+(device|unauthorized|offline)\b(.*)$/);
+      if (!m) continue;
+      const model = (m[3].match(/model:(\S+)/) || [])[1] || '';
+      devices.push({ id: m[1], platform: 'android', model: model.replace(/_/g, ' '), status: m[2] });
+    } else if (section === 'ios') {
+      const [udid, name] = line.split('|');
+      if (udid) devices.push({ id: udid, platform: 'ios', model: (name || '').trim(), status: 'device' });
+    }
+  }
+  return devices;
+}
+
+// Resolve a device id → {id, platform}. Validates it's actually connected and,
+// for android, that it's authorized.
+async function resolveDevice(id) {
+  if (!id) throw Object.assign(new Error('missing <device> (serial or udid). Run `agent-mobile devices`.'), { exitCode: 2 });
+  const devices = await listDevices();
+  const d = devices.find((x) => x.id === id);
+  if (!d) {
+    const ids = devices.map((x) => `${x.id}(${x.platform})`).join(', ') || 'none';
+    throw Object.assign(new Error(`device ${id} not connected. Connected: ${ids}`), { exitCode: 3 });
+  }
+  if (d.platform === 'android' && d.status === 'unauthorized') {
+    throw Object.assign(new Error(`android device ${id} is unauthorized — accept the "Allow USB debugging?" prompt on the phone, then retry.`), { exitCode: 3 });
+  }
+  return d;
+}
+function iosUnsupported(d, what) {
+  if (d.platform === 'ios') throw Object.assign(new Error(`${what} is not supported on iOS (v1) — iOS allows screenshot / info / applist / install only.`), { exitCode: 2 });
+}
+// shell-quote a single argument safely
+function q(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+
+// ── commands ────────────────────────────────────────────────────────────────
+async function cmdDevices() {
+  const devices = await listDevices();
+  if (json) return ok(devices);
+  if (!devices.length) { console.log('no devices connected (plug a phone into the desktop machine)'); return; }
+  for (const d of devices) {
+    const tag = d.platform === 'android' ? 'Android' : 'iOS';
+    const st = d.status !== 'device' ? ` [${d.status}]` : '';
+    console.log(`${tag.padEnd(8)} ${d.id}${d.model ? `  (${d.model})` : ''}${st}`);
+  }
+}
+
+// Capture a screenshot on the desktop, downscale to JPEG via macOS `sips` to
+// bound the RPC payload, return base64; write decoded bytes to a local file by
+// default (so the agent can Read the image), or print base64 with --base64.
+async function cmdScreenshot(rest) {
+  const d = await resolveDevice(rest[0]);
+  const SRC = '/tmp/agent-mobile-shot.png';
+  // Default = JPEG at `quality`% (50 → ~half size). --lossless = full-resolution PNG.
+  const ext = lossless ? 'png' : 'jpg';
+  const OUT = `/tmp/agent-mobile-shot.${ext}`;
+  const cap = d.platform === 'android'
+    ? `adb -s ${q(d.id)} exec-out screencap -p > ${SRC}`
+    // iOS screenshotr needs the Developer Disk Image mounted (and Developer Mode
+    // on the device). Best-effort auto-mount the matching Xcode DDI first — it's
+    // a quick no-op when already mounted; the screenshot then runs regardless.
+    : `MAJ=$(ideviceinfo -u ${q(d.id)} -k ProductVersion 2>/dev/null | cut -d. -f1); ` +
+      `DS=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/DeviceSupport; ` +
+      `IMG=$(ls -d "$DS"/$MAJ.* 2>/dev/null | sort -V | tail -1); ` +
+      `[ -n "$IMG" ] && ideviceimagemounter -u ${q(d.id)} "$IMG/DeveloperDiskImage.dmg" "$IMG/DeveloperDiskImage.dmg.signature" >/dev/null 2>&1; ` +
+      `idevicescreenshot -u ${q(d.id)} ${SRC} >/dev/null 2>&1`;
+  // macOS sips: lossless → PNG (no resize, no quality loss); else JPEG quality% (downscaled).
+  const conv = lossless
+    ? `sips -s format png ${SRC} --out ${OUT}`
+    : `sips -Z 1200 -s format jpeg -s formatOptions ${quality} ${SRC} --out ${OUT}`;
+  const r = await shell(`${cap} && ${conv} >/dev/null 2>&1 && base64 < ${OUT}`);
+  const b64 = r.stdout.replace(/\s+/g, '');
+  if (!b64) throw Object.assign(new Error(`screenshot failed${r.stderr ? `: ${r.stderr.trim()}` : ''}`), { exitCode: 4 });
+  if (wantBase64) {
+    if (json) return ok({ id: d.id, platform: d.platform, lossless, quality: lossless ? null : quality, base64: b64 });
+    console.log(b64);
+    return;
+  }
+  const file = outPath || `/tmp/agent-mobile-${d.id.replace(/[^A-Za-z0-9_.-]/g, '_')}.${ext}`;
+  const bytes = Buffer.from(b64, 'base64');
+  writeFileSync(file, bytes);
+  if (json) return ok({ id: d.id, platform: d.platform, out: file, bytes: bytes.length, lossless, quality: lossless ? null : quality });
+  console.log(`✓ screenshot${lossless ? ' (lossless PNG)' : ` (JPEG q${quality})`} → ${file} (${bytes.length} bytes)`);
+}
+
+async function cmdInfo(rest) {
+  const d = await resolveDevice(rest[0]);
+  if (d.platform === 'android') {
+    const r = await shell(`adb -s ${q(d.id)} shell 'getprop ro.product.model; getprop ro.product.manufacturer; getprop ro.build.version.release; getprop ro.build.version.sdk'`);
+    const [model, brand, release, sdk] = r.stdout.replace(/\\n/g, '\n').trim().split('\n').map((s) => s.trim());
+    const info = { id: d.id, platform: 'android', model, manufacturer: brand, androidVersion: release, sdk };
+    if (json) return ok(info);
+    console.log(`Android ${release} (API ${sdk}) · ${brand} ${model} · ${d.id}`);
+    return;
+  }
+  const r = await shell(`for k in DeviceName ProductType ProductVersion BuildVersion; do printf '%s|' "$(ideviceinfo -u ${q(d.id)} -k $k 2>/dev/null)"; done`);
+  const [name, product, version, build] = r.stdout.replace(/\\n/g, '\n').trim().split('|');
+  const info = { id: d.id, platform: 'ios', name, productType: product, iosVersion: version, build };
+  if (json) return ok(info);
+  console.log(`iOS ${version} (${build}) · ${name} [${product}] · ${d.id}`);
+}
+
+async function cmdApplist(rest) {
+  const d = await resolveDevice(rest[0]);
+  const r = d.platform === 'android'
+    ? await shell(`adb -s ${q(d.id)} shell pm list packages -3`)
+    : await shell(`ideviceinstaller -u ${q(d.id)} -l 2>/dev/null`);
+  const text = r.stdout.replace(/\\n/g, '\n').trim();
+  if (json) {
+    const apps = d.platform === 'android'
+      ? text.split('\n').map((l) => l.replace(/^package:/, '').trim()).filter(Boolean)
+      : text.split('\n').slice(1).map((l) => l.trim()).filter(Boolean);
+    return ok(apps);
+  }
+  console.log(text || '(no third-party apps)');
+}
+
+// install <device> <apk|ipa|URL>. The artifact must be reachable from the
+// DESKTOP machine: a URL (downloaded there via curl) or an absolute path that
+// exists on that machine.
+async function cmdInstall(rest) {
+  const d = await resolveDevice(rest[0]);
+  const src = rest[1];
+  if (!src) throw Object.assign(new Error('Usage: agent-mobile install <device> <apk|ipa|URL>'), { exitCode: 2 });
+  const isUrl = /^https?:\/\//i.test(src);
+  if (d.platform === 'android') {
+    const dst = '/tmp/agent-mobile-install.apk';
+    const fetchCmd = isUrl ? `curl -fsSL ${q(src)} -o ${dst}` : `cp ${q(src)} ${dst}`;
+    const r = await shell(`set -e; ${fetchCmd} && adb -s ${q(d.id)} install -r -d ${dst} 2>&1`);
+    if (!/success/i.test(r.stdout) && r.exitCode !== 0) throw Object.assign(new Error(`install failed: ${(r.stdout || r.stderr).trim()}`), { exitCode: 4 });
+    if (json) return ok({ id: d.id, platform: 'android', result: r.stdout.trim() });
+    console.log(r.stdout.trim() || '✓ installed');
+    return;
+  }
+  const dst = '/tmp/agent-mobile-install.ipa';
+  const fetchCmd = isUrl ? `curl -fsSL ${q(src)} -o ${dst}` : `cp ${q(src)} ${dst}`;
+  const r = await shell(`set -e; ${fetchCmd} && ideviceinstaller -u ${q(d.id)} -i ${dst} 2>&1`);
+  if (json) return ok({ id: d.id, platform: 'ios', result: r.stdout.trim() });
+  console.log(r.stdout.trim() || '✓ installed');
+}
+
+// ── Android-only input control ───────────────────────────────────────────────
+async function cmdTap(rest) {
+  const d = await resolveDevice(rest[0]); iosUnsupported(d, 'tap');
+  const [x, y] = [rest[1], rest[2]];
+  if (x == null || y == null) throw Object.assign(new Error('Usage: agent-mobile tap <device> <x> <y>'), { exitCode: 2 });
+  await shell(`adb -s ${q(d.id)} shell input tap ${Number(x)} ${Number(y)}`);
+  if (json) return ok({ id: d.id, action: 'tap', x: Number(x), y: Number(y) });
+  console.log(`✓ tap ${x},${y}`);
+}
+async function cmdSwipe(rest) {
+  const d = await resolveDevice(rest[0]); iosUnsupported(d, 'swipe');
+  const [x1, y1, x2, y2, ms] = rest.slice(1);
+  if ([x1, y1, x2, y2].some((v) => v == null)) throw Object.assign(new Error('Usage: agent-mobile swipe <device> <x1> <y1> <x2> <y2> [ms]'), { exitCode: 2 });
+  const dur = ms != null ? ` ${Number(ms)}` : '';
+  await shell(`adb -s ${q(d.id)} shell input swipe ${Number(x1)} ${Number(y1)} ${Number(x2)} ${Number(y2)}${dur}`);
+  if (json) return ok({ id: d.id, action: 'swipe' });
+  console.log(`✓ swipe ${x1},${y1} → ${x2},${y2}`);
+}
+async function cmdText(rest) {
+  const d = await resolveDevice(rest[0]); iosUnsupported(d, 'text');
+  const str = rest.slice(1).join(' ');
+  if (!str) throw Object.assign(new Error('Usage: agent-mobile text <device> <string>'), { exitCode: 2 });
+  // adb `input text` uses %s for spaces and chokes on shell metacharacters.
+  const encoded = str.replace(/ /g, '%s');
+  await shell(`adb -s ${q(d.id)} shell input text ${q(encoded)}`);
+  if (json) return ok({ id: d.id, action: 'text', text: str });
+  console.log(`✓ typed`);
+}
+const KEYMAP = { home: 'KEYCODE_HOME', back: 'KEYCODE_BACK', enter: 'KEYCODE_ENTER', recents: 'KEYCODE_APP_SWITCH', menu: 'KEYCODE_MENU', power: 'KEYCODE_POWER', up: 'KEYCODE_DPAD_UP', down: 'KEYCODE_DPAD_DOWN', delete: 'KEYCODE_DEL' };
+async function cmdKey(rest) {
+  const d = await resolveDevice(rest[0]); iosUnsupported(d, 'key');
+  const k = rest[1];
+  if (!k) throw Object.assign(new Error(`Usage: agent-mobile key <device> <${Object.keys(KEYMAP).join('|')}|KEYCODE_*|number>`), { exitCode: 2 });
+  const keycode = KEYMAP[k.toLowerCase()] || k;
+  await shell(`adb -s ${q(d.id)} shell input keyevent ${q(keycode)}`);
+  if (json) return ok({ id: d.id, action: 'key', key: keycode });
+  console.log(`✓ key ${keycode}`);
+}
+async function cmdExec(rest) {
+  const d = await resolveDevice(rest[0]); iosUnsupported(d, 'exec');
+  const command = rest.slice(1).join(' ');
+  if (!command) throw Object.assign(new Error('Usage: agent-mobile exec <device> <shell command>'), { exitCode: 2 });
+  const r = await shell(`adb -s ${q(d.id)} shell ${q(command)}`);
+  const text = r.stdout.replace(/\\n/g, '\n');
+  if (json) return ok({ id: d.id, stdout: text, stderr: r.stderr, exitCode: r.exitCode });
+  if (text) console.log(text);
+  if (r.stderr) process.stderr.write(r.stderr);
+}

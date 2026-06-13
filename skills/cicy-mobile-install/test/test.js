@@ -14,6 +14,8 @@ assert('--help has output', help.stdout.length > 0);
 assert('--help mentions install', help.stdout.includes('install'));
 assert('--help mentions android', help.stdout.includes('android'));
 assert('--help mentions ios', help.stdout.includes('ios'));
+assert('--help documents sideloadly method', help.stdout.includes('sideloadly'));
+assert('--help documents xcode method', help.stdout.includes('xcode'));
 
 // unknown subcommand → non-0
 const bad = runSkill(D, ['badcmd']);
