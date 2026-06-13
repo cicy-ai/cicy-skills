@@ -40,9 +40,17 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000);
   try {
     switch (cmd) {
       case 'tools':      printTools(); return;
+      case 'list':       await cmdList(rest); return;
+      case 'profiles':   await cmdList(rest); return;
+      case 'profile':    await cmdProfile(rest); return;
       case 'sessions':   await cmdSessions(rest); return;
       case 'session':    await cmdSession(rest); return;
+      case 'add':        await cmdAdd(rest); return;
       case 'proxy':      await cmdProxy(rest); return;
+      case 'login':      await cmdLogin(rest); return;
+      case 'logins':     await cmdLogins(rest); return;
+      case 'detect-logins': await cmdDetectLogins(rest); return;
+      case 'probe-ip':   await cmdProbeIp(rest); return;
       case 'open':       await cmdOpen(rest); return;
       case 'close':      await cmdClose(rest); return;
       case 'windows':    await cmdWindows(rest); return;
@@ -52,6 +60,14 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000);
       case 'screenshot': await cmdScreenshot(rest); return;
       case 'snapshot':   await cmdSnapshot(rest); return;
       case 'sysinfo':    await cmdSysinfo(rest); return;
+      // tab-browser tabs (BrowserView tabs, addressed by webContentsId)
+      case 'tabs':           await cmdTabs(rest); return;
+      case 'tab-open':       await cmdTabOpen(rest); return;
+      case 'tab-nav':        await cmdTabNav(rest); return;
+      case 'tab-eval':       await cmdTabEval(rest); return;
+      case 'tab-screenshot': await cmdTabScreenshot(rest); return;
+      case 'tab-activate':   await cmdTabActivate(rest); return;
+      case 'tab-close':      await cmdTabClose(rest); return;
       default: bail(`unknown command: ${cmd}. Try agent-electron --help.`, 2);
     }
   } catch (e) {
@@ -74,7 +90,7 @@ function emit(result) {
 }
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: agent-electron <sessions|session|proxy|open|close|windows|window|url|cdp|screenshot|snapshot|sysinfo> [...] [--client ID]\n'); }
+  catch { process.stdout.write('Usage: agent-electron <sessions|session|proxy|logins|detect-logins|open|close|windows|window|url|cdp|screenshot|snapshot|sysinfo> [...] [--client ID]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -84,6 +100,11 @@ function intArg(s, name) {
   const n = parseInt(s, 10);
   if (Number.isNaN(n)) throw Object.assign(new Error(`${name} must be a number, got: ${s}`), { exitCode: 2 });
   return n;
+}
+// Accept the unified profile id ("electron-3") or a bare accountIdx ("3").
+function profileIdx(s) {
+  const m = /^electron-(\d+)$/.exec(String(s || '').trim());
+  return intArg(m ? m[1] : s, 'profileId');
 }
 function loadToken() {
   if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
@@ -194,10 +215,69 @@ async function cmdSession(args) {
   });
 }
 
+async function cmdList(_args) {
+  emit(unwrap(await rpc('electron_list_profiles', {})));
+}
+
+async function cmdProfile(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron profile <id>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_get_profile', { accountIdx: profileIdx(args[0]) })));
+}
+
+// add [name] — create a new Electron profile (next account-N.json)
+async function cmdAdd(args) {
+  const name = args[0] && !args[0].startsWith('--') ? args[0] : undefined;
+  emit(unwrap(await rpc('electron_add_profile', name ? { name } : {})));
+}
+
 async function cmdProxy(args) {
-  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron proxy <accountIdx> <url|"">'), { exitCode: 2 });
-  const idx = intArg(args[0], 'accountIdx');
-  emit(unwrap(await rpc('set_account_proxy', { accountIdx: idx, proxy: args[1] })));
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron proxy <id> <url|"">'), { exitCode: 2 });
+  emit(unwrap(await rpc('set_account_proxy', { accountIdx: profileIdx(args[0]), proxy: args[1] })));
+}
+
+// parse `--name x --url y --2fa z ...` into a rich-login payload object.
+function parseLoginFlags(args, base = {}) {
+  const MAP = { '--name': 'name', '--url': 'url', '--username': 'username', '--email': 'email',
+    '--mobile': 'mobile', '--2fa': 'twofa', '--second-email': 'secondEmail', '--note': 'note', '--login-at': 'loginAt' };
+  const out = { ...base };
+  for (let i = 0; i < args.length; i++) { const k = MAP[args[i]]; if (k) out[k] = args[++i] || ''; }
+  return out;
+}
+
+async function cmdLogin(args) {
+  const sub = args[0];
+  if (sub === 'add') {
+    if (args.length < 4) throw Object.assign(new Error('usage: agent-electron login add <id> <platform> <account>'), { exitCode: 2 });
+    emit(unwrap(await rpc('electron_profile_login_add', { accountIdx: profileIdx(args[1]), platform: args[2], account: args[3] })));
+  } else if (sub === 'set') {
+    if (args.length < 2) throw Object.assign(new Error('usage: agent-electron login set <id> --name <名称> [--url --username --email --mobile --2fa --second-email --note]'), { exitCode: 2 });
+    const payload = parseLoginFlags(args.slice(2), { accountIdx: profileIdx(args[1]) });
+    if (!payload.name) throw Object.assign(new Error('login set 需要 --name <名称>'), { exitCode: 2 });
+    emit(unwrap(await rpc('electron_profile_login_set', payload)));
+  } else if (sub === 'rm') {
+    if (args.length < 3) throw Object.assign(new Error('usage: agent-electron login rm <id> <name>'), { exitCode: 2 });
+    emit(unwrap(await rpc('electron_profile_login_rm', { accountIdx: profileIdx(args[1]), platform: args[2] })));
+  } else {
+    throw Object.assign(new Error('usage: agent-electron login <add|set|rm> ...'), { exitCode: 2 });
+  }
+}
+
+async function cmdLogins(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron logins <id>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_profile_logins', { accountIdx: profileIdx(args[0]) })));
+}
+
+// detect-logins <id> — infer which sites this profile's LIVE sandbox session is
+// logged into, from its partition cookies (vs. `logins`, the manual ledger).
+async function cmdDetectLogins(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron detect-logins <id>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_detect_logins', { accountIdx: profileIdx(args[0]) })));
+}
+
+// probe-ip <id> — probe the profile's egress IP + area (through its proxy), store to config.
+async function cmdProbeIp(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron probe-ip <id>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_probe_ip', { accountIdx: profileIdx(args[0]) })));
 }
 
 async function cmdOpen(args) {
@@ -274,4 +354,45 @@ async function cmdSnapshot(args) {
 
 async function cmdSysinfo(_args) {
   emit(unwrap(await rpc('get_system_info', {})));
+}
+
+// ── tab-browser: BrowserView tabs of a profile's tab window, each addressed
+//    by webContentsId (like a Chrome target). One profile = one tab window. ──
+async function cmdTabs(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron tabs <accountIdx>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_tabs', { accountIdx: intArg(args[0], 'accountIdx') })));
+}
+async function cmdTabOpen(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron tab-open <accountIdx> [url]'), { exitCode: 2 });
+  const a = { accountIdx: intArg(args[0], 'accountIdx') };
+  if (args[1] && !args[1].startsWith('--')) a.url = args[1];
+  emit(unwrap(await rpc('electron_tab_open', a)));
+}
+async function cmdTabNav(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron tab-nav <webContentsId> <url>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_tab_navigate', { webContentsId: intArg(args[0], 'webContentsId'), url: args[1] })));
+}
+async function cmdTabEval(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron tab-eval <webContentsId> <code>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_tab_eval', { webContentsId: intArg(args[0], 'webContentsId'), code: args.slice(1).join(' ') })));
+}
+async function cmdTabScreenshot(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron tab-screenshot <webContentsId> [--out path]'), { exitCode: 2 });
+  const wcId = intArg(args[0], 'webContentsId');
+  let outPath = '';
+  for (let i = 1; i < args.length; i++) if (args[i] === '--out') outPath = args[++i];
+  const r = unwrap(await rpc('electron_tab_screenshot', { webContentsId: wcId, format: 'png' }));
+  if (!outPath) { emit(r); return; }
+  const b64 = String(r?.base64 || '').split(',').pop();
+  if (!b64) throw Object.assign(new Error('no screenshot data returned'), { exitCode: 5 });
+  writeFileSync(outPath, Buffer.from(b64, 'base64'));
+  emit({ ok: true, out: outPath, bytes: Buffer.from(b64, 'base64').length });
+}
+async function cmdTabActivate(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron tab-activate <webContentsId>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_tab_activate', { webContentsId: intArg(args[0], 'webContentsId') })));
+}
+async function cmdTabClose(args) {
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron tab-close <webContentsId>'), { exitCode: 2 });
+  emit(unwrap(await rpc('electron_tab_close', { webContentsId: intArg(args[0], 'webContentsId') })));
 }
