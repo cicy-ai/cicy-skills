@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "title": "Cicy Agent",
-  "description": "Operate tmux panes and windows on this host. Wraps cicy-code's /api/tmux/* endpoints (list, capture, send-keys, msg, create, restart, clear).",
+  "description": "Operate tmux panes/windows on this host (list, capture, send-keys, msg, create, restart). `msg --notify` wakes the SENDER when the dispatched agent finishes — the multi-agent coordination primitive.",
   "category": "dev",
   "tags": [
     "tmux",

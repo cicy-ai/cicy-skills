@@ -1,6 +1,6 @@
 ---
 name: cicy-agent
-description: Operate tmux panes and windows on this host. Wraps cicy-code's /api/tmux/* endpoints (list, capture, send-keys, msg, create, restart, clear).
+description: Operate tmux panes/windows on this host (list, capture, send-keys, msg, create, restart). `msg --notify` wakes the SENDER when the dispatched agent finishes — the multi-agent coordination primitive.
 ---
 
 # Cicy Agent
@@ -8,24 +8,63 @@ description: Operate tmux panes and windows on this host. Wraps cicy-code's /api
 This skill is the local `cicy-agent` wrapper for tmux pane / window
 operations on this host (and optional remote nodes via `--node NAME`).
 
+## ⭐ `--notify` — get woken when the agent you dispatched finishes
+
+`cicy-agent msg <pane> --notify "<task>"` does more than send text — it arms a
+**callback on the receiver**. When `<pane>`'s turn handling your message reaches
+a terminal state, YOU (the sender) receive a push:
+
+```
+🔔 [<them>] msg <id> → done       (or  ⚠️ [<them>] msg <id> → failed)
+```
+
+**That push wakes you up.** This is the point: after dispatching, you can go
+idle — no polling, no screen-scraping a pane to guess if they're done. The
+receiver finishing is what re-activates you, to collect the result or verify.
+
+This is the core multi-agent **orchestration primitive**:
+
+```
+orchestrator:  cicy-agent msg w-200 --notify "do X"     # dispatch
+               cicy-agent msg w-201 --notify "do Y"     # dispatch
+               …go idle…
+               🔔 [w-201] msg ab12 → done   ← woken → collect Y
+               🔔 [w-200] msg cd34 → done   ← woken → collect X
+```
+
+Details:
+
+- **Default (no `--notify`) is silent.** The message is still recorded in the
+  store (`cicy-agent msgs` shows status `sent → done/failed`), but NO chat push
+  fires — so routine dispatches don't spam you. Add `--notify` only when you
+  want to be woken.
+- **De-duped.** If the receiver already replied to you in-band during that turn,
+  the `--notify` push is suppressed — you won't be double-notified.
+- **You get an id immediately.** `msg` returns `msg_id=<id>`; use it with
+  `cicy-agent msgs` to trace this message's status / link later.
+- `--no-callback` = pure fire-and-forget (not even tracked).
+
+> Don't "dispatch then sit waiting to be poked", and don't write a script that
+> scrapes `capture` to detect completion — `--notify` exists for exactly this.
+
 ## Scope
 
-Use this skill for:
-
-- listing panes / windows / tree
-- capturing pane output
-- sending text or keys to a pane
-- sending a chat message (`msg`) to another pane (fire-and-forget; with
-  `--callback` the receiver's pane writes `[<them>] work done` back to you
-  when their next turn finishes)
-- restarting all panes / clearing one
+- list panes / windows / tree
+- capture pane output; `reply` returns the recipient's parsed last-turn text
+- `msg` a message to another pane (recorded in the store, status → done/failed;
+  `--notify` above; `--no-callback` = fire-and-forget)
+- `msgs` — the cross-agent message link: who→who, status, and a q⟶answer
+  summary of what the receiver actually did
+- restart all panes / clear one
 
 ## Rules
 
-1. Prefer `cicy-agent` for local convenience operations on this host.
-2. Use `--node NAME` for remote nodes; the named entry in `~/cicy-ai/db/cicy-agent.json` supplies the API base + token.
-3. `msg --callback` requires `X_AGENT_SHORT_ID` env (set inside cicy panes).
-4. `capture` returns raw pane text. `reply` returns parsed last-turn text from the recipient.
+1. Prefer `cicy-agent` for local convenience operations on this host; use
+   `--node NAME` for remote nodes (entry in `~/cicy-ai/db/cicy-agent.json`).
+2. `msg --notify` needs `X_AGENT_SHORT_ID` env (set inside cicy panes) — it's
+   the sender id the callback wakes.
+3. To judge "did they finish" or read their conclusion, use `reply` (parsed
+   last turn) — do NOT scrape `capture` (raw scrollback drifts as it scrolls).
 
 ## References
 
