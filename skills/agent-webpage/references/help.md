@@ -17,6 +17,10 @@ agent-webpage tools
 
 ## Notes
 
+- `clients` lists every connected webpage/desktop client. For clients running
+  inside **cicy-desktop** it also surfaces that machine's `device_id`,
+  `public_ip`, `ip_region` (country / region / city), and `system_language`
+  (forwarded by the desktop on the chat-WS register; empty for plain browsers).
 - target by `client_id`, not `agent_id`
 - if omitted, current agent must have exactly one connected client
 - response-oriented calls wait for and print the real webpage response

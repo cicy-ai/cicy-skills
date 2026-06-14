@@ -1,8 +1,8 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.2.1",
-  "title": "Cicy Agent (tmux)",
+  "version": "1.4.0",
+  "title": "Cicy Agent",
   "description": "Operate tmux panes and windows on this host. Wraps cicy-code's /api/tmux/* endpoints (list, capture, send-keys, msg, create, restart, clear).",
   "category": "dev",
   "tags": [
@@ -63,8 +63,13 @@
     },
     {
       "name": "tmux msg",
-      "example": "cicy-agent msg <worker> <message>",
-      "description": "Send a message to an agent worker"
+      "example": "cicy-agent msg <worker> <message> [--notify] [--no-callback]",
+      "description": "Message an agent worker. Tracked in the message store (status→done/failed), silent by default; --notify pushes a completion wake-up unless they already replied; --no-callback = fire-and-forget."
+    },
+    {
+      "name": "agent msgs",
+      "example": "cicy-agent msgs --to <worker> [--open] [--json]",
+      "description": "List the cross-agent message link: who→who, status (sent|done|failed), and a q⟶answer summary of what the receiver actually did (JOINed from history)."
     },
     {
       "name": "broadcast",

@@ -9,7 +9,18 @@ cicy-agent tree                               Tree (JSON)
 cicy-agent windows                            Window list (JSON)
 cicy-agent capture <pane>                     Capture raw pane text
 cicy-agent reply <pane> [--full]              Last reply text from pane (parsed)
-cicy-agent msg <pane> <text> [--callback]     Send chat message (fire-and-forget)
+cicy-agent msg <pane> <text>                  Send chat message. Default: tracked in the
+            [--no-callback] [--notify]         message store (status → done/failed) but NO
+                                              completion chat line, and prints msg_id=<id>
+                                              for later lookup. --notify also pushes a one-line
+                                              status wake-up when the turn ends ("🔔 [B] msg <id>
+                                              → done"; suppressed if they already replied).
+                                              --no-callback = full
+                                              fire-and-forget (no tracking, no push).
+cicy-agent msgs [--from P] [--to P]           Cross-agent message link: who→who, status,
+            [--status S] [--open] [--json]     id, and a q⟶answer summary of BOTH the sender's
+                                              dispatch turn (from-turn) and what the receiver
+                                              did (to-turn), JOINed from each agent's history.
 cicy-agent broadcast [--timeout <ms>] <text>  Group-send to ONLINE agents only (offline
                                               agents can't receive — there is no --all).
                                               Every send has a per-pane timeout (default

@@ -25,6 +25,7 @@
 | `exec`          | `exec_shell`                        |
 | `exec-file`     | `exec_shell_file` / `exec_python_file` / `exec_node_file` (by ext, content upload) |
 | `sysinfo`       | `get_system_info` + `exec_shell` gap fill (os_version, disk on darwin) |
+| `device-info`   | `get_device_info` → `{deviceId, publicIp, ipRegion, systemLanguage}` |
 | `rpc <tool>`    | `<tool>` (passthrough)              |
 | `clients`       | (no rpc — GET `/api/chat/clients`)  |
 

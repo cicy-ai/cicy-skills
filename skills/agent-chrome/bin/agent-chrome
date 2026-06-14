@@ -36,6 +36,12 @@ const API_PORT = process.env.CICY_API_PORT || '8008';
 const HTTP_BASE = `http://127.0.0.1:${API_PORT}`;
 const WS_BASE   = `ws://127.0.0.1:${API_PORT}`;
 const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000); // Chrome ops can take longer
+// Hoisted ABOVE the entry IIFE: the dispatch chain reaches rpc() synchronously
+// before module eval would pass a mid-file declaration → TDZ otherwise.
+const AUTH_PENDING = '__CICY_AUTH_PENDING__';
+const AUTH_DENIED = '__CICY_AUTH_DENIED__';
+const AUTH_WAIT_MS = Number(process.env.CICY_AUTH_WAIT_MS || 180000);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   try {
@@ -154,7 +160,20 @@ async function resolveDesktop() {
   return { clientID: matches[0].client_id };
 }
 
-async function rpc(tool, toolArgs) {
+// The desktop's domain-allowlist gate returns these sentinels immediately (instead
+// of blocking us — our transport is a single fixed-timeout HTTP call) while the
+// consent modal is up. result may be a raw string or MCP {content:[{text}]}.
+function authSentinel(result) {
+  let s = result;
+  if (s && typeof s === 'object' && Array.isArray(s.content)) s = s.content.map((c) => (c && c.text) || '').join('');
+  if (typeof s !== 'string') return null;
+  const t = s.trim();
+  if (t === AUTH_PENDING) return 'pending';
+  if (t === AUTH_DENIED) return 'denied';
+  return null;
+}
+
+async function rpcOnce(tool, toolArgs) {
   const target = await resolveDesktop();
   // wait_ack sync mode keys solely on client_id — no agent_id needed.
   // The server injects its own requestId (overriding ours), registers a
@@ -166,11 +185,29 @@ async function rpc(tool, toolArgs) {
     type: 'desktop_event',
     wait_ack: true,
     timeout_ms: RPC_TIMEOUT_MS,
-    data: { type: 'rpc_call', tool, args: toolArgs ?? {}, requestId: rid },
+    // __cicyAuthNonBlocking → desktop won't block us on the consent modal; it
+    // returns a PENDING/DENIED sentinel we poll on, and strips this key before
+    // dispatching so it never reaches the actual tool args.
+    data: { type: 'rpc_call', tool, args: { ...(toolArgs ?? {}), __cicyAuthNonBlocking: true }, requestId: rid },
   });
   const data = resp?.data || {};
   if (data.error) throw Object.assign(new Error(String(data.error)), { exitCode: 4 });
   return data.result;
+}
+
+// Poll while the user decides domain authorization in the desktop modal.
+async function rpc(tool, toolArgs) {
+  const deadline = Date.now() + AUTH_WAIT_MS;
+  let notified = false;
+  for (;;) {
+    const result = await rpcOnce(tool, toolArgs);
+    const sentinel = authSentinel(result);
+    if (!sentinel) return result;
+    if (sentinel === 'denied') throw Object.assign(new Error('用户在 cicy-desktop 弹窗中拒绝了该站点的桌面 RPC 授权'), { exitCode: 4 });
+    if (!notified) { process.stderr.write('⏳ 正在等待桌面授权（请在 cicy-desktop 弹窗里点「信任此站点」或「本次允许」）…\n'); notified = true; }
+    if (Date.now() > deadline) throw Object.assign(new Error('等待桌面授权超时（用户未在弹窗中授权）'), { exitCode: 4 });
+    await sleep(2000);
+  }
 }
 
 function emit(result) {

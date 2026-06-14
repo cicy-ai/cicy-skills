@@ -1,0 +1,27 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "douyin2feishu",
+  "version": "0.2.0",
+  "title": "Douyin → 转写 → 飞书表",
+  "description": "抖音视频一键转写并写入飞书多维表:解析分享链接抓元数据、下载无水印视频、Groq whisper 带时间戳转写、LLM 生成摘要,按字段写入指定 Base。凭证与目标表来自私有配置,不入库。",
+  "category": "productivity",
+  "tags": ["douyin", "feishu", "bitable", "transcribe", "whisper", "groq"],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": ["ffmpeg", "curl", "lark-cli"],
+  "npm_dependencies": false,
+  "entry": "bin/douyin2feishu",
+  "permissions": [],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}

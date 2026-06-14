@@ -1,0 +1,199 @@
+#!/usr/bin/env node
+// douyin2feishu — 抖音视频 → Groq whisper 转写 → 写入飞书多维表。
+// 方法公有;凭证与目标表来自私有配置 ~/cicy-ai/db/douyin2feishu.json(绝不写进 skill)。
+// 零 npm 依赖,纯 ESM,Node 18+。外部命令:curl、ffmpeg、lark-cli(已登录)。
+import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
+import { join } from 'node:path';
+
+const HOME = homedir();
+const expand = (p) => (p && p.startsWith('~') ? join(HOME, p.slice(1)) : p);
+const log = (...a) => process.stderr.write(a.join(' ') + '\n');
+const die = (m) => { process.stderr.write('ERROR: ' + m + '\n'); process.exit(1); };
+
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1';
+
+// ── config (private; never baked into the skill) ───────────────────────────
+const CFG_PATH = process.env.D2F_CONFIG || join(HOME, 'cicy-ai', 'db', 'douyin2feishu.json');
+function loadConfig() {
+  const cfg = {
+    base_token: '', table_id: '',
+    feishu_host: '', // e.g. pcn0gj2p9lrd.feishu.cn — only used to print a clickable link
+    groq_key_file: join(HOME, 'cicy-ai', 'db', 'groq.json'),
+    groq_key: '',
+    groq_model: 'whisper-large-v3',
+    summary: true,                       // 转写后用 LLM 生成「摘要」字段
+    summary_model: 'qwen/qwen3-32b',     // 中文强;设 summary:false 可关闭
+    language: 'zh',
+    source: '抖音',
+  };
+  if (existsSync(CFG_PATH)) Object.assign(cfg, JSON.parse(readFileSync(CFG_PATH, 'utf8')));
+  else die(`缺少配置 ${CFG_PATH}(需 base_token / table_id;凭证私有,不入 skill)`);
+  if (!cfg.base_token || !cfg.table_id) die(`配置缺 base_token 或 table_id(${CFG_PATH})`);
+  if (!cfg.groq_key) {
+    const f = expand(cfg.groq_key_file);
+    if (!existsSync(f)) die(`缺少 Groq key:${f}`);
+    cfg.groq_key = JSON.parse(readFileSync(f, 'utf8')).api_key;
+  }
+  if (!cfg.groq_key) die('Groq key 为空');
+  return cfg;
+}
+
+// ── shell helpers ───────────────────────────────────────────────────────────
+const run = (file, args, env) =>
+  execFileSync(file, args, { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024, env: env || process.env });
+// curl with proxy DISABLED (Douyin is in CN; the host proxy routes overseas)
+const curlNoProxy = (args) => run('curl', ['-s', '--noproxy', '*', '-A', UA, ...args]);
+// curl WITH the host proxy (Groq is in the US)
+const curlProxy = (args) => run('curl', ['-s', ...args]);
+const lark = (args) => run('lark-cli', args, { ...process.env, LARK_CLI_NO_PROXY: '1' });
+
+// ── douyin ──────────────────────────────────────────────────────────────────
+function resolveShare(url) {
+  const head = curlNoProxy(['-IL', url]);
+  const locs = [...head.matchAll(/^location:\s*(\S+)/gim)].map((m) => m[1]);
+  const shareUrl = locs.find((l) => /iesdouyin\.com\/share\/video\//.test(l)) || url;
+  const m = shareUrl.match(/video\/(\d+)/);
+  return { shareUrl, awemeId: m ? m[1] : null };
+}
+function fetchMeta(shareUrl) {
+  const html = curlNoProxy([shareUrl]);
+  const m = html.match(/_ROUTER_DATA\s*=\s*(\{[\s\S]*?\});?\s*<\/script>/);
+  if (!m) throw new Error('解析 _ROUTER_DATA 失败(可能改版或需登录)');
+  const data = JSON.parse(m[1]);
+  const ld = data.loaderData || {};
+  let page = null;
+  for (const k of Object.keys(ld)) { const v = ld[k]; if (v && v.videoInfoRes) { page = v; break; } }
+  if (!page || !page.videoInfoRes || !page.videoInfoRes.item_list) throw new Error('videoInfoRes 缺失');
+  const it = page.videoInfoRes.item_list[0];
+  const st = it.statistics || {};
+  return {
+    title: it.desc || '',
+    author: (it.author && it.author.nickname) || '',
+    awemeId: it.aweme_id || null,
+    playUri: it.video.play_addr.uri,
+    durationMs: (it.video && it.video.duration) || 0,
+    createTime: it.create_time || 0,
+    digg: st.digg_count, comment: st.comment_count, share: st.share_count, collect: st.collect_count,
+  };
+}
+function downloadVideo(playUri, out) {
+  curlNoProxy(['-L', `https://aweme.snssdk.com/aweme/v1/play/?video_id=${playUri}&ratio=1080p&line=0`, '-o', out]);
+}
+function extractAudio(video, audio) {
+  run('ffmpeg', ['-y', '-loglevel', 'error', '-nostats', '-i', video, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', '-b:a', '64k', audio]);
+}
+
+// ── groq ──────────────────────────────────────────────────────────────────
+function transcribe(audio, cfg) {
+  const out = audio + '.json';
+  curlProxy(['--max-time', '300', 'https://api.groq.com/openai/v1/audio/transcriptions',
+    '-H', 'Authorization: Bearer ' + cfg.groq_key,
+    '-F', 'model=' + cfg.groq_model, '-F', 'language=' + cfg.language, '-F', 'temperature=0',
+    '-F', 'response_format=verbose_json', '-F', 'file=@' + audio, '-o', out]);
+  const j = JSON.parse(readFileSync(out, 'utf8'));
+  if (j.error) throw new Error('Groq: ' + JSON.stringify(j.error));
+  return j;
+}
+const mmss = (t) => { t = Math.round(t); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+// 用 LLM 把文案提炼成「一句话总结 + 要点」。失败不致命(由调用方 try/catch),返回空串。
+function summarize(text, cfg) {
+  if (!cfg.summary || !text) return '';
+  const body = JSON.stringify({
+    model: cfg.summary_model,
+    messages: [
+      { role: 'system', content: '你是中文内容编辑。把视频口播文案提炼成要点,直接输出结果,不要任何前言或解释。' },
+      { role: 'user', content: '用中文提炼下面这段视频文案:先一句话总结,再 3-6 条要点(每条一行,以「· 」开头)。只输出结果。\n\n' + text },
+    ],
+    temperature: 0.2, max_tokens: 800, reasoning_format: 'hidden',
+  });
+  const out = curlProxy(['--max-time', '120', 'https://api.groq.com/openai/v1/chat/completions',
+    '-H', 'Authorization: Bearer ' + cfg.groq_key, '-H', 'Content-Type: application/json', '-d', body]);
+  const j = JSON.parse(out.slice(out.indexOf('{')));
+  if (j.error) throw new Error('Groq(summary): ' + JSON.stringify(j.error));
+  const s = (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
+  return s.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<think>[\s\S]*$/g, '').trim();
+}
+
+// ── feishu base ─────────────────────────────────────────────────────────────
+// 注:目标表「ID」是飞书 auto_number 字段,编号由飞书自动生成 —— 本工具不传、也不算 ID。
+function upsert(cfg, fields) {
+  return lark(['base', '+record-upsert', '--base-token', cfg.base_token, '--table-id', cfg.table_id, '--json', JSON.stringify(fields)]);
+}
+
+// ── pipeline ────────────────────────────────────────────────────────────────
+function buildRecord(cfg, url, meta, tr, summary) {
+  const segs = tr.segments || [];
+  const full = (tr.text || '').trim() || segs.map((s) => s.text).join('').trim();
+  const timeline = segs.map((s) => `[${mmss(s.start)}–${mmss(s.end)}] ${(s.text || '').trim()}`).join('<br>');
+  const durSec = Math.round(meta.durationMs ? meta.durationMs / 1000 : (tr.duration || 0));
+  const pub = meta.createTime ? new Date(meta.createTime * 1000).toISOString().slice(0, 10) : '';
+  return {
+    '标题': meta.title, '作者': meta.author,
+    '视频ID': String(meta.awemeId || ''), '视频链接': url,
+    '发布日期': pub,
+    '点赞数': String(meta.digg ?? ''), '收藏数': String(meta.collect ?? ''),
+    '转发数': String(meta.share ?? ''), '评论数': String(meta.comment ?? ''),
+    '时长': durSec ? durSec + '秒' : '', '来源': cfg.source || '抖音',
+    '转写时间': new Date().toISOString().slice(0, 10),
+    '摘要': summary || '', '文案': full, '时间线': timeline,
+  };
+}
+
+function main(url, opts) {
+  const cfg = loadConfig();
+  log('① 解析分享链接', url);
+  const r = resolveShare(url);
+  log('② 抓元数据');
+  const meta = fetchMeta(r.shareUrl);
+  meta.awemeId = meta.awemeId || r.awemeId;
+  const dir = mkdtempSync(join(tmpdir(), 'd2f-'));
+  const video = join(dir, 'v.mp4'), audio = join(dir, 'a.mp3');
+  try {
+    log('③ 下载无水印视频');
+    downloadVideo(meta.playUri, video);
+    log('④ 抽音频');
+    extractAudio(video, audio);
+    log('⑤ Groq 转写(' + cfg.groq_model + ')');
+    const tr = transcribe(audio, cfg);
+    let summary = '';
+    if (cfg.summary) {
+      log('⑥ 生成摘要(' + cfg.summary_model + ')');
+      const full = (tr.text || '').trim() || (tr.segments || []).map((s) => s.text).join('').trim();
+      try { summary = summarize(full, cfg); } catch (e) { log('warn: 摘要失败,跳过 (' + e.message + ')'); }
+    }
+    const rec = buildRecord(cfg, url, meta, tr, summary);
+    if (opts.dryRun) {
+      log('⑦ [dry-run] 跳过写入');
+      process.stdout.write(JSON.stringify({ ok: true, dryRun: true, record: { ...rec, 文案: rec.文案.slice(0, 80) + '…', 时间线: '(' + (tr.segments || []).length + ' 段)' } }, null, 2) + '\n');
+      return;
+    }
+    log('⑦ 写入飞书表(ID 由飞书自动编号)');
+    const res = upsert(cfg, rec);
+    const id = (String(res).match(/NO\.\d+/) || [])[0] || '(auto)';
+    const link = cfg.feishu_host ? `https://${cfg.feishu_host}/base/${cfg.base_token}?table=${cfg.table_id}` : `base ${cfg.base_token}/${cfg.table_id}`;
+    process.stdout.write(JSON.stringify({ ok: true, id, title: meta.title, author: meta.author, awemeId: meta.awemeId, chars: rec.文案.length, segments: (tr.segments || []).length, table: link }) + '\n');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+// ── cli ─────────────────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+const opts = { dryRun: argv.includes('--dry-run') };
+const url = argv.find((a) => !a.startsWith('-'));
+if (!url || argv.includes('--help') || argv.includes('-h')) {
+  process.stdout.write(`douyin2feishu — 抖音视频 → Groq 转写 → 自动写入飞书多维表
+
+usage:
+  douyin2feishu <抖音链接>            一键:解析→下载→转写→写飞书表(新建 NO.xxx)
+  douyin2feishu <抖音链接> --dry-run  跑完整流程但不写表(打印将写入的记录)
+  douyin2feishu --help
+
+config (私有,不入 skill): ${CFG_PATH}
+  { base_token, table_id, feishu_host?, groq_key_file?, groq_model?, summary?, summary_model?, language?, source? }
+  转写后默认用 summary_model(qwen/qwen3-32b)生成「摘要」字段写入;summary:false 可关
+needs: ffmpeg, curl, lark-cli(已登录), Groq key(默认 ~/cicy-ai/db/groq.json)
+`);
+  process.exit(url ? 0 : 0);
+}
+try { main(url, opts); } catch (e) { die(e.message); }

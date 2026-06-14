@@ -1,0 +1,216 @@
+#!/usr/bin/env node
+// agent-creator — author & manage custom cicy agents via cicy-code /api/custom-agents.
+// Zero npm dependencies. Pure ESM. Node 18+.
+//
+// A custom agent is a reusable cicy persona stored on the cicy-code host at
+// ~/cicy-ai/agents/<slug>/AGENT.md (frontmatter name/tools/model + a body that
+// becomes the persona). Once created it shows up as its own agent type
+// ("custom:<slug>") in the cicy-code "new worker" picker — author a persona
+// once, then spin up instances of it on demand. All state lives server-side;
+// this CLI only talks to the local cicy-code API.
+
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const API_PORT = process.env.CICY_API_PORT || '8008';
+
+const argv = process.argv.slice(2);
+const cmd = argv[0];
+
+if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
+  printHelp();
+  process.exit(cmd ? 0 : 2);
+}
+
+const KNOWN = new Set(['list', 'ls', 'create', 'new', 'add', 'show', 'get', 'delete', 'rm', 'del', 'tools']);
+if (!KNOWN.has(cmd)) {
+  process.stderr.write(`unknown command: ${cmd}\nrun "agent-creator --help"\n`);
+  process.exit(2);
+}
+
+main().catch((e) => {
+  process.stderr.write((e && e.message ? e.message : String(e)) + '\n');
+  process.exit(e && e.exitCode ? e.exitCode : 1);
+});
+
+// ── command dispatch ───────────────────────────────────────────────────────
+async function main() {
+  const { flags, pos } = parseFlags(argv.slice(1));
+  switch (cmd) {
+    case 'list': case 'ls': return doList(flags);
+    case 'tools': return doTools(flags);
+    case 'show': case 'get': return doShow(pos[0], flags);
+    case 'create': case 'new': case 'add': return doCreate(pos[0], flags);
+    case 'delete': case 'rm': case 'del': return doDelete(pos[0], flags);
+  }
+}
+
+async function doList(flags) {
+  const data = await api('GET', '');
+  const agents = Array.isArray(data.agents) ? data.agents : [];
+  if (flags.json) { out(JSON.stringify(agents, null, 2)); return; }
+  if (agents.length === 0) { out('(no custom agents yet — create one with: agent-creator create <name> --prompt "...")'); return; }
+  for (const a of agents) {
+    const tools = (a.tools || []).join(', ') || '-';
+    const model = a.model || 'default';
+    out(`• ${a.name}  [tools: ${tools}]  [model: ${model}]`);
+  }
+}
+
+async function doTools(flags) {
+  const data = await api('GET', '');
+  const groups = Array.isArray(data.toolGroups) ? data.toolGroups : [];
+  if (flags.json) { out(JSON.stringify(groups, null, 2)); return; }
+  out('Available tool groups (selectable in --tools):');
+  for (const g of groups) out(`  ${g}`);
+}
+
+async function doShow(name, flags) {
+  if (!name) throw usage('show needs a name: agent-creator show <name>');
+  const data = await api('GET', '');
+  const agents = Array.isArray(data.agents) ? data.agents : [];
+  const a = agents.find((x) => x.slug === name || x.name === name);
+  if (!a) throw Object.assign(new Error(`no custom agent named "${name}"`), { exitCode: 2 });
+  if (flags.json) { out(JSON.stringify(a, null, 2)); return; }
+  out(`name:   ${a.name}`);
+  out(`slug:   ${a.slug}`);
+  out(`tools:  ${(a.tools || []).join(', ') || '-'}`);
+  out(`model:  ${a.model || 'default'}`);
+  out('persona:');
+  out((a.body || '').split('\n').map((l) => '  ' + l).join('\n'));
+}
+
+async function doCreate(name, flags) {
+  if (!name) throw usage('create needs a name: agent-creator create <name> [--tools a,b] [--model M] [--prompt "..."]');
+  const body = resolvePrompt(flags);
+  const tools = (flags.tools || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const payload = { name, tools, model: flags.model || '', body };
+  const data = await api('POST', '', payload);
+  const a = data.agent || {};
+  if (flags.json) { out(JSON.stringify(a, null, 2)); return; }
+  out(`✓ saved custom agent "${a.name || name}"`);
+  out(`  pick it in the cicy-code "new worker" picker as: ★ ${a.name || name}  (agent_type custom:${a.slug || name})`);
+}
+
+async function doDelete(name, flags) {
+  if (!name) throw usage('delete needs a name: agent-creator delete <name>');
+  const data = await api('DELETE', '/' + encodeURIComponent(name));
+  if (flags.json) { out(JSON.stringify(data, null, 2)); return; }
+  out(`✓ deleted custom agent "${name}"`);
+}
+
+// ── http ────────────────────────────────────────────────────────────────────
+function baseURL() {
+  return `http://127.0.0.1:${API_PORT}/api/custom-agents`;
+}
+
+function readApiToken() {
+  if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
+  if (!existsSync(GLOBAL_JSON)) {
+    throw Object.assign(new Error(`missing ${GLOBAL_JSON} and CICY_API_TOKEN not set`), { exitCode: 3 });
+  }
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(GLOBAL_JSON, 'utf8')); }
+  catch (e) { throw Object.assign(new Error(`parse ${GLOBAL_JSON}: ${e.message}`), { exitCode: 1 }); }
+  if (!cfg.api_token) throw Object.assign(new Error(`api_token not found in ${GLOBAL_JSON}`), { exitCode: 3 });
+  return cfg.api_token;
+}
+
+async function api(method, path, body) {
+  const url = baseURL() + path;
+  const token = readApiToken();
+  const init = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  let res;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    throw Object.assign(new Error(`cannot reach cicy-code at ${baseURL()} — is it running? (${e.message})`), { exitCode: 3 });
+  }
+  const text = await res.text();
+  let payload;
+  try { payload = text ? JSON.parse(text) : {}; } catch { payload = { raw: text }; }
+  if (res.status === 401 || res.status === 403) {
+    throw Object.assign(new Error(`auth failed (HTTP ${res.status})`), { exitCode: 3 });
+  }
+  if (!res.ok) {
+    throw Object.assign(new Error(`HTTP ${res.status}: ${payload.error || payload.detail || text}`), { exitCode: 1 });
+  }
+  return payload;
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────
+function parseFlags(args) {
+  const flags = {};
+  const pos = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json') flags.json = true;
+    else if (a === '--tools') flags.tools = args[++i];
+    else if (a === '--model') flags.model = args[++i];
+    else if (a === '--prompt') flags.prompt = args[++i];
+    else if (a === '--prompt-file') flags.promptFile = args[++i];
+    else if (a.startsWith('--tools=')) flags.tools = a.slice('--tools='.length);
+    else if (a.startsWith('--model=')) flags.model = a.slice('--model='.length);
+    else if (a.startsWith('--prompt=')) flags.prompt = a.slice('--prompt='.length);
+    else if (a.startsWith('--prompt-file=')) flags.promptFile = a.slice('--prompt-file='.length);
+    else if (a.startsWith('--')) { /* ignore unknown flag */ }
+    else pos.push(a);
+  }
+  return { flags, pos };
+}
+
+// Persona resolution order: --prompt > --prompt-file > piped stdin > "".
+function resolvePrompt(flags) {
+  if (typeof flags.prompt === 'string') return flags.prompt;
+  if (flags.promptFile) {
+    if (!existsSync(flags.promptFile)) throw Object.assign(new Error(`prompt file not found: ${flags.promptFile}`), { exitCode: 2 });
+    return readFileSync(flags.promptFile, 'utf8');
+  }
+  if (!process.stdin.isTTY) {
+    try { return readFileSync(0, 'utf8'); } catch { /* no stdin */ }
+  }
+  return '';
+}
+
+function usage(msg) { return Object.assign(new Error(msg), { exitCode: 2 }); }
+function out(s) { process.stdout.write(s + '\n'); }
+
+function printHelp() {
+  process.stdout.write(`agent-creator — author & manage custom cicy agents (persona + tools + model)
+
+A custom agent is a reusable cicy persona. Create one and it appears as its own
+agent type ("custom:<slug>") in the cicy-code "new worker" picker.
+
+Usage:
+  agent-creator list [--json]                 List custom agents
+  agent-creator tools [--json]                List selectable tool groups
+  agent-creator show <name> [--json]          Show one agent's persona/tools/model
+  agent-creator create <name> [opts]          Create / overwrite a custom agent
+  agent-creator delete <name> [--json]        Delete a custom agent
+
+create options:
+  --tools a,b        Comma-separated tool groups (see "agent-creator tools")
+  --model <id>       Default model for new instances (e.g. claude-opus-4-8)
+  --prompt "..."     Persona text; or --prompt-file <path>; or pipe via stdin
+
+Examples:
+  agent-creator tools
+  agent-creator create 销售助手 --tools coordinate,shell --model claude-opus-4-8 \\
+    --prompt "你是销售助手,主动热情,擅长挖掘需求。"
+  cat persona.md | agent-creator create 客服小美 --tools coordinate
+  agent-creator list
+  agent-creator delete 销售助手
+
+Auth: reads api_token from ~/cicy-ai/global.json (or CICY_API_TOKEN env).
+Server: http://127.0.0.1:${API_PORT} (override with CICY_API_PORT).
+`);
+}

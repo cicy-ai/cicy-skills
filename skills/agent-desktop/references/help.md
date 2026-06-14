@@ -8,6 +8,7 @@ agent-desktop ping [--client ID] [--json]
 agent-desktop exec <shell_cmd> [--client ID] [--json]
 agent-desktop exec-file <local_script> [--cwd DIR] [--client ID] [--json]
 agent-desktop sysinfo [--client ID] [--json]
+agent-desktop device-info [--client ID] [--json]   # deviceId + egress IP + IP region + system language
 agent-desktop rpc <tool> [json_args] [--client ID] [--json]
 agent-desktop --help / -h / help
 agent-desktop tools [--schema] [--names] [--tag <Tag>] [--static] [--client ID] [--json]

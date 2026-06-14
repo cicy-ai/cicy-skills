@@ -47,6 +47,7 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 30000);
       case 'exec':        await cmdExec(rest); return;
       case 'exec-file':   await cmdExecFile(rest); return;
       case 'sysinfo':     await cmdSysinfo(); return;
+      case 'device-info': await cmdDeviceInfo(); return;
       case 'rpc':         await cmdRPC(rest); return;
       default: bail(`unknown command: ${cmd}. Try agent-desktop --help.`, 2);
     }
@@ -335,6 +336,17 @@ async function cmdTools(rest) {
     console.log(`  ${t.name}${t.description ? ' — ' + t.description : ''}`);
     if (t.inputSchema) console.log(`      ${JSON.stringify(t.inputSchema)}`);
   }
+}
+
+// device-info — this cicy-desktop host's identity + detected network/locale:
+// deviceId + egress publicIp + ipRegion + systemLanguage (read from the
+// desktop's global.json deviceInfo via the get_device_info RPC). Empty/absent
+// for non-cicy-desktop clients.
+async function cmdDeviceInfo() {
+  let { result } = await rpc('get_device_info', {});
+  if (typeof result === 'string') { try { result = JSON.parse(result); } catch { /* keep raw */ } }
+  if (json) return ok(result);
+  console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
 }
 
 async function cmdRPC(args) {

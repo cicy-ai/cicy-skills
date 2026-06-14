@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
-// Subcommands: list / ls / tree / windows / capture / reply / msg / broadcast /
-//              get_online_agents / get_offline_agents / get_all_agents /
-//              send-keys / restart / clear / fork
+// Subcommands: list / ls / tree / windows / capture / reply / msg / msgs /
+//              broadcast / get_online_agents / get_offline_agents /
+//              get_all_agents / send-keys / restart / clear / fork
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -36,6 +36,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'capture':            await cmdCapture(r2, node); break;
       case 'reply':              await cmdReply(r2, node); break;
       case 'msg':                await cmdMsg(r2, node); break;
+      case 'msgs':               await cmdMsgs(r2, node); break;
       case 'broadcast':          await cmdBroadcast(r2, node); break;
       case 'get_online_agents': case 'get-online-agents':   await cmdAgents('online', node); break;
       case 'get_offline_agents': case 'get-offline-agents': await cmdAgents('offline', node); break;
@@ -62,7 +63,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|send-keys|restart|clear|fork> [args...] [--node NAME]\n'); }
+  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork> [args...] [--node NAME]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -200,24 +201,77 @@ function stampSender(text) {
 }
 
 async function cmdMsg(args, node) {
-  // Default ON: callback (reply routes back to the sender) + a 📮 [sender]
-  // prefix so the recipient knows who messaged. Disable callback with
-  // --no-callback.
+  // Default: callback ON (the message is tracked in the agent_messages store and
+  // its status is followed back to done/failed) + a 📮 [sender] prefix so the
+  // recipient knows who messaged. By default NO completion chat line is pushed —
+  // status lives in the queryable store (cicy-agent msgs), not the chat. Pass
+  // --notify to also get a one-line status wake-up when the receiver's turn ends
+  // (e.g. "🔔 [w-x] msg <id> → done"; suppressed if they already replied in-band).
+  // --no-callback is full fire-and-forget: no tracking, no push.
   let callback = true;
+  let notify = false;
   const filtered = [];
   for (const a of args) {
     if (a === '--callback' || a === '-c') callback = true;
     else if (a === '--no-callback' || a === '--no-cb') callback = false;
+    else if (a === '--notify') notify = true;
     else filtered.push(a);
   }
-  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--no-callback]'), { exitCode: 2 });
+  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--no-callback] [--notify]'), { exitCode: 2 });
   const { text, senderID } = stampSender(filtered.slice(1).join(' '));
   const payload = { pane_id: filtered[0], text };
   // callback_to only works with a sender id; outside a pane (no env) it's skipped.
   if (callback && senderID) payload.callback_to = senderID;
+  // notify only matters alongside a callback; it gates the completion chat push.
+  if (callback && senderID && notify) payload.notify = true;
   const data = await api('POST', '/api/tmux/send', payload, node);
   if (json) return ok(data);
-  console.log(typeof data === 'string' ? data : JSON.stringify(data));
+  // Echo the message id (when the send was recorded in the agent_messages store)
+  // so the sender can later `cicy-agent msgs` it by id. Falls back to the raw
+  // response for non-agent sends that carry no msg_id.
+  if (data && typeof data === 'object' && data.msg_id) {
+    console.log(`sent → ${filtered[0]}  msg_id=${data.msg_id}`);
+  } else {
+    console.log(typeof data === 'string' ? data : JSON.stringify(data));
+  }
+}
+
+// cicy-agent msgs [--from PANE] [--to PANE] [--status sent|done|failed] [--open]
+// Lists the cross-agent message link: who → who, status, and a one-line summary
+// of what the receiver actually did (q ⟶ answer, JOINed from history_turns).
+async function cmdMsgs(args, node) {
+  const q = new URLSearchParams();
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--from') q.set('from', args[++i] || '');
+    else if (a === '--to') q.set('to', args[++i] || '');
+    else if (a === '--status') q.set('status', args[++i] || '');
+    else if (a === '--open') q.set('open', '1');
+  }
+  const path = '/api/agent/messages' + (q.toString() ? `?${q.toString()}` : '');
+  const data = await api('GET', path, undefined, node);
+  if (json) return ok(data);
+  const msgs = data?.messages || data?.data?.messages || [];
+  if (!msgs.length) { console.log('(no messages)'); return; }
+  const trunc = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const shortP = (p) => String(p || '?').replace(':main.0', '');
+  for (const m of msgs) {
+    const head = `${shortP(m.from_pane)} → ${shortP(m.to_pane)}  [${m.status}]${m.replied ? ' replied' : ''}  id=${m.id}`;
+    const when = m.completed_at || m.created_at || '';
+    console.log(`${head}  ${when}`);
+    const body = trunc(m.text, 70);
+    if (body) console.log(`  msg: ${body}`);
+    // from-side: what the sender was doing when it dispatched (their turn).
+    if (m.from_turn && (m.from_turn.q || m.from_turn.a)) {
+      console.log(`  from-turn: ${trunc(m.from_turn.q, 50)} ⟶ ${trunc(m.from_turn.a, 60)}`);
+    } else if (m.from_turn_id) {
+      console.log(`  from-turn: ${m.from_conversation_id || '?'}/${m.from_turn_id}`);
+    }
+    // to-side: what the receiver actually did this turn.
+    if (m.turn && (m.turn.q || m.turn.a)) {
+      console.log(`  to-turn: ${trunc(m.turn.q, 50)} ⟶ ${trunc(m.turn.a, 60)}`);
+    }
+  }
 }
 
 // ── online / offline / broadcast (todo #81) ─────────────────────────────

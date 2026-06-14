@@ -16,7 +16,7 @@ Every RPC subcommand:
 | `current-active-agent-id`    | `exec_js`      | `exec_js_result`   |
 | `current-master-agent-id`    | `exec_js`      | `exec_js_result`   |
 | `send <type> <data> [exp]`   | `<type>`       | `<exp>` or any with matching `requestId` |
-| `clients`                    | (none — GET `/api/chat/clients`) | — |
+| `clients`                    | (none — GET `/api/chat/clients`) | per client: `client_id, isElectron, platform, user_agent, remote_addr, connected_at` + (cicy-desktop) `device_id, public_ip, ip_region, system_language` |
 | `helper-init`                | `exec_js` (auto-resolved web-* client; runs a single payload that returns `{lang, area, isElectron, os, arch, github, dockerhub}` — silent, JSON to stdout) | `exec_js_result` |
 
 ## Auth + endpoints
