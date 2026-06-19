@@ -84,18 +84,18 @@ skip-auth-prefixes:
 # workaround is to expose one listener per Chrome profile on a distinct
 # local port, then route each listener to its own proxy-group via IN-NAME.
 #
-# Convention: chrome-profile listeners start at port 18000 (chrome-profile-1 =
-# 18000, each new profile takes the next free port). Each listener needs an
+# Convention: chrome-profile listeners start at port 20001 (chrome-profile-1 =
+# 20001, each new profile takes the next free port). Each listener needs an
 # IN-NAME rule at the TOP of the rules list (before any IN-USER / IN-USER-PREFIX
 # rules — listener rules fire first; reaching auth-user rules is irreversible).
 listeners:
   - name: chrome-profile-1
     type: mixed
-    port: 18000
+    port: 20001
     listen: 127.0.0.1
   # - name: chrome-profile-2
   #   type: mixed
-  #   port: 18001
+  #   port: 20002
   #   listen: 127.0.0.1
 
 proxies:
@@ -626,7 +626,7 @@ async function cmdListeners() {
 
 // ── chrome-profile add / remove ─────────────────────────────────────────
 
-// Convention: chrome-profile listeners start at port 18000 (auto-pick next free from 18000).
+// Convention: chrome-profile listeners start at port 20001 (auto-pick next free from 20001).
 function cmdAddChromeProfile(args) {
   // cicy-mihomo add-chrome-profile <name> [--port N] [--upstream <proxy_or_group>] [--listen 127.0.0.1]
   if (args.length < 1) bail('Usage: cicy-mihomo add-chrome-profile <name> [--port N] [--upstream <proxy_or_group>] [--listen ADDR]', 2);
@@ -646,7 +646,7 @@ function cmdAddChromeProfile(args) {
   if (existing.some((l) => l.name === name)) bail(`listener '${name}' already exists`, 4);
   if (groupNames.includes(groupName)) bail(`proxy-group '${groupName}' already exists`, 4);
 
-  // pick port: explicit, else next available 18000+
+  // pick port: explicit, else next available 20001+
   let port;
   if (opts.port) {
     port = parseInt(opts.port, 10);
@@ -654,7 +654,7 @@ function cmdAddChromeProfile(args) {
     if (existing.some((l) => l.port === port)) bail(`port ${port} already used by listener '${existing.find((l) => l.port === port).name}'`, 4);
   } else {
     const used = new Set(existing.map((l) => l.port));
-    port = 18000;
+    port = 20001;
     while (used.has(port)) port++;
   }
 
@@ -1004,7 +1004,7 @@ function matchScalar(text, re) {
 //   listeners:
 //     - name: chrome-profile-1
 //       type: mixed
-//       port: 18000
+//       port: 20001
 //       listen: 127.0.0.1
 // and inline-flow style { name: ..., port: ..., ... } (best-effort).
 // Skips comment-only entries.
