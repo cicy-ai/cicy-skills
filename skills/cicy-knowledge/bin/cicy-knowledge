@@ -111,7 +111,7 @@ function readStdin() {
 //                              [--tags "a b"] [--source <kind>]
 //                              [--source-pane <pane>] [--origin <ref>]
 async function cmdAdd(args) {
-  const valueFlags = ['--body', '--body-file', '--tags', '--source', '--source-pane', '--origin'];
+  const valueFlags = ['--body', '--body-file', '--tags', '--summary', '--source', '--source-pane', '--origin'];
   const pos = positionals(args, valueFlags);
   const title = pos[0];
   if (!title) throw Object.assign(new Error('Usage: cicy-knowledge add "<title>" [--body <md>|--body-file f|stdin] [--tags] [--source]'), { exitCode: 2 });
@@ -130,6 +130,7 @@ async function cmdAdd(args) {
     title,
     body,
     tags: flag(args, '--tags'),
+    summary: flag(args, '--summary'),
     source_kind: flag(args, '--source') || 'manual',
     source_pane: flag(args, '--source-pane') || SELF,
     origin_ref: flag(args, '--origin'),
@@ -160,7 +161,9 @@ async function cmdRecall(args) {
   const kw = pos[0] || '';
   const tag = flag(args, '--tag');
   if (!kw && !tag) throw Object.assign(new Error('Usage: cicy-knowledge recall <kw> [--tag T]'), { exitCode: 2 });
-  const q = new URLSearchParams({ status: 'canon' });
+  // view=index → pointers only (id/title/tags/summary, NO body) so recall over a
+  // large KB stays small. Read full content of the few hits with `get <id>`.
+  const q = new URLSearchParams({ status: 'canon', view: 'index' });
   if (kw) q.set('q', kw);
   if (tag) q.set('tag', tag);
   const data = await api('GET', `/api/knowledge?${q.toString()}`);
@@ -168,6 +171,7 @@ async function cmdRecall(args) {
   const rows = data?.knowledge || [];
   if (!rows.length) { console.log('(no canon knowledge matched)'); return; }
   printRows(rows);
+  console.log('\n(↑ 仅目录;看正文用: cicy-knowledge get <id>)');
 }
 
 // cicy-knowledge get <id>
@@ -215,6 +219,7 @@ function printRows(rows) {
     const where = k.status === 'canon' && k.domain ? `canon:${k.domain}` : k.status;
     const tags = k.tags ? `  #${String(k.tags).trim().replace(/[,\s]+/g, ' #')}` : '';
     console.log(`${k.id}  [${where}]  ${trunc(k.title, 60)}${tags}`);
+    if (k.summary) console.log(`    └ ${trunc(k.summary, 100)}`);
   }
 }
 

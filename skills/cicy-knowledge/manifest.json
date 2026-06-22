@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-knowledge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "title": "Cicy Knowledge",
   "description": "Team knowledge Layer 2 store CLI over cicy-code's /api/knowledge: add/list/get/recall/promote/reject/supersede. Recall is keyword+tag over canon (no vector RAG).",
   "category": "agent",
