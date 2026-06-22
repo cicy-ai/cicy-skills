@@ -1,6 +1,6 @@
 ---
 name: email
-description: Self-hosted email over standard protocols — send via SMTP, receive via IMAP or POP3. Subcommands: config / status / send / list / read.
+description: Self-hosted email over standard protocols: send via SMTP, receive via IMAP or POP3. Subcommands: config / status / send / list / read.
 ---
 
 # Email (SMTP / IMAP / POP3)

@@ -1,6 +1,6 @@
 ---
 name: globalApiToken
-description: Show or refresh the api_token in ~/cicy-ai/global.json on this host.
+description: Show or refresh the api_token in ~/cicy-ai/global.json on this host. Refresh delivers the new token by email (SMTP) since it is never stored off-host.
 ---
 
 # Global API Token
