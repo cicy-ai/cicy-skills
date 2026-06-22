@@ -111,22 +111,32 @@ proxies:
 proxy-groups:
   # default_proxy_group is the routing target for all rules; it selects the
   # default_proxy node (swap the selection to switch the whole egress at once).
+  # DIRECT is kept as a fallback so traffic never hard-fails before a real
+  # upstream is configured.
   - name: default_proxy_group
     type: select
     proxies:
       - default_proxy
-  # Per-profile groups. Pin a single upstream or a select between several:
-  # - name: chrome-profile-1-group
-  #   type: select
-  #   proxies: [DIRECT]
+      - DIRECT
+  # chrome-profile-1-group is the per-profile egress for the chrome-profile-1
+  # listener (routed by the IN-NAME rule below) — a switchable select over the
+  # configured nodes + DIRECT, so each chrome profile can have its own exit
+  # independent of default_proxy_group. More profiles are added by
+  # 'cicy-mihomo add-chrome-profile' (adds a chrome-profile-N listener + its own
+  # chrome-profile-N-group + the matching IN-NAME rule).
+  - name: chrome-profile-1-group
+    type: select
+    proxies:
+      - default_proxy
+      - DIRECT
   # - name: chrome-profile-2-group
   #   type: select
-  #   proxies: [DIRECT]
+  #   proxies: [default_proxy, DIRECT]
 
 rules:
   # IN-NAME rules MUST be first — listener-named connections never reach
   # IN-USER / IN-USER-PREFIX once IN-NAME matches.
-  - IN-NAME,chrome-profile-1,default_proxy_group
+  - IN-NAME,chrome-profile-1,chrome-profile-1-group
   # Localhost is trusted: in-container agents and the MITM egress (which dials
   # mihomo anonymously, no w- username) are routed to the egress group here.
   - SRC-IP-CIDR,127.0.0.1/32,default_proxy_group
@@ -662,8 +672,19 @@ function cmdAddChromeProfile(args) {
   //   1. insert listener block under listeners:
   //   2. insert proxy-group block under proxy-groups:
   //   3. insert IN-NAME rule at the TOP of rules:
+  // Members of the per-profile select group: the chosen upstream FIRST (becomes
+  // the active selection), then every configured node, then DIRECT. This makes
+  // the group a real switchable selector (like default_proxy_group) instead of a
+  // single pinned upstream — so the UI dropdown can switch the profile to any
+  // node and always offers a DIRECT fallback. Deduped, order preserved.
+  const groupMembers = [];
+  for (const m of [upstream, ...parseProxyNames(text), 'DIRECT']) {
+    if (m && !groupMembers.includes(m)) groupMembers.push(m);
+  }
+  const groupProxiesYaml = groupMembers.map((m) => `      - ${m}`).join('\n');
+
   let updated = appendUnderTopKey(text, 'listeners', `  - name: ${name}\n    type: mixed\n    port: ${port}\n    listen: ${listen}\n`);
-  updated = appendUnderTopKey(updated, 'proxy-groups', `  - name: ${groupName}\n    type: select\n    proxies:\n      - ${upstream}\n`);
+  updated = appendUnderTopKey(updated, 'proxy-groups', `  - name: ${groupName}\n    type: select\n    proxies:\n${groupProxiesYaml}\n`);
   updated = insertFirstRuleEntry(updated, `  - IN-NAME,${name},${groupName}\n`);
 
   if (updated === text) bail('failed to update yaml — no listeners: / proxy-groups: / rules: top-level keys found', 4);

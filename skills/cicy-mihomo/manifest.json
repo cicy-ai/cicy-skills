@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-mihomo",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "title": "Cicy Mihomo Proxy",
   "description": "Manage the local Cicy Mihomo proxy with start/stop/reload/status/logs, node speed-testing, and per-Chrome-profile listeners (multi-port + IN-NAME rules).",
   "category": "network",
@@ -43,8 +43,8 @@
   },
   "i18n": {
     "zh-CN": {
-      "title": "Cicy Mihomo \u4ee3\u7406",
-      "description": "\u7ba1\u7406\u672c\u5730 Cicy Mihomo (mihomo / clash-meta fork) \u4ee3\u7406\uff0c\u5305\u542b start/stop/reload/status/logs\u3001\u8282\u70b9\u6d4b\u901f\u548c\u6bcf Chrome Profile \u72ec\u7acb\u76d1\u542c\u7aef\u53e3\uff08\u591a\u7aef\u53e3 + IN-NAME \u89c4\u5219\uff09\u3002"
+      "title": "Cicy Mihomo 代理",
+      "description": "管理本地 Cicy Mihomo (mihomo / clash-meta fork) 代理，包含 start/stop/reload/status/logs、节点测速和每 Chrome Profile 独立监听端口（多端口 + IN-NAME 规则）。"
     }
   },
   "tools": [
