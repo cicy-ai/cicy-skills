@@ -1,5 +1,5 @@
 ---
-name: globalApiToken
+name: global-api-token
 description: Show or refresh the api_token in ~/cicy-ai/global.json on this host. Refresh delivers the new token by email (SMTP) since it is never stored off-host.
 ---
 
@@ -24,11 +24,11 @@ Do **not** use this skill for:
 ## Quick start
 
 ```sh
-globalApiToken show              # print current token (plain text)
-globalApiToken show --json       # JSON output
-globalApiToken refresh           # rotate AND email the new token (requires email skill)
-globalApiToken refresh --to me@example.com
-globalApiToken refresh --no-email   # rotate without emailing (may lock you out)
+global-api-token show              # print current token (plain text)
+global-api-token show --json       # JSON output
+global-api-token refresh           # rotate AND email the new token (requires email skill)
+global-api-token refresh --to me@example.com
+global-api-token refresh --no-email   # rotate without emailing (may lock you out)
 ```
 
 ## Refresh delivers the new token by email

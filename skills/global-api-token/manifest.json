@@ -1,6 +1,6 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
-  "name": "globalApiToken",
+  "name": "global-api-token",
   "version": "1.1.0",
   "title": "Global API Token",
   "description": "Show or refresh the api_token in ~/cicy-ai/global.json on this host. Refresh delivers the new token by email (SMTP) since it is never stored off-host.",
@@ -11,14 +11,14 @@
     "config"
   ],
   "author": "cicy-ai",
-  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/globalApiToken",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/global-api-token",
   "license": "MIT",
   "runtime": {
     "node": ">=18"
   },
   "system_requirements": [],
   "npm_dependencies": false,
-  "entry": "bin/globalApiToken",
+  "entry": "bin/global-api-token",
   "config": {
     "path": "~/cicy-ai/global.json",
     "permissions": "0600",
@@ -47,13 +47,13 @@
   },
   "tools": [
     {
-      "name": "globalApiToken show",
-      "example": "globalApiToken show",
+      "name": "global-api-token show",
+      "example": "global-api-token show",
       "description": "Show current cicy-code API token"
     },
     {
-      "name": "globalApiToken refresh",
-      "example": "globalApiToken refresh --to me@example.com",
+      "name": "global-api-token refresh",
+      "example": "global-api-token refresh --to me@example.com",
       "description": "Rotate the API token and email the new one (requires the email skill; --no-email to skip)"
     }
   ]

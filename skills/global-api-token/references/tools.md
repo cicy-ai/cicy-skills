@@ -1,4 +1,4 @@
-# globalApiToken — tools
+# global-api-token — tools
 
 For agents: where this skill reads/writes and what it returns.
 

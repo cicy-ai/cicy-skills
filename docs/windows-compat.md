@@ -38,7 +38,7 @@
 
 agent-chrome, agent-desktop, agent-editor, agent-electron, agent-identity*,
 agent-summary*, agent-webpage, artifact, cicy-agent, cicy-todo, cping, eng,
-gemini-ask, globalApiToken, google, gpt-chat, telegram-web, tg, cicy-skill-spec*, cicy-team*
+gemini-ask, global-api-token, google, gpt-chat, telegram-web, tg, cicy-skill-spec*, cicy-team*
 
 > *agent-identity:opencode/kiro 的 unix 路径(~/.local/share、~/.config)在 win 上自然报「not installed」,优雅降级,后续真有 win 用户再补 %LOCALAPPDATA% 路径。
 > *agent-summary:symlink 降级见 §1。

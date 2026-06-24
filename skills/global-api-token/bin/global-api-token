@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// globalApiToken — show / refresh ~/cicy-ai/global.json api_token.
+// global-api-token — show / refresh ~/cicy-ai/global.json api_token.
 // Zero npm dependencies. Pure ESM. Node 18+.
 
 import { readFileSync, writeFileSync, existsSync, chmodSync } from 'node:fs';
@@ -18,7 +18,7 @@ if (argv.includes('--help') || argv.includes('-h') || argv[0] === 'help') {
   try {
     process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8'));
   } catch {
-    process.stdout.write('globalApiToken <show|refresh> [--json]\n');
+    process.stdout.write('global-api-token <show|refresh> [--json]\n');
   }
   process.exit(0);
 }
@@ -35,7 +35,7 @@ function emit(obj, ok = true) {
 
 function bail(code, message, exit = 1) {
   if (json) process.stdout.write(JSON.stringify({ ok: false, error: { code, message } }) + '\n');
-  else process.stderr.write(`globalApiToken: ${message}\n`);
+  else process.stderr.write(`global-api-token: ${message}\n`);
   process.exit(exit);
 }
 

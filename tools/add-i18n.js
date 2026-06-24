@@ -75,7 +75,7 @@ const TRANSLATIONS = {
     title: 'Gemini 提问',
     description: '通过 desktop_event WebSocket RPC 向已连接的 cicy-desktop 窗口发送 Gemini 提问并获取回答。',
   },
-  'globalApiToken': {
+  'global-api-token': {
     title: '全局 API Token',
     description: '查看或刷新 ~/cicy-ai/global.json 中的 api_token，Token 不会明文暴露给 Agent。',
   },

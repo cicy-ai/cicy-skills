@@ -1,10 +1,10 @@
-# globalApiToken — help
+# global-api-token — help
 
 ## Synopsis
 
 ```
-globalApiToken <show|refresh> [--json]
-globalApiToken --help
+global-api-token <show|refresh> [--json]
+global-api-token --help
 ```
 
 ## Commands
@@ -47,13 +47,13 @@ rotates (your current token keeps working).
 
 ```bash
 # print token
-globalApiToken show
+global-api-token show
 
 # get JSON
-globalApiToken show --json
+global-api-token show --json
 # → {"ok":true,"data":"abc123..."}
 
 # rotate
-globalApiToken refresh --json
+global-api-token refresh --json
 # → {"ok":true,"data":{"api_token":"...","path":"...","refreshed_at":"..."}}
 ```

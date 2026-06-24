@@ -1,8 +1,8 @@
-# globalApiToken
+# global-api-token
 
 > Show or rotate the api_token in `~/cicy-ai/global.json`.
 
-Source-only Node.js. Read [`bin/globalApiToken`](./bin/globalApiToken) before
+Source-only Node.js. Read [`bin/global-api-token`](./bin/global-api-token) before
 installing — it's 75 lines.
 
 ## What it does
@@ -17,17 +17,17 @@ manager API on `127.0.0.1:8008`.
 ## Install
 
 ```bash
-cicy-code skill install globalApiToken
+cicy-code skill install global-api-token
 ```
 
 ## Usage
 
 ```bash
-globalApiToken show
-globalApiToken show --json
+global-api-token show
+global-api-token show --json
 
-globalApiToken refresh
-globalApiToken refresh --json
+global-api-token refresh
+global-api-token refresh --json
 ```
 
 ## Configuration
