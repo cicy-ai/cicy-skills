@@ -1,0 +1,69 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cicy-knowledge",
+  "version": "0.4.0",
+  "title": "Cicy Knowledge",
+  "description": "Team knowledge Layer 2 store CLI over cicy-code's /api/knowledge: add/list/get/recall/promote/reject/supersede + specialist (pin the governing pane). Recall is keyword+tag over canon (no vector RAG).",
+  "category": "agent",
+  "tags": [
+    "knowledge",
+    "memory",
+    "agent",
+    "cicy"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-knowledge",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/cicy-knowledge",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/global.json",
+    "secret_fields": [
+      "api_token"
+    ]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "tools": [
+    {
+      "name": "knowledge add",
+      "example": "cicy-knowledge add \"<title>\" --body <md> [--tags] [--source]",
+      "description": "Add a new pending knowledge entry (markdown body via --body/--body-file/stdin). Returns its id."
+    },
+    {
+      "name": "knowledge list",
+      "example": "cicy-knowledge list [--status canon|pending] [--tag T] [-q kw]",
+      "description": "List knowledge filtered by status / tag / keyword."
+    },
+    {
+      "name": "knowledge recall",
+      "example": "cicy-knowledge recall <kw> [--tag T]",
+      "description": "Keyword/tag recall over CANON entries only (exact-ish match over title+tags+body; no vector RAG)."
+    },
+    {
+      "name": "knowledge govern",
+      "example": "cicy-knowledge promote <id> | reject <id> | supersede <old> <new>",
+      "description": "Governance transitions used by the 知识专员: promote→canon, reject, or supersede an entry with a newer one."
+    },
+    {
+      "name": "knowledge specialist",
+      "example": "cicy-knowledge specialist [<pane>]",
+      "description": "Show or pin which pane is the 知识专员 (receives memory-hook briefs). Config-file backed (global.json), not a DB role query; defaults to the master pane w-1001."
+    }
+  ]
+}
