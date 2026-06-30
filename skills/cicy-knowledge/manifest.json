@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-knowledge",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "title": "Cicy Knowledge",
-  "description": "Team knowledge Layer 2 store CLI over cicy-code's /api/knowledge: add/list/get/recall/promote/reject/supersede + specialist (pin the governing pane). Recall is keyword+tag over canon (no vector RAG).",
+  "description": "Team knowledge store CLI over cicy-code /api/knowledge: add/list/get/recall/promote/reject/supersede + draft/deprecate maturity flags + specialist pin. Recall = keyword+tag over canon, no vector RAG.",
   "category": "agent",
   "tags": [
     "knowledge",
@@ -59,6 +59,11 @@
       "name": "knowledge govern",
       "example": "cicy-knowledge promote <id> | reject <id> | supersede <old> <new>",
       "description": "Governance transitions used by the 知识专员: promote→canon, reject, or supersede an entry with a newer one."
+    },
+    {
+      "name": "knowledge maturity",
+      "example": "cicy-knowledge add --draft \"<title>\" | draft <id> | deprecate <id> | restore <id>",
+      "description": "Maturity flags separate from location: add --draft lands in _drafts/ (未成稿); draft/deprecate mark an existing entry in place so it drops out of canon recall; restore clears the flag."
     },
     {
       "name": "knowledge specialist",

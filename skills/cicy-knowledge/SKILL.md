@@ -1,6 +1,6 @@
 ---
 name: cicy-knowledge
-description: Team knowledge Layer 2 store CLI over cicy-code's /api/knowledge: add/list/get/recall/promote/reject/supersede + specialist (pin the governing pane). Recall is keyword+tag over canon (no vector RAG).
+description: Team knowledge store CLI over cicy-code /api/knowledge: add/list/get/recall/promote/reject/supersede + draft/deprecate maturity flags + specialist pin. Recall = keyword+tag over canon, no vector RAG.
 ---
 
 # Cicy Knowledge

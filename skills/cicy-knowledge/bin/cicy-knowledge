@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // cicy-knowledge — team knowledge Layer 2 store CLI. Talks to cicy-code's
 // /api/knowledge endpoints (token-authed). Zero deps, pure ESM, Node 18+.
-// Subcommands: add / list / get / recall / promote / reject / supersede
+// Subcommands: add / list / get / recall / promote / reject / supersede /
+//              draft / deprecate / restore / specialist
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -33,6 +34,9 @@ const SELF = (process.env.X_AGENT_SHORT_ID || '').trim();
       case 'promote':   await cmdTransition(rest, 'promote'); break;
       case 'reject':    await cmdTransition(rest, 'reject'); break;
       case 'supersede': await cmdSupersede(rest); break;
+      case 'draft':     await cmdSetStatus(rest, 'draft'); break;
+      case 'deprecate': await cmdSetStatus(rest, 'deprecated'); break;
+      case 'restore':   await cmdSetStatus(rest, ''); break;
       case 'specialist': await cmdSpecialist(rest); break;
       default: bail(`unknown command: ${cmd}. Try cicy-knowledge --help.`, 2);
     }
@@ -52,7 +56,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-knowledge <add|list|get|recall|promote|reject|supersede|specialist> [args...]\n'); }
+  catch { process.stdout.write('Usage: cicy-knowledge <add|list|get|recall|promote|reject|supersede|draft|deprecate|restore|specialist> [args...]\n'); }
 }
 
 function loadToken() {
@@ -110,7 +114,9 @@ function readStdin() {
 
 // cicy-knowledge add "<title>" [--body <md> | --body-file <f> | stdin]
 //                              [--tags "a b"] [--source <kind>]
-//                              [--source-pane <pane>] [--origin <ref>]
+//                              [--source-pane <pane>] [--origin <ref>] [--draft]
+// --draft → lands in _drafts/ as 未成稿 (recall won't serve it; specialist won't
+// govern it) instead of the default _inbox/ pending proposal.
 async function cmdAdd(args) {
   const valueFlags = ['--body', '--body-file', '--tags', '--summary', '--source', '--source-pane', '--origin'];
   const pos = positionals(args, valueFlags);
@@ -127,6 +133,7 @@ async function cmdAdd(args) {
   body = (body || '').trim();
   if (!body) throw Object.assign(new Error('body required (use --body, --body-file, or pipe via stdin)'), { exitCode: 2 });
 
+  const asDraft = args.includes('--draft');
   const payload = {
     title,
     body,
@@ -136,9 +143,22 @@ async function cmdAdd(args) {
     source_pane: flag(args, '--source-pane') || SELF,
     origin_ref: flag(args, '--origin'),
   };
+  if (asDraft) payload.status = 'draft';
   const data = await api('POST', '/api/knowledge', payload);
   if (json) return ok(data);
-  console.log(`added pending knowledge: id=${data?.id}`);
+  console.log(`added ${data?.status || 'pending'} knowledge: id=${data?.id}`);
+}
+
+// cicy-knowledge draft <id>      — mark an existing entry 未成稿 (in place, no move)
+// cicy-knowledge deprecate <id>  — mark it 已废弃 (drops out of canon recall)
+// cicy-knowledge restore <id>    — clear the maturity flag (back to its folder status)
+async function cmdSetStatus(args, status) {
+  const id = positionals(args)[0];
+  const verb = status === 'draft' ? 'draft' : status === 'deprecated' ? 'deprecate' : 'restore';
+  if (!id) throw Object.assign(new Error(`Usage: cicy-knowledge ${verb} <id>`), { exitCode: 2 });
+  const data = await api('PATCH', `/api/knowledge/${encodeURIComponent(id)}`, { action: 'status', status, verified_by: SELF });
+  if (json) return ok(data);
+  console.log(`${id} → ${data?.status}`);
 }
 
 // cicy-knowledge list [--status S] [--tag T] [-q kw]
@@ -244,7 +264,7 @@ function printOne(k) {
   if (!k || !k.id) { console.log('(not found)'); return; }
   console.log(`id:        ${k.id}`);
   console.log(`title:     ${k.title}`);
-  console.log(`status:    ${k.status}${k.domain ? `  (domain: ${k.domain})` : ''}`);
+  console.log(`status:    ${k.status}${k.domain ? `  (domain: ${k.domain})` : ''}${k.declared ? `  [in-place flag: ${k.declared}]` : ''}`);
   if (k.tags) console.log(`tags:      ${k.tags}`);
   if (k.source_kind) console.log(`source:    ${k.source_kind}${k.source_pane ? ` (${k.source_pane})` : ''}`);
   if (k.origin_ref) console.log(`origin:    ${k.origin_ref}`);
