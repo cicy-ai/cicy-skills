@@ -1,0 +1,136 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cicy-audit-policy",
+  "version": "1.1.0",
+  "title": "Audit Policy Admin",
+  "description": "Configure the cicy AI-traffic audit policy and analyse its log via /api/audit/*: inspect, tighten, loosen or roll back rules, tune false positives, read events, snapshots, stats to adjudicate hits.",
+  "category": "ai",
+  "tags": [
+    "audit",
+    "policy",
+    "security",
+    "redaction",
+    "compliance"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-audit-policy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "git"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/cicy-audit-policy",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/audit/policy.json",
+    "secret_fields": []
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "审计策略管理",
+      "description": "用自然语言审视、收紧、放松或回滚 cicy 的 AI 流量审计策略(\"脱敏银行卡号\"、\"让计费 agent 看到 SSN\"、\"我现在跑哪些规则?\"、\"撤销上一次改动\")。读取 ~/cicy-ai/audit/policy.json,提出 patch,确认后经 /api/audit/policy 写回 —— 和 UI 审计台同一条写入路径,运行中的流水线会热重载。"
+    }
+  },
+  "tools": [
+    {
+      "name": "show",
+      "example": "cicy-audit-policy show",
+      "description": "Print the full policy JSON"
+    },
+    {
+      "name": "summary",
+      "example": "cicy-audit-policy summary",
+      "description": "One-screen human view: enabled? fail-mode? overrides? allow-list? preventive?"
+    },
+    {
+      "name": "patch",
+      "example": "cicy-audit-policy patch '{\"preventive\":{\"enabled\":true}}'",
+      "description": "Deep-merge a JSON object into the policy and write it back"
+    },
+    {
+      "name": "set",
+      "example": "cicy-audit-policy set fail_mode closed",
+      "description": "Set one field by dot-path (value parsed as JSON, else string)"
+    },
+    {
+      "name": "unset",
+      "example": "cicy-audit-policy unset preventive.enabled",
+      "description": "Remove one field by dot-path"
+    },
+    {
+      "name": "rule-test",
+      "example": "cicy-audit-policy rule-test regex '(?i)bearer\\s+[a-z0-9._-]{20,}' 'Authorization: Bearer abc...'",
+      "description": "Dry-run a matcher (regex|js) against sample text before adding the rule — confirm it hits and check for false positives"
+    },
+    {
+      "name": "effective",
+      "example": "cicy-audit-policy effective w-106",
+      "description": "Print the merged policy actually in force for one agent (global ⊕ per-agent override)"
+    },
+    {
+      "name": "events",
+      "example": "cicy-audit-policy events --severity high,critical --direction outbound --limit 20",
+      "description": "List matched audit events, filtered by --severity/--agent/--direction/--rule (or a raw query string); --json for full objects"
+    },
+    {
+      "name": "event",
+      "example": "cicy-audit-policy event evt_abc123",
+      "description": "Full detail of a single audit event by id"
+    },
+    {
+      "name": "stats",
+      "example": "cicy-audit-policy stats",
+      "description": "Hit aggregation by rule / agent / severity — find noisy rules or repeat offenders"
+    },
+    {
+      "name": "snapshot",
+      "example": "cicy-audit-policy snapshot <meta.snapshot_ref>",
+      "description": "Fetch the raw, un-redacted forensic snapshot referenced by an event (evidence; do not leak)"
+    },
+    {
+      "name": "agents",
+      "example": "cicy-audit-policy agents",
+      "description": "List agents that have audit events"
+    },
+    {
+      "name": "recent",
+      "example": "cicy-audit-policy recent --rule secret.bearer_token --limit 5",
+      "description": "Compact recent event list, optionally filtered by rule/agent"
+    },
+    {
+      "name": "allowlist",
+      "example": "cicy-audit-policy allowlist",
+      "description": "Show the allow-list (content_hashes / paths / agents) that suppresses false-positive findings"
+    },
+    {
+      "name": "allowlist-add",
+      "example": "cicy-audit-policy allowlist-add sha256:<hash> \"known FP — internal test fixture\"",
+      "description": "Allow-list a finding by its content sha256 so identical content stops alerting"
+    },
+    {
+      "name": "allowlist-remove",
+      "example": "cicy-audit-policy allowlist-remove content_hash sha256:<hash>",
+      "description": "Remove one allow-list entry (category = content_hash | path | agent)"
+    },
+    {
+      "name": "history",
+      "example": "cicy-audit-policy history",
+      "description": "Show the git log of ~/cicy-ai/audit (autonomy auto-commits; manual edits do not)"
+    }
+  ]
+}
