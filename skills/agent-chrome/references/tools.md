@@ -4,10 +4,15 @@
 
 | subcmd                  | tool                          | args                                |
 |-------------------------|-------------------------------|-------------------------------------|
-| `profiles [--all] [--with <svc>]` | `chrome_list_profiles` | `{ includeHidden }` (`--with` filters client-side) |
-| `profile <idx>`         | `chrome_get_profile`          | `{ accountIdx }`                    |
+| `list` / `profiles [--all] [--with <svc>]` | `chrome_list_profiles` | `{ includeHidden }` (`--with` filters client-side) |
+| `profile <id>`          | `chrome_get_profile`          | `{ accountIdx }`                    |
 | `add`                   | `chrome_add_profile`          | `{ gmail?, orgPath?, launchAfterCreate? }` |
-| `proxy <idx> <url>`     | `chrome_set_profile_proxy`    | `{ accountIdx, proxy }`             |
+| `proxy <id> <url>`      | `chrome_set_profile_proxy`    | `{ accountIdx, proxy }` — persists `{url,enabled}` |
+| `login set <id> --name N ...` | `chrome_profile_login_set` | rich: `{ accountIdx, name, url?, username?, email?, mobile?, twofa?, secondEmail?, note? }` |
+| `login rm <id> <name>`  | `chrome_profile_login_rm`     | `{ accountIdx, name }`              |
+| `logins <id>`           | `chrome_profile_logins`       | `{ accountIdx }`                    |
+| `detect-logins <id>`    | `chrome_detect_logins`        | `{ accountIdx }` — infer signed-in sites from cookies |
+| `probe-ip <id>`         | `chrome_probe_ip`             | `{ accountIdx }` — egress IP+area via proxy (api.myip.com), stored |
 | `note <idx> <text>`     | `chrome_set_profile_meta`     | `{ accountIdx, note }`              |
 | `account <idx> <svc> <id>` | `chrome_set_profile_meta`  | `{ accountIdx, accounts:{[svc]:{account:id}} }` |
 | `password <idx> <svc> <pwd>` | `chrome_set_profile_meta` | `{ accountIdx, accounts:{[svc]:{password}} }` |
@@ -32,9 +37,9 @@ push `desktop_event { rpc_call, tool, args, requestId }`, await
 
 ```json
 {
-  "account_1": {
+  "profile_1": {
     "gmail": "x@y.com",
-    "userDataDir": "~/chrome/account_1",
+    "userDataDir": "~/chrome/profile_1",
     "debuggerPort": 11001,
     "proxy": "socks5://127.0.0.1:1080",
     "note": "main work identity",

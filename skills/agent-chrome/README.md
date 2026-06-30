@@ -1,6 +1,6 @@
 # agent-chrome
 
-> Source-only Node.js, 247 LOC. Read [`bin/agent-chrome`](./bin/agent-chrome).
+> Source-only Node.js. Read [`bin/agent-chrome`](./bin/agent-chrome).
 > Requires Node **22+** for native WebSocket.
 
 Per-profile system Chrome control on a connected cicy-desktop host. Each
@@ -26,6 +26,13 @@ agent-chrome targets --idx 1
 agent-chrome cdp Page.navigate '{"url":"https://example.com"}' --idx 1
 agent-chrome gmails
 agent-chrome github
+
+# Probe egress IP, infer logins, record a rich login
+agent-chrome probe-ip 1                     # egress IP+area via the proxy (api.myip.com, stored)
+agent-chrome detect-logins 1                # infer signed-in sites from cookies
+agent-chrome login set 1 --name 抖音 --username u --email e@x.com
+agent-chrome logins 1
+
 agent-chrome --client mcp-1 ...
 ```
 

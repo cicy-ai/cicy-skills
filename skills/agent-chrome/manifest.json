@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-chrome",
-  "version": "1.4.0",
+  "version": "1.4.4",
   "title": "Agent Chrome",
   "description": "Control system Chrome on a connected cicy-desktop host with per-profile proxy support. CDP + ~/cicy-ai/db/chrome.json multi-profile via desktop_event RPC.",
   "category": "dev",
@@ -43,64 +43,119 @@
   "i18n": {
     "zh-CN": {
       "title": "Agent Chrome",
-      "description": "\u901a\u8fc7 cicy-desktop \u63a7\u5236\u672c\u673a Chrome\uff0c\u652f\u6301\u591a Profile \u72ec\u7acb\u4ee3\u7406\u3002\u4f7f\u7528 CDP + ~/cicy-ai/db/chrome.json\u3002"
+      "description": "通过 cicy-desktop 控制本机 Chrome，支持多 Profile 独立代理。使用 CDP + ~/cicy-ai/db/chrome.json。"
     }
   },
   "tools": [
     {
-      "name": "screenshot",
-      "example": "agent-chrome screenshot",
-      "description": "Take a screenshot of the active Chrome tab"
-    },
-    {
-      "name": "navigate",
-      "example": "agent-chrome navigate https://example.com",
-      "description": "Navigate Chrome to a URL"
-    },
-    {
-      "name": "eval",
-      "example": "agent-chrome eval 'document.title'",
-      "description": "Run JavaScript in the active Chrome tab via CDP"
+      "name": "list",
+      "example": "agent-chrome list",
+      "description": "列出所有 Chrome profile(统一 list,等价 profiles)"
     },
     {
       "name": "profiles",
-      "example": "agent-chrome profiles --with github",
-      "description": "List Chrome profiles; --with <service> filters to profiles tagged with / signed into that service"
+      "example": "agent-chrome profiles [--all] [--with <service>]",
+      "description": "列出 profile,可按服务(github/gmail 等)过滤"
     },
     {
-      "name": "account",
-      "example": "agent-chrome account 3 github octocat",
-      "description": "Record the login id a profile holds for a service"
+      "name": "profile",
+      "example": "agent-chrome profile <idx>",
+      "description": "看单个 profile(id = chrome-N 或 N)"
     },
     {
-      "name": "password",
-      "example": "agent-chrome password 3 github 's3cr3t'",
-      "description": "Record the password for a profile's service account"
+      "name": "add",
+      "example": "agent-chrome add [--gmail x] [--org-path p] [--launch]",
+      "description": "新建一个 Chrome profile"
     },
     {
-      "name": "2fa",
-      "example": "agent-chrome 2fa 3 github JBSWY3DPEHPK3PXP",
-      "description": "Record the TOTP (2FA) secret for a profile's service account"
-    },
-    {
-      "name": "otp",
-      "example": "agent-chrome otp 3 github",
-      "description": "Generate the current 2FA code from the stored TOTP secret"
-    },
-    {
-      "name": "accounts",
-      "example": "agent-chrome accounts 3",
-      "description": "List a profile's service accounts (password/2FA masked unless --show)"
+      "name": "proxy",
+      "example": "agent-chrome proxy <id> <url|\"\">",
+      "description": "设置/清除该 profile 代理(留空清除,下次启动生效)"
     },
     {
       "name": "note",
-      "example": "agent-chrome note 3 \"main work identity\"",
-      "description": "Set a free-form note on a profile"
+      "example": "agent-chrome note <idx> <text>",
+      "description": "设置/清除自由文本备注(空文本清除)"
+    },
+    {
+      "name": "account",
+      "example": "agent-chrome account <idx> <service> <id>",
+      "description": "登记某服务的账户 id"
+    },
+    {
+      "name": "password",
+      "example": "agent-chrome password <idx> <service> <pw>",
+      "description": "存某服务的密码"
+    },
+    {
+      "name": "2fa",
+      "example": "agent-chrome 2fa <idx> <service> <base32-secret>",
+      "description": "存某服务的 TOTP(2FA)密钥"
+    },
+    {
+      "name": "otp",
+      "example": "agent-chrome otp <idx> <service>",
+      "description": "用存的密钥生成当前 TOTP 验证码"
+    },
+    {
+      "name": "accounts",
+      "example": "agent-chrome accounts <idx> [--show]",
+      "description": "列出该 profile 的账户(密码/TOTP 默认遮罩)"
     },
     {
       "name": "ip",
-      "example": "agent-chrome ip 3",
-      "description": "Show the profile's egress IP + country (CDP fetch through its proxy)"
+      "example": "agent-chrome ip <idx>",
+      "description": "从该 profile 内部抓 IP 信息(反映代理出口;profile 须在运行)"
+    },
+    {
+      "name": "launch",
+      "example": "agent-chrome launch <idx> [url]",
+      "description": "启动该 Chrome profile(独立进程 + 调试端口)"
+    },
+    {
+      "name": "close",
+      "example": "agent-chrome close <idx>",
+      "description": "关闭该 Chrome profile"
+    },
+    {
+      "name": "targets",
+      "example": "agent-chrome targets <idx>",
+      "description": "列出该 profile 的 CDP target(标签页)"
+    },
+    {
+      "name": "cdp",
+      "example": "agent-chrome cdp <idx> <Method> [paramsJson] [--target T]",
+      "description": "对该 profile 发 CDP(Page.navigate/Runtime.evaluate/Input.* 等)"
+    },
+    {
+      "name": "gmails",
+      "example": "agent-chrome gmails",
+      "description": "列出所有 profile 的 gmail"
+    },
+    {
+      "name": "github",
+      "example": "agent-chrome profiles --with github",
+      "description": "列出登录了 github 的 profile(过滤糖)"
+    },
+    {
+      "name": "detect-logins",
+      "example": "agent-chrome detect-logins <idx>",
+      "description": "按 cookie 推断该 profile 当前登录了哪些站点"
+    },
+    {
+      "name": "probe-ip",
+      "example": "agent-chrome probe-ip <idx>",
+      "description": "经该 profile 代理探测出口 IP + 地区并写入配置(api.myip.com)"
+    },
+    {
+      "name": "login",
+      "example": "agent-chrome login set <idx> --name 抖音 --username u --email e",
+      "description": "富登记:新增/更新登录记录(地址/名称/用户名/邮箱/手机/2FA/备用邮箱/备注);login rm <idx> <name> 删除"
+    },
+    {
+      "name": "logins",
+      "example": "agent-chrome logins <idx>",
+      "description": "列出该 profile 的登录记录"
     }
   ]
 }

@@ -36,11 +36,18 @@ const API_PORT = process.env.CICY_API_PORT || '8008';
 const HTTP_BASE = `http://127.0.0.1:${API_PORT}`;
 const WS_BASE   = `ws://127.0.0.1:${API_PORT}`;
 const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000); // Chrome ops can take longer
+// Hoisted ABOVE the entry IIFE: the dispatch chain reaches rpc() synchronously
+// before module eval would pass a mid-file declaration → TDZ otherwise.
+const AUTH_PENDING = '__CICY_AUTH_PENDING__';
+const AUTH_DENIED = '__CICY_AUTH_DENIED__';
+const AUTH_WAIT_MS = Number(process.env.CICY_AUTH_WAIT_MS || 180000);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   try {
     switch (cmd) {
       case 'tools':     printTools(); return;
+      case 'list':      await cmdProfiles(rest); return;
       case 'profiles':  await cmdProfiles(rest); return;
       case 'profile':   await cmdProfile(rest); return;
       case 'add':       await cmdAdd(rest); return;
@@ -58,6 +65,10 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000); // Ch
       case 'cdp':       await cmdCDP(rest); return;
       case 'gmails':    await cmdSimpleRPC('chrome_list_gmails'); return;
       case 'github':    await cmdSimpleRPC('chrome_list_github_accounts'); return;
+      case 'detect-logins': await cmdDetectLogins(rest); return;
+      case 'probe-ip':  await cmdProbeIp(rest); return;
+      case 'login':     await cmdLogin(rest); return;
+      case 'logins':    await cmdLoginsList(rest); return;
       default: bail(`unknown command: ${cmd}. Try agent-chrome --help.`, 2);
     }
   } catch (e) {
@@ -149,7 +160,20 @@ async function resolveDesktop() {
   return { clientID: matches[0].client_id };
 }
 
-async function rpc(tool, toolArgs) {
+// The desktop's domain-allowlist gate returns these sentinels immediately (instead
+// of blocking us — our transport is a single fixed-timeout HTTP call) while the
+// consent modal is up. result may be a raw string or MCP {content:[{text}]}.
+function authSentinel(result) {
+  let s = result;
+  if (s && typeof s === 'object' && Array.isArray(s.content)) s = s.content.map((c) => (c && c.text) || '').join('');
+  if (typeof s !== 'string') return null;
+  const t = s.trim();
+  if (t === AUTH_PENDING) return 'pending';
+  if (t === AUTH_DENIED) return 'denied';
+  return null;
+}
+
+async function rpcOnce(tool, toolArgs) {
   const target = await resolveDesktop();
   // wait_ack sync mode keys solely on client_id — no agent_id needed.
   // The server injects its own requestId (overriding ours), registers a
@@ -161,11 +185,29 @@ async function rpc(tool, toolArgs) {
     type: 'desktop_event',
     wait_ack: true,
     timeout_ms: RPC_TIMEOUT_MS,
-    data: { type: 'rpc_call', tool, args: toolArgs ?? {}, requestId: rid },
+    // __cicyAuthNonBlocking → desktop won't block us on the consent modal; it
+    // returns a PENDING/DENIED sentinel we poll on, and strips this key before
+    // dispatching so it never reaches the actual tool args.
+    data: { type: 'rpc_call', tool, args: { ...(toolArgs ?? {}), __cicyAuthNonBlocking: true }, requestId: rid },
   });
   const data = resp?.data || {};
   if (data.error) throw Object.assign(new Error(String(data.error)), { exitCode: 4 });
   return data.result;
+}
+
+// Poll while the user decides domain authorization in the desktop modal.
+async function rpc(tool, toolArgs) {
+  const deadline = Date.now() + AUTH_WAIT_MS;
+  let notified = false;
+  for (;;) {
+    const result = await rpcOnce(tool, toolArgs);
+    const sentinel = authSentinel(result);
+    if (!sentinel) return result;
+    if (sentinel === 'denied') throw Object.assign(new Error('用户在 cicy-desktop 弹窗中拒绝了该站点的桌面 RPC 授权'), { exitCode: 4 });
+    if (!notified) { process.stderr.write('⏳ 正在等待桌面授权（请在 cicy-desktop 弹窗里点「信任此站点」或「本次允许」）…\n'); notified = true; }
+    if (Date.now() > deadline) throw Object.assign(new Error('等待桌面授权超时（用户未在弹窗中授权）'), { exitCode: 4 });
+    await sleep(2000);
+  }
 }
 
 function emit(result) {
@@ -178,6 +220,12 @@ function intArg(s, name) {
   const n = parseInt(s, 10);
   if (Number.isNaN(n)) throw Object.assign(new Error(`${name} must be a number, got: ${s}`), { exitCode: 2 });
   return n;
+}
+
+// Accept the unified profile id ("chrome-3") or a bare accountIdx ("3").
+function profileIdx(s) {
+  const m = /^chrome-(\d+)$/.exec(String(s || '').trim());
+  return intArg(m ? m[1] : s, 'profileId');
 }
 
 // ── commands ────────────────────────────────────────────────────────────
@@ -229,9 +277,8 @@ async function cmdAdd(args) {
 }
 
 async function cmdProxy(args) {
-  if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome proxy <accountIdx> <url|"">'), { exitCode: 2 });
-  const idx = intArg(args[0], 'accountIdx');
-  emit(await rpc('chrome_set_profile_proxy', { accountIdx: idx, proxy: args[1] }));
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome proxy <id> <url|"">'), { exitCode: 2 });
+  emit(await rpc('chrome_set_profile_proxy', { accountIdx: profileIdx(args[0]), proxy: args[1] }));
 }
 
 // note <idx> <text...> — set a free-form note on the profile (chrome.json).
@@ -272,8 +319,55 @@ async function cmdAccounts(args) {
   const idx = intArg(args[0], 'accountIdx');
   const show = args.includes('--show');
   const p = await rpc('chrome_get_profile', { accountIdx: idx });
-  const accounts = maskAccounts(p?.accounts, show);
-  emit({ accountIdx: idx, note: p?.note || '', accounts });
+  // chrome_get_profile nests the entry under `privateConfig` — read accounts/note
+  // from there (older code read the top level, so `accounts` always showed `{}`).
+  const pc = p?.privateConfig ?? p ?? {};
+  const accounts = maskAccounts(pc.accounts, show);
+  emit({ accountIdx: idx, note: pc.note || '', accounts });
+}
+
+// detect-logins <idx> — infer which sites this profile's LIVE session is logged
+// into, from its cookies (vs. `logins`, which is the manual rich ledger).
+async function cmdDetectLogins(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome detect-logins <accountIdx>'), { exitCode: 2 });
+  emit(await rpc('chrome_detect_logins', { accountIdx: intArg(args[0], 'accountIdx') }));
+}
+
+// probe-ip <idx> — probe egress IP + area through the profile's proxy and STORE
+// to config (vs `ip`, which is a live read from a running Chrome and doesn't persist).
+async function cmdProbeIp(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome probe-ip <accountIdx>'), { exitCode: 2 });
+  emit(await rpc('chrome_probe_ip', { accountIdx: intArg(args[0], 'accountIdx') }));
+}
+
+// parse `--name x --url y --2fa z ...` into a rich-login payload object.
+function parseLoginFlags(args, base = {}) {
+  const MAP = { '--name': 'name', '--url': 'url', '--username': 'username', '--email': 'email',
+    '--mobile': 'mobile', '--2fa': 'twofa', '--second-email': 'secondEmail', '--note': 'note', '--login-at': 'loginAt' };
+  const out = { ...base };
+  for (let i = 0; i < args.length; i++) { const k = MAP[args[i]]; if (k) out[k] = args[++i] || ''; }
+  return out;
+}
+
+// login set/rm — manage this profile's rich login ledger (地址/名称/用户名/邮箱/手机/2FA/备用邮箱/备注).
+async function cmdLogin(args) {
+  const sub = args[0];
+  if (sub === 'set') {
+    if (args.length < 2) throw Object.assign(new Error('usage: agent-chrome login set <idx> --name <名称> [--url --username --email --mobile --2fa --second-email --note]'), { exitCode: 2 });
+    const payload = parseLoginFlags(args.slice(2), { accountIdx: intArg(args[1], 'accountIdx') });
+    if (!payload.name) throw Object.assign(new Error('login set 需要 --name <名称>'), { exitCode: 2 });
+    emit(await rpc('chrome_profile_login_set', payload));
+  } else if (sub === 'rm') {
+    if (args.length < 3) throw Object.assign(new Error('usage: agent-chrome login rm <idx> <name>'), { exitCode: 2 });
+    emit(await rpc('chrome_profile_login_rm', { accountIdx: intArg(args[1], 'accountIdx'), platform: args[2] }));
+  } else {
+    throw Object.assign(new Error('usage: agent-chrome login <set|rm> ...'), { exitCode: 2 });
+  }
+}
+
+async function cmdLoginsList(args) {
+  if (args.length < 1) throw Object.assign(new Error('usage: agent-chrome logins <accountIdx>'), { exitCode: 2 });
+  emit(await rpc('chrome_profile_logins', { accountIdx: intArg(args[0], 'accountIdx') }));
 }
 
 // otp <idx> <service> — generate the current TOTP (2FA) code from the stored
@@ -283,9 +377,9 @@ async function cmdOtp(args) {
   const idx = intArg(args[0], 'accountIdx');
   const service = String(args[1]).trim().toLowerCase();
   const p = await rpc('chrome_get_profile', { accountIdx: idx });
-  const info = p?.accounts?.[service];
+  const info = (p?.privateConfig?.accounts ?? p?.accounts)?.[service];
   const secret = (info && typeof info === 'object') ? info.totp : null;
-  if (!secret) throw Object.assign(new Error(`no 2FA secret stored for ${service} on account_${idx} (set one: agent-chrome 2fa ${idx} ${service} <base32-secret>)`), { exitCode: 4 });
+  if (!secret) throw Object.assign(new Error(`no 2FA secret stored for ${service} on profile_${idx} (set one: agent-chrome 2fa ${idx} ${service} <base32-secret>)`), { exitCode: 4 });
   const step = 30;
   const code = totp(secret, { step });
   const secondsLeft = step - (Math.floor(Date.now() / 1000) % step);
