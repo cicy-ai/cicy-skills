@@ -168,11 +168,21 @@ async function cmdWindows(_args, node) {
 
 async function cmdCapture(args, node) {
   if (args.length < 1) throw Object.assign(new Error('Usage: cicy-agent capture <pane>'), { exitCode: 2 });
-  const data = await api('POST', '/api/tmux/capture_pane', { pane_id: args[0] }, node);
-  if (json) return ok(data);
-  if (typeof data === 'string') console.log(data);
-  else if (data?.content) console.log(data.content);
-  else console.log(JSON.stringify(data, null, 2));
+  const pane = args[0];
+  const data = await api('POST', '/api/tmux/capture_pane', { pane_id: pane }, node);
+  // backend (/api/tmux/capture_pane) returns { pane_id, output }; keep `content`
+  // as a legacy fallback so we print the TEXT, not a JSON blob.
+  const out = typeof data === 'string' ? data : (data?.output ?? data?.content ?? '');
+  // A cicy chat agent runs a TUI in its tmux pane, so `capture` only shows the
+  // static chat frame ("● CiCy … 已就绪"), NOT the conversation. Detect it
+  // (authoritatively by agent_type, else by the frame text) and steer to `reply`,
+  // which reads the parsed history — messages + tool_use — the real work log.
+  let agentType = '';
+  try { const p = await api('GET', `/api/panes/${pane}`, undefined, node); agentType = (p && p.agent_type) || ''; } catch { /* best-effort */ }
+  const isChat = agentType === 'cicy' || /[●•]\s*CiCy\b|直接输入需求/.test(out);
+  if (json) return ok(typeof data === 'object' ? { ...data, agent_type: agentType, chat_agent: isChat } : { output: out, chat_agent: isChat });
+  if (isChat) process.stderr.write(`⚠️  ${pane} is a cicy chat agent — its tmux pane shows only the chat frame, not the conversation.\n    Use \`cicy-agent reply ${pane} --full\` to see its messages + tool calls.\n\n`);
+  console.log(out.trimEnd() || JSON.stringify(data, null, 2));
 }
 
 async function cmdReply(args, node) {
