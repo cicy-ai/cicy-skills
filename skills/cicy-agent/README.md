@@ -21,8 +21,15 @@ cicy-agent capture w-1001       # raw pane text
 cicy-agent reply w-1001         # last reply (parsed)
 cicy-agent reply w-1001 --full  # include tool_use entries
 
-cicy-agent msg w-10002 'hello there'
-cicy-agent msg w-10002 'do this' --callback   # notify me when their next turn finishes
+cicy-agent msg w-10002 'do this'              # tracked in the message store (status → done/
+                                              # failed) + prints msg_id, but NO completion chat
+                                              # line by default
+cicy-agent msg w-10002 'do this' --notify     # also push a one-line status wake-up when the
+                                              # turn ends ("🔔 [B] msg <id> → done"; suppressed
+                                              # if they already replied in-band)
+cicy-agent msg w-10002 'fyi' --no-callback    # fire-and-forget: no tracking, no push
+cicy-agent msgs --to w-10002                  # the cross-agent message link: who→who, status,
+                                              # and a q⟶answer summary of what they did
 
 cicy-agent send-keys w-1001 'ls -la' Enter
 cicy-agent clear w-1001

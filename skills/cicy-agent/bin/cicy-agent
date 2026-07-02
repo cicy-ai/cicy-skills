@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
-// Subcommands: list / ls / tree / windows / capture / reply / msg / broadcast /
-//              get_online_agents / get_offline_agents / get_all_agents /
-//              send-keys / restart / clear / fork
+// Subcommands: list / ls / tree / windows / capture / reply / msg / msgs /
+//              broadcast / get_online_agents / get_offline_agents /
+//              get_all_agents / send-keys / restart / clear / fork / create
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -36,6 +36,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'capture':            await cmdCapture(r2, node); break;
       case 'reply':              await cmdReply(r2, node); break;
       case 'msg':                await cmdMsg(r2, node); break;
+      case 'msgs':               await cmdMsgs(r2, node); break;
       case 'broadcast':          await cmdBroadcast(r2, node); break;
       case 'get_online_agents': case 'get-online-agents':   await cmdAgents('online', node); break;
       case 'get_offline_agents': case 'get-offline-agents': await cmdAgents('offline', node); break;
@@ -44,6 +45,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'restart':            await cmdRestart(r2, node); break;
       case 'clear':               await cmdClear(r2, node); break;
       case 'fork':               await cmdFork(r2, node); break;
+      case 'create': case 'new':  await cmdCreate(r2, node); break;
       default: bail(`unknown command: ${cmd}. Try cicy-agent --help.`, 2);
     }
   } catch (e) {
@@ -62,7 +64,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|send-keys|restart|clear|fork> [args...] [--node NAME]\n'); }
+  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork> [args...] [--node NAME]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -200,24 +202,77 @@ function stampSender(text) {
 }
 
 async function cmdMsg(args, node) {
-  // Default ON: callback (reply routes back to the sender) + a 📮 [sender]
-  // prefix so the recipient knows who messaged. Disable callback with
-  // --no-callback.
+  // Default: callback ON (the message is tracked in the agent_messages store and
+  // its status is followed back to done/failed) + a 📮 [sender] prefix so the
+  // recipient knows who messaged. By default NO completion chat line is pushed —
+  // status lives in the queryable store (cicy-agent msgs), not the chat. Pass
+  // --notify to also get a one-line status wake-up when the receiver's turn ends
+  // (e.g. "🔔 [w-x] msg <id> → done"; suppressed if they already replied in-band).
+  // --no-callback is full fire-and-forget: no tracking, no push.
   let callback = true;
+  let notify = false;
   const filtered = [];
   for (const a of args) {
     if (a === '--callback' || a === '-c') callback = true;
     else if (a === '--no-callback' || a === '--no-cb') callback = false;
+    else if (a === '--notify') notify = true;
     else filtered.push(a);
   }
-  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--no-callback]'), { exitCode: 2 });
+  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--no-callback] [--notify]'), { exitCode: 2 });
   const { text, senderID } = stampSender(filtered.slice(1).join(' '));
   const payload = { pane_id: filtered[0], text };
   // callback_to only works with a sender id; outside a pane (no env) it's skipped.
   if (callback && senderID) payload.callback_to = senderID;
+  // notify only matters alongside a callback; it gates the completion chat push.
+  if (callback && senderID && notify) payload.notify = true;
   const data = await api('POST', '/api/tmux/send', payload, node);
   if (json) return ok(data);
-  console.log(typeof data === 'string' ? data : JSON.stringify(data));
+  // Echo the message id (when the send was recorded in the agent_messages store)
+  // so the sender can later `cicy-agent msgs` it by id. Falls back to the raw
+  // response for non-agent sends that carry no msg_id.
+  if (data && typeof data === 'object' && data.msg_id) {
+    console.log(`sent → ${filtered[0]}  msg_id=${data.msg_id}`);
+  } else {
+    console.log(typeof data === 'string' ? data : JSON.stringify(data));
+  }
+}
+
+// cicy-agent msgs [--from PANE] [--to PANE] [--status sent|done|failed] [--open]
+// Lists the cross-agent message link: who → who, status, and a one-line summary
+// of what the receiver actually did (q ⟶ answer, JOINed from history_turns).
+async function cmdMsgs(args, node) {
+  const q = new URLSearchParams();
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--from') q.set('from', args[++i] || '');
+    else if (a === '--to') q.set('to', args[++i] || '');
+    else if (a === '--status') q.set('status', args[++i] || '');
+    else if (a === '--open') q.set('open', '1');
+  }
+  const path = '/api/agent/messages' + (q.toString() ? `?${q.toString()}` : '');
+  const data = await api('GET', path, undefined, node);
+  if (json) return ok(data);
+  const msgs = data?.messages || data?.data?.messages || [];
+  if (!msgs.length) { console.log('(no messages)'); return; }
+  const trunc = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const shortP = (p) => String(p || '?').replace(':main.0', '');
+  for (const m of msgs) {
+    const head = `${shortP(m.from_pane)} → ${shortP(m.to_pane)}  [${m.status}]${m.replied ? ' replied' : ''}  id=${m.id}`;
+    const when = m.completed_at || m.created_at || '';
+    console.log(`${head}  ${when}`);
+    const body = trunc(m.text, 70);
+    if (body) console.log(`  msg: ${body}`);
+    // from-side: what the sender was doing when it dispatched (their turn).
+    if (m.from_turn && (m.from_turn.q || m.from_turn.a)) {
+      console.log(`  from-turn: ${trunc(m.from_turn.q, 50)} ⟶ ${trunc(m.from_turn.a, 60)}`);
+    } else if (m.from_turn_id) {
+      console.log(`  from-turn: ${m.from_conversation_id || '?'}/${m.from_turn_id}`);
+    }
+    // to-side: what the receiver actually did this turn.
+    if (m.turn && (m.turn.q || m.turn.a)) {
+      console.log(`  to-turn: ${trunc(m.turn.q, 50)} ⟶ ${trunc(m.turn.a, 60)}`);
+    }
+  }
 }
 
 // ── online / offline / broadcast (todo #81) ─────────────────────────────
@@ -243,35 +298,6 @@ async function fetchAgentSets(node) {
   const online = panes.filter((p) => live.has(sessionOf(p.pane_id)));
   const offline = panes.filter((p) => !live.has(sessionOf(p.pane_id)));
   return { panes, online, offline };
-}
-
-// Resolve an agent's one-line duty (职责) for the roster:
-//   1. role_template, when it names a cicy-team role charter
-//      (~/cicy-ai/skills/cicy-team/roles/<rt>/SKILL.md) → the charter
-//      frontmatter description's first sentence;
-//   2. role_template verbatim (the db holds free text like 测试工程师);
-//   3. fall back to title.
-// NB: /api/tmux/panes does not expose role_template yet (column exists in
-// agent_config but isn't selected) — until cicy-code ships that, 1–2 only
-// fire for rows that carry it, everything else falls back to title.
-function dutyOf(p) {
-  const rt = String(p.role_template || '').trim();
-  if (rt) {
-    const roots = [
-      process.env.CICY_ROLES_DIR,
-      join(homedir(), 'cicy-ai', 'skills', 'cicy-team', 'roles'),
-      join(homedir(), 'projects', 'cicy-skills', 'skills', 'cicy-team', 'roles'),
-    ].filter(Boolean);
-    for (const root of roots) {
-      try {
-        const charter = readFileSync(join(root, rt, 'SKILL.md'), 'utf8');
-        const m = /^description:\s*(.+)$/m.exec(charter);
-        if (m) return m[1].split(/[。.]/)[0].trim();
-      } catch { /* try next root */ }
-    }
-    return rt; // free text (db holds strings like 测试工程师) or unknown charter
-  }
-  return String(p.title || '').trim();
 }
 
 // Runtime enrichment (todo #91) — read straight from the agent's gateway
@@ -324,7 +350,6 @@ function rosterRow(p, liveSet, isRemote) {
   return {
     id,
     title: p.title || '',
-    duty: dutyOf(p),
     agent_type: p.agent_type || '',
     online: liveSet.has(id),
     model: rt.model || p.default_model || null,
@@ -347,11 +372,11 @@ async function cmdAgents(kind, node) {
   const agents = sel.map((p) => rosterRow(p, liveSet, !!node));
   if (json) return ok({ kind, count: agents.length, online: online.length, offline: offline.length, all: panes.length, agents });
   console.log(`${kind}: ${agents.length}  (online ${online.length} + offline ${offline.length} = all ${panes.length})`);
-  console.log('id      \ton\tidle\tctx\tcost\tmodel\tgw\tduty');
-  console.log('--------\t--\t----\t---\t----\t-----\t--\t----');
+  console.log('id      \ton\tidle\tctx\tcost\tmodel\tgw\ttitle');
+  console.log('--------\t--\t----\t---\t----\t-----\t--\t-----');
   for (const a of agents) {
     const idle = a.idle === null ? 'n/a' : (a.idle ? '✓' : 'busy');
-    console.log(`${a.id}\t${a.online ? '✓' : '✗'}\t${idle}\t${na(a.context_usage)}\t${na(a.cost)}\t${na(a.model)}\t${a.local_gateway ? '✓' : '✗'}\t${a.duty}`);
+    console.log(`${a.id}\t${a.online ? '✓' : '✗'}\t${idle}\t${na(a.context_usage)}\t${na(a.cost)}\t${na(a.model)}\t${a.local_gateway ? '✓' : '✗'}\t${a.title}`);
   }
 }
 
@@ -424,6 +449,40 @@ async function cmdClear(args, node) {
 // config (agent_type, model, role, allow_all, reply_in_chinese, use_custom_gateway,
 // proxy_enable) and is prompted to INHERIT that context and continue. POSTs
 // /api/tmux/fork.
+// create a BRAND-NEW agent (POST /api/panes/create). Unlike `fork` (which clones
+// an existing agent's context), create spins up a fresh agent from scratch.
+//   cicy-agent create <title...> [--type cicy] [--model M] [--role R]
+//                                [--role-template RT] [--master PANE]
+// agent_type defaults to `cicy`; the title can be positional or via --title.
+async function cmdCreate(args, node) {
+  let title = '', type = 'cicy', model = '', role = '', roleTemplate = '', master = '';
+  const pos = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--title' || a === '-t') title = args[++i] || '';
+    else if (a === '--type') type = args[++i] || '';
+    else if (a === '--model') model = args[++i] || '';
+    else if (a === '--role') role = args[++i] || '';
+    else if (a === '--role-template' || a === '--rt') roleTemplate = args[++i] || '';
+    else if (a === '--master') master = args[++i] || '';
+    else pos.push(a);
+  }
+  if (!title && pos.length) title = pos.join(' ');
+  if (!title) {
+    throw Object.assign(new Error('Usage: cicy-agent create <title> [--type cicy] [--model M] [--role-template RT] [--master PANE]'), { exitCode: 2 });
+  }
+  const payload = { title, agent_type: type };
+  if (model) payload.default_model = model;
+  if (role) payload.role = role;
+  if (roleTemplate) payload.role_template = roleTemplate;
+  if (master) payload.master_pane_id = master;
+  const data = await api('POST', '/api/panes/create', payload, node);
+  if (json) return ok(data);
+  if (data && data.success === false) throw Object.assign(new Error(`create failed: ${data.error || 'unknown'}`), { exitCode: 4 });
+  const pid = data?.pane_id || data?.data?.pane_id || '';
+  console.log(pid ? `created ${type} agent "${title}" -> ${pid}` : (typeof data === 'string' ? data : JSON.stringify(data)));
+}
+
 async function cmdFork(args, node) {
   let title = '', master = '';
   const pos = [];

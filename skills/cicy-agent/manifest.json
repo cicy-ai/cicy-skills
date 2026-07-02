@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.2.2",
+  "version": "1.5.0",
   "title": "Cicy Agent",
-  "description": "Operate tmux panes and windows on this host. Wraps cicy-code's /api/tmux/* endpoints (list, capture, send-keys, msg, create, restart, clear).",
+  "description": "Operate tmux panes/windows on this host (list, capture, send-keys, msg, create, restart). `msg --notify` wakes the SENDER when the dispatched agent finishes — the multi-agent coordination primitive.",
   "category": "dev",
   "tags": [
     "tmux",
@@ -63,8 +63,13 @@
     },
     {
       "name": "tmux msg",
-      "example": "cicy-agent msg <worker> <message>",
-      "description": "Send a message to an agent worker"
+      "example": "cicy-agent msg <worker> <message> [--notify] [--no-callback]",
+      "description": "Message an agent worker. Tracked in the message store (status→done/failed), silent by default; --notify pushes a completion wake-up unless they already replied; --no-callback = fire-and-forget."
+    },
+    {
+      "name": "agent msgs",
+      "example": "cicy-agent msgs --to <worker> [--open] [--json]",
+      "description": "List the cross-agent message link: who→who, status (sent|done|failed), and a q⟶answer summary of what the receiver actually did (JOINed from history)."
     },
     {
       "name": "broadcast",
@@ -74,7 +79,12 @@
     {
       "name": "agents online/offline/all",
       "example": "cicy-agent get_online_agents --json",
-      "description": "Roster by liveness: get_online/offline/all_agents. Rows: id, title, duty, agent_type, online, model, provider, local_gateway, context_usage, cost, idle. Runtime fields show n/a when unavailable."
+      "description": "Roster by liveness: get_online/offline/all_agents. Rows: id, title, agent_type, online, model, provider, local_gateway, context_usage, cost, idle. Runtime fields show n/a when unavailable."
+    },
+    {
+      "name": "create",
+      "example": "cicy-agent create <title> --type cicy",
+      "description": "Create a BRAND-NEW agent from scratch (POST /api/panes/create); agent_type defaults to cicy. Not a clone — use fork to inherit an existing agent's context."
     }
   ]
 }
