@@ -454,8 +454,11 @@ async function cmdClear(args, node) {
 //   cicy-agent create <title...> [--type cicy] [--model M] [--role R]
 //                                [--role-template RT] [--master PANE]
 // agent_type defaults to `cicy`; the title can be positional or via --title.
+// role defaults to `worker` and role_template to `assistant` — WITHOUT a worker
+// role the agent has no shell/skill tools and degrades to chat-only, so these
+// must be set for a functional agent (override --role/--role-template as needed).
 async function cmdCreate(args, node) {
-  let title = '', type = 'cicy', model = '', role = '', roleTemplate = '', master = '';
+  let title = '', type = 'cicy', model = '', role = 'worker', roleTemplate = 'assistant', master = '';
   const pos = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
