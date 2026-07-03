@@ -2,11 +2,16 @@
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
 // Subcommands: list / ls / tree / windows / capture / reply / msg / msgs /
 //              broadcast / get_online_agents / get_offline_agents /
-//              get_all_agents / send-keys / restart / clear / fork / create
+//              get_all_agents / send-keys / restart / clear / fork / create / team
+//
+// Cross-team: every subcommand accepts --team NAME (legacy alias: --node) to
+// run against another team's cicy-code instance — same API, their address +
+// token. Teams are registered with `cicy-agent team add <name> <api> <token>`
+// into ~/cicy-ai/db/cicy-agent.json.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 
 const argv = process.argv.slice(2);
 
@@ -46,6 +51,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'clear':               await cmdClear(r2, node); break;
       case 'fork':               await cmdFork(r2, node); break;
       case 'create': case 'new':  await cmdCreate(r2, node); break;
+      case 'team':               await cmdTeam(r2); break;
       default: bail(`unknown command: ${cmd}. Try cicy-agent --help.`, 2);
     }
   } catch (e) {
@@ -64,7 +70,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork> [args...] [--node NAME]\n'); }
+  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork|create|team> [args...] [--team NAME]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -75,10 +81,29 @@ function extractNode(args) {
   let node = '';
   const rest = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--node' || args[i] === '-n') { node = args[++i] || ''; continue; }
+    // --team is the canonical flag; --node kept as a legacy alias.
+    if (args[i] === '--team' || args[i] === '-T' || args[i] === '--node' || args[i] === '-n') { node = args[++i] || ''; continue; }
     rest.push(args[i]);
   }
   return { rest, node };
+}
+
+// ── team registry (~/cicy-ai/db/cicy-agent.json) ────────────────────────
+// Shape: { teams: [{name, api, api_token}, ...] }. Legacy shapes (bare array,
+// {nodes: [...]}) are still read; writes always normalize to {teams}.
+
+function loadTeams() {
+  if (!existsSync(NODES_JSON)) return [];
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(NODES_JSON, 'utf8')); }
+  catch (e) { throw Object.assign(new Error(`failed to parse ${NODES_JSON}: ${e.message}`), { exitCode: 3 }); }
+  const arr = Array.isArray(cfg) ? cfg : (cfg.teams || cfg.nodes || []);
+  return arr.filter((t) => t && t.name);
+}
+
+function saveTeams(teams) {
+  mkdirSync(dirname(NODES_JSON), { recursive: true });
+  writeFileSync(NODES_JSON, JSON.stringify({ teams }, null, 2) + '\n', { mode: 0o600 });
 }
 
 function loadLocalToken() {
@@ -93,19 +118,16 @@ function loadLocalToken() {
   return cfg.api_token;
 }
 
-// resolve { api, token } for a named remote node, or the local cicy-code by default
-function resolveTarget(node) {
-  if (!node) return { api: API_BASE, token: loadLocalToken() };
-  if (!existsSync(NODES_JSON)) {
-    throw Object.assign(new Error(`--node ${node} requested but ${NODES_JSON} does not exist. Create it with [{name,api,api_token}, ...]`), { exitCode: 3 });
+// resolve { api, token } for a registered team, or the local cicy-code by default
+function resolveTarget(team) {
+  if (!team) return { api: API_BASE, token: loadLocalToken() };
+  const teams = loadTeams();
+  if (!teams.length) {
+    throw Object.assign(new Error(`--team ${team} requested but no teams registered. Run: cicy-agent team add <name> <api> <token>`), { exitCode: 3 });
   }
-  let nodes;
-  try { nodes = JSON.parse(readFileSync(NODES_JSON, 'utf8')); }
-  catch (e) { throw Object.assign(new Error(`failed to parse ${NODES_JSON}: ${e.message}`), { exitCode: 3 }); }
-  const arr = Array.isArray(nodes) ? nodes : (nodes.nodes || []);
-  const found = arr.find((n) => n.name === node);
-  if (!found) throw Object.assign(new Error(`node ${node} not found in ${NODES_JSON}`), { exitCode: 4 });
-  if (!found.api || !found.api_token) throw Object.assign(new Error(`node ${node} missing api or api_token`), { exitCode: 3 });
+  const found = teams.find((t) => t.name === team);
+  if (!found) throw Object.assign(new Error(`team ${team} not registered (have: ${teams.map((t) => t.name).join(', ')}). Run: cicy-agent team add ${team} <api> <token>`), { exitCode: 4 });
+  if (!found.api || !found.api_token) throw Object.assign(new Error(`team ${team} missing api or api_token in ${NODES_JSON}`), { exitCode: 3 });
   return { api: found.api.replace(/\/+$/, ''), token: found.api_token };
 }
 
@@ -494,6 +516,94 @@ async function cmdCreate(args, node) {
   if (data && data.success === false) throw Object.assign(new Error(`create failed: ${data.error || 'unknown'}`), { exitCode: 4 });
   const pid = data?.pane_id || data?.data?.pane_id || '';
   console.log(pid ? `created ${type} agent "${title}" -> ${pid}` : (typeof data === 'string' ? data : JSON.stringify(data)));
+}
+
+// ── team registry commands ──────────────────────────────────────────────
+// cicy-agent team add <name> <api> <token>   register / update a team
+// cicy-agent team ls                          list teams (token masked)
+// cicy-agent team rm <name>                   unregister
+// cicy-agent team ping [name]                 liveness + version (all teams when omitted)
+
+function mask(t) { return t && t.length > 8 ? t.slice(0, 4) + '…' + t.slice(-4) : '***'; }
+
+// Probe one team: GET /api/health (unauthenticated on cicy-code, but we send
+// the Bearer anyway for setups that gate it). Returns {online, version, error}.
+async function probeTeam(t, timeoutMs = 5000) {
+  const base = String(t.api || '').replace(/\/+$/, '');
+  try {
+    const res = await fetch(base + '/api/health', {
+      headers: { 'Authorization': `Bearer ${t.api_token || ''}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.status >= 400) return { online: false, version: null, error: `http ${res.status}` };
+    const body = await res.json().catch(() => ({}));
+    return { online: true, version: body.version || null, agents: body.agents_count ?? null, error: null };
+  } catch (e) {
+    return { online: false, version: null, error: String(e.message || e) };
+  }
+}
+
+async function cmdTeam(args) {
+  const sub = args[0] || 'ls';
+  const teams = loadTeams();
+
+  if (sub === 'add') {
+    let [, name, apiURL, token] = args;
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--token') { token = args[++i] || ''; }
+    }
+    if (!name || !apiURL || !token) {
+      throw Object.assign(new Error('Usage: cicy-agent team add <name> <api-url> <api-token>'), { exitCode: 2 });
+    }
+    if (!/^https?:\/\//.test(apiURL)) {
+      throw Object.assign(new Error(`api-url must start with http(s)://, got: ${apiURL}`), { exitCode: 2 });
+    }
+    const entry = { name, api: apiURL.replace(/\/+$/, ''), api_token: token };
+    const next = teams.filter((t) => t.name !== name).concat([entry]);
+    saveTeams(next);
+    // Probe right away so a typo'd address/token surfaces at registration time.
+    const p = await probeTeam(entry);
+    if (json) return ok({ added: entry.name, api: entry.api, online: p.online, version: p.version, error: p.error });
+    console.log(`registered team ${name} → ${entry.api}`);
+    console.log(p.online ? `  ✓ online  version=${p.version || '?'}  agents=${p.agents ?? '?'}` : `  ✗ unreachable: ${p.error}`);
+    return;
+  }
+
+  if (sub === 'ls' || sub === 'list') {
+    if (json) return ok({ teams: teams.map((t) => ({ name: t.name, api: t.api })) });
+    if (!teams.length) { console.log('(no teams registered — cicy-agent team add <name> <api> <token>)'); return; }
+    console.log('name\tapi\ttoken');
+    for (const t of teams) console.log(`${t.name}\t${t.api}\t${mask(t.api_token)}`);
+    return;
+  }
+
+  if (sub === 'rm' || sub === 'remove') {
+    const name = args[1];
+    if (!name) throw Object.assign(new Error('Usage: cicy-agent team rm <name>'), { exitCode: 2 });
+    if (!teams.some((t) => t.name === name)) throw Object.assign(new Error(`team ${name} not registered`), { exitCode: 4 });
+    saveTeams(teams.filter((t) => t.name !== name));
+    if (json) return ok({ removed: name });
+    console.log(`removed team ${name}`);
+    return;
+  }
+
+  if (sub === 'ping') {
+    const name = args[1];
+    const sel = name ? teams.filter((t) => t.name === name) : teams;
+    if (name && !sel.length) throw Object.assign(new Error(`team ${name} not registered`), { exitCode: 4 });
+    if (!sel.length) { console.log('(no teams registered)'); return; }
+    const results = await Promise.all(sel.map(async (t) => ({ name: t.name, api: t.api, ...(await probeTeam(t)) })));
+    if (json) return ok({ teams: results });
+    console.log('name\tonline\tversion\tagents\tapi');
+    for (const r of results) {
+      console.log(`${r.name}\t${r.online ? '✓' : '✗'}\t${r.version || 'n/a'}\t${r.agents ?? 'n/a'}\t${r.api}${r.error ? `  (${r.error})` : ''}`);
+    }
+    const down = results.filter((r) => !r.online).length;
+    if (down) process.exitCode = 1;
+    return;
+  }
+
+  throw Object.assign(new Error(`unknown team subcommand: ${sub}. Use add|ls|rm|ping.`), { exitCode: 2 });
 }
 
 async function cmdFork(args, node) {

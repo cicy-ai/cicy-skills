@@ -37,7 +37,7 @@ cicy-agent get_all_agents                     Roster: whole db (online ∪ offli
                                               (reply.json → idle+model, context.json →
                                               context_usage, usage.jsonl → Σcost +
                                               provider); unavailable → null / "n/a"
-                                              (always n/a with --node — files are remote).
+                                              (always n/a with --team — files are remote).
                                               idle is a heuristic: "thinking" or request
                                               activity <45s ago = busy.
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
@@ -47,7 +47,17 @@ cicy-agent fork <src> [--title T] [--master PANE]     Replicate an agent so a ne
 cicy-agent create <title> [--type cicy] [--model M]   Create a BRAND-NEW agent from scratch (POST /api/panes/create).
             [--role R] [--role-template RT] [--master PANE]   agent_type defaults to cicy. NOT a clone — use fork to inherit context.
 
-cicy-agent --node <NAME> ...                  Run against a remote node
+cicy-agent team add <name> <api> <token>      Register another team's cicy-code (probes it immediately)
+cicy-agent team ls                            List registered teams (token masked)
+cicy-agent team rm <name>                     Unregister a team
+cicy-agent team ping [name]                   Liveness + version via /api/health — online ✓/✗,
+                                              version, agents count. All teams when name omitted;
+                                              exit code 1 if any team is down.
+
+cicy-agent --team <NAME> ...                  Run ANY command against a registered team
+                                              (their cicy-code API + token). Legacy alias: --node.
+                                              Note: msg --notify can't push back across teams —
+                                              check status with `cicy-agent msgs --team <NAME>`.
 cicy-agent --json ...                         JSON output mode
 cicy-agent --help / -h / help
 cicy-agent tools
@@ -58,5 +68,5 @@ cicy-agent tools
 - `CICY_API_TOKEN`     — bearer token (overrides global.json)
 - `CICY_API_PORT`      — local server port (default 8008)
 - `CICY_GLOBAL_JSON`   — global.json path override
-- `CICY_AGENT_JSON`    — multi-node config override (default `~/cicy-ai/db/cicy-agent.json`)
+- `CICY_AGENT_JSON`    — team registry override (default `~/cicy-ai/db/cicy-agent.json`)
 - `X_AGENT_SHORT_ID`   — required for `msg --callback` (set inside panes)

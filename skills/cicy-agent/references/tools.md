@@ -15,6 +15,8 @@
 | `send-keys`     | POST   | `/api/tmux/send-keys`      |
 | `restart`       | POST   | `/api/tmux/restart_all`    |
 | `clear`         | POST   | `/api/tmux/clear`          |
+| `team ping`     | GET    | `<team.api>/api/health` (per team; online + version + agents_count) |
+| `team add/ls/rm`| —      | local registry file only (add also probes `/api/health`) |
 
 All requests carry `Authorization: Bearer <api_token>`.
 
@@ -23,10 +25,11 @@ All requests carry `Authorization: Bearer <api_token>`.
 | path                              | mode | secret_fields  |
 |-----------------------------------|------|----------------|
 | `~/cicy-ai/global.json`           | 0600 | `api_token`    |
-| `~/cicy-ai/db/cicy-agent.json`    | 0600 | per-node `api_token` |
+| `~/cicy-ai/db/cicy-agent.json`    | 0600 | per-team `api_token` |
 
-`cicy-agent.json` is a JSON array: `[{name, api, api_token}, ...]`. Selected
-with `--node NAME`. When omitted, the local cicy-code server is used.
+`cicy-agent.json` is the team registry: `{ "teams": [{name, api, api_token}, ...] }`
+(legacy bare-array / `{nodes}` shapes still read). Selected with `--team NAME`
+(legacy alias `--node`). When omitted, the local cicy-code server is used.
 
 ## Common payloads
 

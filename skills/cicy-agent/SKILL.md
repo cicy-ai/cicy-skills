@@ -6,7 +6,8 @@ description: Operate tmux panes/windows on this host (list, capture, send-keys, 
 # Cicy Agent
 
 This skill is the local `cicy-agent` wrapper for tmux pane / window
-operations on this host (and optional remote nodes via `--node NAME`).
+operations on this host — and on other TEAMS' hosts via `--team NAME`
+(register with `cicy-agent team add`; probe with `cicy-agent team ping`).
 
 ## ⭐ `--notify` — get woken when the agent you dispatched finishes
 
@@ -56,11 +57,15 @@ Details:
 - `msgs` — the cross-agent message link: who→who, status, and a q⟶answer
   summary of what the receiver actually did
 - restart all panes / clear one
+- `team add/ls/rm/ping` — register another team's cicy-code (api + token) and
+  probe liveness + version; then any command works cross-team with `--team NAME`
 
 ## Rules
 
 1. Prefer `cicy-agent` for local convenience operations on this host; use
-   `--node NAME` for remote nodes (entry in `~/cicy-ai/db/cicy-agent.json`).
+   `--team NAME` for other teams (registry `~/cicy-ai/db/cicy-agent.json`,
+   managed by `cicy-agent team add/ls/rm`; legacy alias `--node`). Cross-team
+   `--notify` can't push back — check with `cicy-agent msgs --team NAME`.
 2. `msg --notify` needs `X_AGENT_SHORT_ID` env (set inside cicy panes) — it's
    the sender id the callback wakes.
 3. To judge "did they finish" or read their conclusion, use `reply` (parsed
