@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-summary",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "title": "Agent Summary",
-  "description": "Dump the raw basic conversation (text + thinking) of an agent session from its request/reply snapshots, for forking or restoring a conversation.",
+  "description": "Dump the raw conversation (text + thinking + compact tool traces) of an agent session from its request/reply snapshots, for forking or restoring a conversation.",
   "category": "dev",
   "tags": [
     "conversation",
@@ -36,14 +36,14 @@
   "i18n": {
     "zh-CN": {
       "title": "Agent 会话摘要",
-      "description": "从 agent 会话的请求/回复快照中导出原始基本对话(text + thinking),用于 fork 或恢复对话。"
+      "description": "从 agent 会话的请求/回复快照中导出原始对话(text + thinking + 精简工具轨迹),用于 fork 或恢复对话。"
     }
   },
   "tools": [
     {
       "name": "summary",
       "example": "agent-summary <agent-id>",
-      "description": "Dump the raw basic conversation (text + thinking) of an agent session"
+      "description": "Dump the raw conversation (text + thinking + compact tool traces) of an agent session"
     }
   ]
 }

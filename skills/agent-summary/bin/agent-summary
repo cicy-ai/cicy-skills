@@ -2,8 +2,10 @@
 // agent-summary — Dump the raw basic conversation of an agent session.
 //
 // Reads the gateway/MITM audit snapshots and writes the basic conversation —
-// text + thinking, in order, with the system prompt, <system-reminder>
-// boilerplate, tool_use and tool_result dropped — to
+// text + thinking + compact tool traces, in order, with the system prompt and
+// <system-reminder> boilerplate dropped. Tool calls keep a one-line headline
+// (name + key arg) and a truncated result, so a fork knows what was read/edited
+// /run without the full payloads. Written to
 // <history>/summary/<conversation_id>.md, repoints a `current.md` symlink at it,
 // and prints that path. Hand the file to a fork ("分身") or replay it to restore.
 //
@@ -114,9 +116,17 @@ function normalizeMessages(data) {
       } else if (itemType === 'function_call') {
         messages.push({ role: 'assistant', id, content: [{ type: 'tool_use', name: item.name || '', input: item.arguments || {} }] });
       } else if (itemType === 'function_call_output') {
-        messages.push({ role: 'user', id, content: [{ type: 'tool_result', output: item.output || '' }] });
+        messages.push({ role: 'user', id, content: [{ type: 'tool_result', content: item.output || '' }] });
       } else if (itemType === 'reasoning') {
-        messages.push({ role: 'assistant', id, content: [{ type: 'thinking', thinking: item.encrypted_content || '' }] });
+        // encrypted_content is opaque ciphertext — dumping it is noise. Only the
+        // human-readable summary blocks (when present) are worth keeping.
+        const summaryText = (item.summary || [])
+          .map((s) => (s && typeof s === 'object' ? s.text || '' : ''))
+          .filter(Boolean)
+          .join('\n');
+        if (summaryText) {
+          messages.push({ role: 'assistant', id, content: [{ type: 'thinking', thinking: summaryText }] });
+        }
       }
     }
     return messages;
@@ -164,7 +174,7 @@ function normalizeMessages(data) {
 
       if (role === 'tool' && toolCallId) {
         const resultContent = typeof contentRaw === 'string' ? contentRaw : '';
-        content = [{ type: 'tool_result', output: resultContent.slice(0, 2000) }];
+        content = [{ type: 'tool_result', content: resultContent }];
         role = 'user';
       }
 
@@ -178,17 +188,76 @@ function normalizeMessages(data) {
   return [];
 }
 
-// --- basic-conversation extraction (text + thinking only) ----------------
+// --- basic-conversation extraction (text + thinking + tool traces) -------
 
-// Chronological turns, text + thinking only. tool_use / tool_result, the system
-// prompt, <system-reminder> boilerplate and OpenClaw noise are dropped; no
-// truncation. Output:
+// Harness scaffolding that rides in a role=user text block but is not a human
+// prompt. Matched as explicit prefixes — NOT a bare '<', which silently ate any
+// legitimate user message that happened to start with a tag.
+const NOISE_PREFIXES = [
+  '<system-reminder>',
+  '<local-command-caveat>',
+  '<command-name>',
+  '<command-message>',
+  '<command-args>',
+  '<local-command-stdout>',
+  '<local-command-stderr>',
+  '<task-notification>',
+  '<environment_context>',
+  '[OpenClaw heartbeat poll]',
+];
+
+// Tool payload caps. tool_result bodies are the bulk of a raw dump — keep the
+// head only; errors get more room because they matter most for continuation.
+const TOOL_INPUT_MAX = 200;
+const TOOL_RESULT_MAX = 400;
+const TOOL_RESULT_ERROR_MAX = 1000;
+
+function truncate(s, max) {
+  s = (s || '').trim();
+  if (s.length <= max) return s;
+  return s.slice(0, max) + ` …[+${s.length - max} chars]`;
+}
+
+// One-line headline for a tool call: the key argument when we recognize it
+// (command/path/pattern/url/…), else the compacted input.
+const TOOL_KEY_ARGS = ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'prompt', 'description'];
+function toolHeadline(name, input) {
+  let arg = '';
+  if (input && typeof input === 'object') {
+    for (const key of TOOL_KEY_ARGS) {
+      const v = input[key];
+      if (typeof v === 'string' && v.trim()) { arg = v; break; }
+    }
+    if (!arg) { try { arg = JSON.stringify(input); } catch { arg = String(input); } }
+  } else if (input != null) {
+    arg = String(input);
+  }
+  return `${name || 'tool'}: ${truncate(arg.replace(/\s+/g, ' '), TOOL_INPUT_MAX)}`;
+}
+
+// tool_result content across formats: string, or a list of text blocks.
+function toolResultText(block) {
+  const raw = block.content ?? block.output ?? '';
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((b) => (typeof b === 'string' ? b : (b && typeof b === 'object' && b.type === 'text' ? b.text || '' : '')))
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+
+// Chronological turns: text + thinking in full, tool calls as one-line
+// headlines with truncated results; the system prompt and harness boilerplate
+// are dropped. Output:
 //   ## Turn N
 //   USER: <message>
 //   AI (thinking): <reasoning>
+//   AI (tool): <name>: <key arg>
+//   TOOL RESULT: <truncated head>
 //   AI: <reply text>
 function generateStructuredText(messages) {
-  const NOISE_PREFIXES = ['<system-reminder>', '<', '[OpenClaw heartbeat poll]'];
   const clean = (s) => {
     s = (s || '').trim();
     if (!s) return '';
@@ -196,46 +265,63 @@ function generateStructuredText(messages) {
     return s;
   };
 
-  // Group messages into turns: each user msg starts a turn, followed by
-  // assistant messages until the next user msg.
+  // Group messages into turns: each user msg with real typed text starts a
+  // turn; assistant blocks and tool results append to the current turn's flow.
   const turns = [];
   let current = null; // { user: [str], ai: [[kind, text]] }
+  const ensureTurn = () => {
+    if (current === null) { current = { user: [], ai: [] }; turns.push(current); }
+    return current;
+  };
   for (const msg of messages) {
     const role = msg.role || '';
     if (role !== 'user' && role !== 'assistant') continue;
 
     if (role === 'user') {
-      // tool_result (a "user" message in the anthropic format) carries no
-      // 'text' block, so it falls away here.
       const userTexts = [];
+      const toolResults = [];
       for (const block of msg.content || []) {
         if (!block || typeof block !== 'object') continue;
         if (block.type === 'text') {
           const c = clean(block.text);
           if (c) userTexts.push(c);
+        } else if (block.type === 'tool_result') {
+          const body = toolResultText(block).trim();
+          if (body) {
+            const max = block.is_error ? TOOL_RESULT_ERROR_MAX : TOOL_RESULT_MAX;
+            toolResults.push((block.is_error ? '[error] ' : '') + truncate(body, max));
+          }
         }
       }
-      if (!userTexts.length) continue;
-      current = { user: userTexts, ai: [] };
-      turns.push(current);
+      if (userTexts.length) {
+        current = { user: userTexts, ai: [] };
+        turns.push(current);
+      }
+      // tool_result belongs to the in-flight assistant turn, not a new one.
+      if (toolResults.length) {
+        const t = ensureTurn();
+        for (const r of toolResults) t.ai.push(['tool_result', r]);
+      }
       continue;
     }
 
     // assistant
-    if (current === null) { current = { user: [], ai: [] }; turns.push(current); }
+    const t = ensureTurn();
     for (const block of msg.content || []) {
       if (!block || typeof block !== 'object') continue;
       if (block.type === 'text') {
         const c = clean(block.text);
-        if (c) current.ai.push(['text', c]);
+        if (c) t.ai.push(['text', c]);
       } else if (block.type === 'thinking') {
-        const t = (block.thinking || '').trim();
-        if (t) current.ai.push(['thinking', t]);
+        const think = (block.thinking || '').trim();
+        if (think) t.ai.push(['thinking', think]);
+      } else if (block.type === 'tool_use') {
+        t.ai.push(['tool', toolHeadline(block.name, block.input)]);
       }
-      // tool_use intentionally dropped — not basic conversation.
     }
   }
 
+  const LABELS = { text: 'AI: ', thinking: 'AI (thinking): ', tool: 'AI (tool): ', tool_result: 'TOOL RESULT: ' };
   const lines = [];
   let turnNo = 0;
   for (const t of turns) {
@@ -243,7 +329,7 @@ function generateStructuredText(messages) {
     turnNo += 1;
     lines.push(`## Turn ${turnNo}`);
     for (const u of t.user) lines.push(`USER: ${u}`);
-    for (const [kind, txt] of t.ai) lines.push(kind === 'text' ? `AI: ${txt}` : `AI (thinking): ${txt}`);
+    for (const [kind, txt] of t.ai) lines.push(LABELS[kind] + txt);
     lines.push('');
   }
   return lines.join('\n').replace(/\s+$/, '') + '\n';
@@ -286,13 +372,53 @@ function main() {
   let messages = normalizeMessages(data);
 
   // Fold the latest assistant turn (reply.json) in as a final assistant message
-  // so it renders through the same path (text + thinking only).
+  // so it renders through the same path. In a tool-continuation round the
+  // request body already carries this turn's earlier blocks while reply.items
+  // still holds them too — dedup by text content / tool id so nothing prints
+  // twice.
   const reply = loadReplySnapshot(path);
-  const replyBlocks = (reply.items || []).filter(
-    (item) => item && typeof item === 'object' && (item.type === 'text' || item.type === 'thinking')
-  );
-  if (replyBlocks.length) {
-    messages = messages.concat([{ role: 'assistant', content: replyBlocks }]);
+  if ((reply.conversation_id || data.conversation_id) === data.conversation_id) {
+    const seenTexts = new Set();
+    const seenToolIds = new Set();
+    for (const msg of messages) {
+      if ((msg.role || '') !== 'assistant') continue;
+      for (const block of msg.content || []) {
+        if (!block || typeof block !== 'object') continue;
+        if (block.type === 'text' && block.text) seenTexts.add(block.text.trim());
+        else if (block.type === 'thinking' && block.thinking) seenTexts.add(block.thinking.trim());
+        else if (block.type === 'tool_use' && block.id) seenToolIds.add(block.id);
+      }
+    }
+    const replyBlocks = [];
+    for (const item of reply.items || []) {
+      if (!item || typeof item !== 'object') continue;
+      if (item.type === 'text') {
+        const text = (item.text || '').trim();
+        if (text && !seenTexts.has(text)) replyBlocks.push({ type: 'text', text });
+      } else if (item.type === 'thinking') {
+        const think = (item.thinking || item.text || '').trim();
+        if (think && !seenTexts.has(think)) replyBlocks.push({ type: 'thinking', thinking: think });
+      } else if (item.type === 'tool_use') {
+        if (item.tool_id && seenToolIds.has(item.tool_id)) continue;
+        replyBlocks.push({ type: 'tool_use', name: item.name, input: item.input });
+        if (item.output) replyBlocks.push({ type: 'reply_tool_output', output: item.output });
+      }
+    }
+    // reply_tool_output renders as a tool_result on the user side of the flow;
+    // flush interleaved so each output stays right after its call.
+    let pending = [];
+    const flush = () => {
+      if (pending.length) { messages = messages.concat([{ role: 'assistant', content: pending }]); pending = []; }
+    };
+    for (const b of replyBlocks) {
+      if (b.type === 'reply_tool_output') {
+        flush();
+        messages = messages.concat([{ role: 'user', content: [{ type: 'tool_result', content: b.output }] }]);
+      } else {
+        pending.push(b);
+      }
+    }
+    flush();
   }
 
   const text = generateStructuredText(messages);
