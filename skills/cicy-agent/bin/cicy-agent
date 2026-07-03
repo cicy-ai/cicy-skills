@@ -10,6 +10,7 @@
 // into ~/cicy-ai/db/cicy-agent.json.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -118,9 +119,9 @@ function loadLocalToken() {
   return cfg.api_token;
 }
 
-// resolve { api, token } for a registered team, or the local cicy-code by default
+// resolve { api, token, proxy } for a registered team, or the local cicy-code by default
 function resolveTarget(team) {
-  if (!team) return { api: API_BASE, token: loadLocalToken() };
+  if (!team) return { api: API_BASE, token: loadLocalToken(), proxy: '' };
   const teams = loadTeams();
   if (!teams.length) {
     throw Object.assign(new Error(`--team ${team} requested but no teams registered. Run: cicy-agent team add <name> <api> <token>`), { exitCode: 3 });
@@ -128,27 +129,50 @@ function resolveTarget(team) {
   const found = teams.find((t) => t.name === team);
   if (!found) throw Object.assign(new Error(`team ${team} not registered (have: ${teams.map((t) => t.name).join(', ')}). Run: cicy-agent team add ${team} <api> <token>`), { exitCode: 4 });
   if (!found.api || !found.api_token) throw Object.assign(new Error(`team ${team} missing api or api_token in ${NODES_JSON}`), { exitCode: 3 });
-  return { api: found.api.replace(/\/+$/, ''), token: found.api_token };
+  return { api: found.api.replace(/\/+$/, ''), token: found.api_token, proxy: found.proxy || '' };
+}
+
+// HTTP via curl subprocess — used when a team has a `proxy` configured, since
+// Node's fetch ignores proxies entirely (a team behind an SNI-filtered path,
+// e.g. *.trycloudflare.com, is only reachable through a specific egress).
+function curlRequest(method, url, { headers = {}, body, timeoutMs = 60000, proxy } = {}) {
+  const args = ['-sS', '-m', String(Math.max(1, Math.ceil(timeoutMs / 1000))), '-X', method, '-w', '\n%{http_code}'];
+  if (proxy) args.push('-x', proxy);
+  for (const [k, v] of Object.entries(headers)) args.push('-H', `${k}: ${v}`);
+  if (body !== undefined) args.push('--data-binary', body);
+  args.push(url);
+  const out = execFileSync('curl', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const i = out.lastIndexOf('\n');
+  return { status: parseInt(out.slice(i + 1), 10) || 0, text: out.slice(0, i) };
 }
 
 async function api(method, path, payload, node, timeoutMs) {
-  const { api: base, token } = resolveTarget(node);
+  const { api: base, token, proxy } = resolveTarget(node);
   const headers = { 'Authorization': `Bearer ${token}` };
-  const init = { method, headers };
+  let body;
   if (payload !== undefined) {
     headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(payload);
+    body = JSON.stringify(payload);
   }
-  // Per-call timeout (broadcast uses it so one dead pane can't stall the run).
-  if (timeoutMs > 0) init.signal = AbortSignal.timeout(timeoutMs);
-  let res;
-  try { res = await fetch(base + path, init); }
-  catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${base} — is it running? (${e.message})`), { exitCode: 3 }); }
-  const text = await res.text();
-  if (res.status === 401 || res.status === 403) throw Object.assign(new Error(`auth failed (${res.status})`), { exitCode: 3 });
-  if (res.status >= 400) {
-    let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
-    throw Object.assign(new Error(`api error (${res.status}): ${body?.error || body?.message || text}`), { exitCode: 4 });
+  let status, text;
+  if (proxy) {
+    try { ({ status, text } = curlRequest(method, base + path, { headers, body, timeoutMs: timeoutMs > 0 ? timeoutMs : 60000, proxy })); }
+    catch (e) { throw Object.assign(new Error(`cannot reach ${base} via proxy ${proxy} (${String(e.message || e).split('\n')[0]})`), { exitCode: 3 }); }
+  } else {
+    const init = { method, headers };
+    if (body !== undefined) init.body = body;
+    // Per-call timeout (broadcast uses it so one dead pane can't stall the run).
+    if (timeoutMs > 0) init.signal = AbortSignal.timeout(timeoutMs);
+    let res;
+    try { res = await fetch(base + path, init); }
+    catch (e) { throw Object.assign(new Error(`cannot reach cicy-code at ${base} — is it running? (${e.message})`), { exitCode: 3 }); }
+    status = res.status;
+    text = await res.text();
+  }
+  if (status === 401 || status === 403) throw Object.assign(new Error(`auth failed (${status})`), { exitCode: 3 });
+  if (status >= 400) {
+    let errBody; try { errBody = JSON.parse(text); } catch { errBody = { error: text }; }
+    throw Object.assign(new Error(`api error (${status}): ${errBody?.error || errBody?.message || text}`), { exitCode: 4 });
   }
   try { return JSON.parse(text); } catch { return text; }
 }
@@ -527,19 +551,25 @@ async function cmdCreate(args, node) {
 function mask(t) { return t && t.length > 8 ? t.slice(0, 4) + '…' + t.slice(-4) : '***'; }
 
 // Probe one team: GET /api/health (unauthenticated on cicy-code, but we send
-// the Bearer anyway for setups that gate it). Returns {online, version, error}.
-async function probeTeam(t, timeoutMs = 5000) {
+// the Bearer anyway for setups that gate it). Honors the team's `proxy` (via
+// curl). Returns {online, version, agents, error}.
+async function probeTeam(t, timeoutMs = 8000) {
   const base = String(t.api || '').replace(/\/+$/, '');
+  const headers = { 'Authorization': `Bearer ${t.api_token || ''}` };
   try {
-    const res = await fetch(base + '/api/health', {
-      headers: { 'Authorization': `Bearer ${t.api_token || ''}` },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (res.status >= 400) return { online: false, version: null, error: `http ${res.status}` };
-    const body = await res.json().catch(() => ({}));
+    let status, text;
+    if (t.proxy) {
+      ({ status, text } = curlRequest('GET', base + '/api/health', { headers, timeoutMs, proxy: t.proxy }));
+    } else {
+      const res = await fetch(base + '/api/health', { headers, signal: AbortSignal.timeout(timeoutMs) });
+      status = res.status;
+      text = await res.text();
+    }
+    if (status >= 400) return { online: false, version: null, agents: null, error: `http ${status}` };
+    let body; try { body = JSON.parse(text); } catch { body = {}; }
     return { online: true, version: body.version || null, agents: body.agents_count ?? null, error: null };
   } catch (e) {
-    return { online: false, version: null, error: String(e.message || e) };
+    return { online: false, version: null, agents: null, error: String(e.message || e).split('\n')[0] };
   }
 }
 
@@ -548,32 +578,38 @@ async function cmdTeam(args) {
   const teams = loadTeams();
 
   if (sub === 'add') {
-    let [, name, apiURL, token] = args;
+    let proxy = '', tokenFlag = '';
+    const pos = [];
     for (let i = 1; i < args.length; i++) {
-      if (args[i] === '--token') { token = args[++i] || ''; }
+      if (args[i] === '--token') { tokenFlag = args[++i] || ''; continue; }
+      if (args[i] === '--proxy') { proxy = args[++i] || ''; continue; }
+      pos.push(args[i]);
     }
+    const [name, apiURL, tokenPos] = pos;
+    const token = tokenFlag || tokenPos;
     if (!name || !apiURL || !token) {
-      throw Object.assign(new Error('Usage: cicy-agent team add <name> <api-url> <api-token>'), { exitCode: 2 });
+      throw Object.assign(new Error('Usage: cicy-agent team add <name> <api-url> <api-token> [--proxy http://127.0.0.1:9001]'), { exitCode: 2 });
     }
     if (!/^https?:\/\//.test(apiURL)) {
       throw Object.assign(new Error(`api-url must start with http(s)://, got: ${apiURL}`), { exitCode: 2 });
     }
     const entry = { name, api: apiURL.replace(/\/+$/, ''), api_token: token };
+    if (proxy) entry.proxy = proxy;
     const next = teams.filter((t) => t.name !== name).concat([entry]);
     saveTeams(next);
     // Probe right away so a typo'd address/token surfaces at registration time.
     const p = await probeTeam(entry);
-    if (json) return ok({ added: entry.name, api: entry.api, online: p.online, version: p.version, error: p.error });
-    console.log(`registered team ${name} → ${entry.api}`);
+    if (json) return ok({ added: entry.name, api: entry.api, proxy: entry.proxy || null, online: p.online, version: p.version, error: p.error });
+    console.log(`registered team ${name} → ${entry.api}${proxy ? ` (proxy ${proxy})` : ''}`);
     console.log(p.online ? `  ✓ online  version=${p.version || '?'}  agents=${p.agents ?? '?'}` : `  ✗ unreachable: ${p.error}`);
     return;
   }
 
   if (sub === 'ls' || sub === 'list') {
-    if (json) return ok({ teams: teams.map((t) => ({ name: t.name, api: t.api })) });
+    if (json) return ok({ teams: teams.map((t) => ({ name: t.name, api: t.api, proxy: t.proxy || null })) });
     if (!teams.length) { console.log('(no teams registered — cicy-agent team add <name> <api> <token>)'); return; }
-    console.log('name\tapi\ttoken');
-    for (const t of teams) console.log(`${t.name}\t${t.api}\t${mask(t.api_token)}`);
+    console.log('name\tapi\ttoken\tproxy');
+    for (const t of teams) console.log(`${t.name}\t${t.api}\t${mask(t.api_token)}\t${t.proxy || '-'}`);
     return;
   }
 

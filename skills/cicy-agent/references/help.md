@@ -48,6 +48,9 @@ cicy-agent create <title> [--type cicy] [--model M]   Create a BRAND-NEW agent f
             [--role R] [--role-template RT] [--master PANE]   agent_type defaults to cicy. NOT a clone — use fork to inherit context.
 
 cicy-agent team add <name> <api> <token>      Register another team's cicy-code (probes it immediately)
+            [--proxy http://127.0.0.1:9001]    --proxy: reach this team via an egress proxy (curl-based;
+                                              use when the team's domain is SNI-filtered on the direct
+                                              path, e.g. *.trycloudflare.com quick tunnels)
 cicy-agent team ls                            List registered teams (token masked)
 cicy-agent team rm <name>                     Unregister a team
 cicy-agent team ping [name]                   Liveness + version via /api/health — online ✓/✗,
