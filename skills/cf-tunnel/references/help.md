@@ -3,12 +3,44 @@
 ## Commands
 
 ```
-cf-tunnel config                          Open ~/cicy-ai/db/cf.json in $EDITOR
-cf-tunnel status [--json]                 Show config state
-cf-tunnel list   [--json]                 List current routes (ingress + DNS)
-cf-tunnel add    <port> [<port> ...]      Add g-<port>.<domain> route
-cf-tunnel del    <port> [<port> ...]      Remove route
+cf-tunnel config                          Open the config in $EDITOR
+cf-tunnel status  [--json]                Show config state + registered tunnels
+cf-tunnel tunnels [--json]                Tree: each tunnel → its hostnames (live, from CF API)
+cf-tunnel sync    [--json]                Regenerate <env>.tunnels in ~/cicy-ai/db/cf-tunnel.json
+                                          from the CF API (id + connector token + hostname list)
+cf-tunnel create <name> [--host <h>] [--service <url>|--port <n>] [--json]
+                                          Provision a NAMED tunnel end-to-end: create/reuse the
+                                          tunnel, add ingress <h>→service, upsert proxied DNS
+                                          CNAME, fetch the connector token, save the entry to
+                                          the registry. Defaults: host=<name>.<domain>,
+                                          service=http://localhost:8008
+cf-tunnel rm <name> [--json]              Delete a named tunnel + its DNS + registry entry
+cf-tunnel list   [--json]                 (legacy) List g-<port> routes of the fixed tunnel_id
+cf-tunnel add    <port> [<port> ...]      (legacy) Add g-<port>.<domain> route
+cf-tunnel del    <port> [<port> ...]      (legacy) Remove g-<port> route
 cf-tunnel --help / -h / help              Print this help
+```
+
+## Registry (~/cicy-ai/db/cf-tunnel.json)
+
+One tunnel = one connector token; the hostnames list is the domains served
+through it:
+
+```json
+{
+  "prod": {
+    "api_token": "...", "account_id": "...", "domain": "...", "zone_id": "...",
+    "tunnels": {
+      "cloudshell": {
+        "id": "744e1a6d-…",
+        "token": "eyJ…",
+        "hostnames": [
+          { "hostname": "cloudshell.example.com", "service": "http://localhost:8008" }
+        ]
+      }
+    }
+  }
+}
 ```
 
 ## Examples
@@ -17,22 +49,31 @@ cf-tunnel --help / -h / help              Print this help
 # bootstrap
 cf-tunnel status
 cf-tunnel config
+
+# named tunnels
+cf-tunnel tunnels                          # live tree: tunnel → hostnames
+cf-tunnel sync                             # write all tunnels (+tokens) into the registry
+cf-tunnel create cloudshell                # cloudshell.<domain> → http://localhost:8008
+cf-tunnel create api --port 8009           # api.<domain> → http://localhost:8009
+cf-tunnel create web --host www.example.com --service http://localhost:3000
+cf-tunnel rm api
+
+# run a connector with a saved token (never print the token itself)
+cloudflared tunnel run --token "$(node -p "require(process.env.HOME+'/cicy-ai/db/cf-tunnel.json').prod.tunnels.cloudshell.token")"
+
+# legacy fixed-tunnel port routes
 cf-tunnel list
-
-# add routes
 cf-tunnel add 8080
-cf-tunnel add 5174 8010 13000
-
-# remove
 cf-tunnel del 8080
 
 # environments
-CF_ENV=dev cf-tunnel list
-CF_ENV=dev cf-tunnel add 8080
+CF_ENV=dev cf-tunnel sync
 ```
 
 ## Environment
 
-- `CICY_CF_CONFIG` — override config path (default `~/cicy-ai/db/cf.json`)
+- `CICY_CF_CONFIG` — override config path (default `~/cicy-ai/db/cf-tunnel.json`,
+  falling back to `~/cicy-ai/db/cf.json` for credentials if the registry is absent;
+  writes always go to `~/cicy-ai/db/cf-tunnel.json`)
 - `CF_ENV`         — pick `prod` (default) or `dev` (or any other key in config)
 - `EDITOR`/`VISUAL` — editor for `cf-tunnel config`

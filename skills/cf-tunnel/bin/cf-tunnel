@@ -1,6 +1,15 @@
 #!/usr/bin/env node
-// cf-tunnel — manage Cloudflare Tunnel routes and DNS records.
-// Subcommands: config / status / list / add / del.
+// cf-tunnel — manage Cloudflare NAMED tunnels, their routes and DNS records.
+// Subcommands: config / status / tunnels / sync / create / rm / list / add / del.
+//
+// Named-tunnel registry (the source of truth this tool maintains):
+//   ~/cicy-ai/db/cf-tunnel.json
+//   { "<env>": { api_token, account_id, domain, zone_id,
+//                tunnels: { "<name>": { id, token, hostnames: [{hostname, service}] } } } }
+// One tunnel = one connector token; its hostnames list is the domains served
+// through it. `sync` regenerates the tunnels section from the CF API; `create`
+// provisions a new named tunnel (tunnel + ingress + DNS + token) and appends it.
+//
 // Zero npm dependencies. Pure ESM. Node 18+.
 
 import { readFileSync, writeFileSync, existsSync, statSync, chmodSync, mkdirSync } from 'node:fs';
@@ -8,10 +17,15 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 
-const CONFIG_PATH = process.env.CICY_CF_CONFIG || join(homedir(), 'cicy-ai', 'db', 'cf.json');
+const REGISTRY_PATH = join(homedir(), 'cicy-ai', 'db', 'cf-tunnel.json');
+const LEGACY_CF_JSON = join(homedir(), 'cicy-ai', 'db', 'cf.json');
+// Config default is the registry itself; cf.json is a read-only credential fallback.
+const CONFIG_PATH = process.env.CICY_CF_CONFIG ||
+  (existsSync(REGISTRY_PATH) || !existsSync(LEGACY_CF_JSON) ? REGISTRY_PATH : LEGACY_CF_JSON);
 const CF_API = 'https://api.cloudflare.com/client/v4';
 const ENV = process.env.CF_ENV || 'prod';
-const REQUIRED_FIELDS = ['api_token', 'account_id', 'tunnel_id', 'domain', 'zone_id'];
+const CORE_FIELDS = ['api_token', 'account_id', 'domain', 'zone_id'];
+const REQUIRED_FIELDS = [...CORE_FIELDS, 'tunnel_id']; // legacy add/del/list only
 
 const argv = process.argv.slice(2);
 
@@ -24,11 +38,15 @@ const cmd = argv[0];
 
 try {
   switch (cmd) {
-    case 'config': await cmdConfig(); break;
-    case 'status': await cmdStatus(); break;
-    case 'list':   await cmdList(); break;
-    case 'add':    await cmdAdd(argv.slice(1)); break;
-    case 'del':    await cmdDel(argv.slice(1)); break;
+    case 'config':  await cmdConfig(); break;
+    case 'status':  await cmdStatus(); break;
+    case 'tunnels': await cmdTunnels(); break;
+    case 'sync':    await cmdSync(); break;
+    case 'create':  await cmdCreate(argv.slice(1)); break;
+    case 'rm':      await cmdRm(argv.slice(1)); break;
+    case 'list':    await cmdList(); break;
+    case 'add':     await cmdAdd(argv.slice(1)); break;
+    case 'del':     await cmdDel(argv.slice(1)); break;
     default: bail(`unknown command: ${cmd}. Try cf-tunnel --help.`, 2);
   }
 } catch (e) {
@@ -57,7 +75,7 @@ function printHelp() {
   }
 }
 
-function readEnvCfg() {
+function readEnvCfg(fields = CORE_FIELDS) {
   if (!existsSync(CONFIG_PATH)) {
     throw Object.assign(new Error(`config missing: ${CONFIG_PATH} — run 'cf-tunnel config'`), { exitCode: 3 });
   }
@@ -77,7 +95,7 @@ function readEnvCfg() {
   } else {
     throw Object.assign(new Error(`config has no '${ENV}' block`), { exitCode: 3 });
   }
-  for (const f of REQUIRED_FIELDS) {
+  for (const f of fields) {
     const v = block[f];
     if (!v || (typeof v === 'string' && v.startsWith('<paste'))) {
       throw Object.assign(
@@ -87,6 +105,51 @@ function readEnvCfg() {
     }
   }
   return block;
+}
+
+// ── registry (~/cicy-ai/db/cf-tunnel.json) ─────────────────────────────
+// Writes always target the registry file, whatever CONFIG_PATH resolved to.
+// Shape per env: { ...credentials, tunnels: { <name>: {id, token, hostnames} } }
+
+function writeRegistryTunnels(cfg, tunnels, { merge = false } = {}) {
+  let raw = {};
+  if (existsSync(REGISTRY_PATH)) {
+    try { raw = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8')); } catch { raw = {}; }
+  }
+  if (!raw[ENV] || typeof raw[ENV] !== 'object') raw[ENV] = {};
+  // seed credentials so the registry is self-contained even when they came from cf.json
+  for (const f of CORE_FIELDS) {
+    if (raw[ENV][f] === undefined && cfg[f] !== undefined) raw[ENV][f] = cfg[f];
+  }
+  raw[ENV].tunnels = merge ? { ...(raw[ENV].tunnels || {}), ...tunnels } : tunnels;
+  mkdirSync(dirname(REGISTRY_PATH), { recursive: true, mode: 0o700 });
+  writeFileSync(REGISTRY_PATH, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
+  try { chmodSync(REGISTRY_PATH, 0o600); } catch {}
+}
+
+// Fetch all live named tunnels with their hostnames (from ingress config).
+async function fetchTunnels(cfg, { withToken = false } = {}) {
+  const listPayload = await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel?is_deleted=false&per_page=100`, {}, cfg,
+  );
+  const out = [];
+  for (const t of listPayload.result || []) {
+    const entry = { name: t.name, id: t.id, status: t.status, hostnames: [] };
+    try {
+      const c = await cfFetch(`/accounts/${cfg.account_id}/cfd_tunnel/${t.id}/configurations`, {}, cfg);
+      for (const r of c.result?.config?.ingress || []) {
+        if (r.hostname) entry.hostnames.push({ hostname: r.hostname, service: r.service });
+      }
+    } catch { /* locally-managed tunnel: no remote config */ }
+    if (withToken) {
+      try {
+        const tok = await cfFetch(`/accounts/${cfg.account_id}/cfd_tunnel/${t.id}/token`, {}, cfg);
+        entry.token = tok.result;
+      } catch { entry.token = null; }
+    }
+    out.push(entry);
+  }
+  return out;
 }
 
 function ensurePlaceholderConfig() {
@@ -106,7 +169,7 @@ function ensurePlaceholderConfig() {
         raw.prod = {};
       }
     }
-    for (const f of REQUIRED_FIELDS) {
+    for (const f of CORE_FIELDS) {
       if (raw.prod[f] === undefined) raw.prod[f] = `<paste-your-${f.replace(/_/g, '-')}-here>`;
     }
     writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
@@ -115,7 +178,7 @@ function ensurePlaceholderConfig() {
   }
   mkdirSync(dirname(CONFIG_PATH), { recursive: true, mode: 0o700 });
   const tmpl = {
-    prod: Object.fromEntries(REQUIRED_FIELDS.map((f) => [f, `<paste-your-${f.replace(/_/g, '-')}-here>`])),
+    prod: Object.fromEntries(CORE_FIELDS.map((f) => [f, `<paste-your-${f.replace(/_/g, '-')}-here>`])),
   };
   writeFileSync(CONFIG_PATH, JSON.stringify(tmpl, null, 2) + '\n', { mode: 0o600 });
   try { chmodSync(CONFIG_PATH, 0o600); } catch {}
@@ -177,10 +240,11 @@ async function cmdStatus() {
       const block = (raw[ENV] && typeof raw[ENV] === 'object') ? raw[ENV] :
                     (ENV === 'prod' && raw.api_token) ? raw : null;
       if (block) {
-        for (const f of REQUIRED_FIELDS) {
+        for (const f of CORE_FIELDS) {
           const v = block[f];
           out.fields[f] = !!(v && !(typeof v === 'string' && v.startsWith('<paste')));
         }
+        out.tunnels = Object.keys(block.tunnels || {});
         if (out.fields.api_token) out.api_token_masked = maskToken(block.api_token);
       } else {
         out.error = `no '${ENV}' block`;
@@ -196,18 +260,191 @@ async function cmdStatus() {
     console.log(`config:       ${out.config_path}`);
     console.log(`exists:       ${out.exists}`);
     console.log(`permissions:  ${out.permissions || '(n/a)'}`);
-    for (const f of REQUIRED_FIELDS) {
+    for (const f of CORE_FIELDS) {
       const masked = f === 'api_token' && out.api_token_masked ? `  [${out.api_token_masked}]` : '';
       console.log(`${(f + ':').padEnd(14)}${out.fields[f] ? '✓' : '(missing)'}${masked}`);
     }
+    if (out.tunnels) console.log(`tunnels:      ${out.tunnels.length ? out.tunnels.join(', ') : '(none — run cf-tunnel sync)'}`);
     if (out.error) console.log(`error:        ${out.error}`);
   }
+}
+
+// ── tunnels (tree view) ────────────────────────────────────────────────
+
+async function cmdTunnels() {
+  const cfg = readEnvCfg();
+  const tunnels = await fetchTunnels(cfg);
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({ ok: true, data: { env: ENV, tunnels } }));
+    return;
+  }
+  if (tunnels.length === 0) { console.log('(no tunnels)'); return; }
+  for (const t of tunnels) {
+    const mark = t.status === 'healthy' ? '✓' : '✗';
+    console.log(`${mark} ${t.name}  (${t.status}, ${t.id.slice(0, 8)}…)`);
+    for (const h of t.hostnames) console.log(`    ${h.hostname} → ${h.service}`);
+    if (t.hostnames.length === 0) console.log('    (no hostnames)');
+  }
+}
+
+// ── sync (regenerate registry tunnels from the CF API) ────────────────
+
+async function cmdSync() {
+  const cfg = readEnvCfg();
+  const tunnels = await fetchTunnels(cfg, { withToken: true });
+  const reg = {};
+  for (const t of tunnels) {
+    reg[t.name] = { id: t.id, token: t.token, hostnames: t.hostnames };
+  }
+  writeRegistryTunnels(cfg, reg);
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({
+      ok: true,
+      data: { env: ENV, path: REGISTRY_PATH, tunnels: tunnels.map((t) => ({ name: t.name, id: t.id, status: t.status, hostnames: t.hostnames, token_masked: maskToken(t.token || '') })) },
+    }));
+    return;
+  }
+  console.log(`synced ${tunnels.length} tunnel(s) → ${REGISTRY_PATH} (${ENV}.tunnels)`);
+  for (const t of tunnels) {
+    console.log(`  ${t.name}: token=${maskToken(t.token || '')}, ${t.hostnames.length} hostname(s)`);
+  }
+}
+
+// ── create (provision a named tunnel end-to-end) ───────────────────────
+// tunnel (create or reuse by name) → ingress rule → DNS CNAME → connector
+// token → registry entry {id, token, hostnames}.
+
+async function cmdCreate(args) {
+  const pos = args.filter((a) => !a.startsWith('--'));
+  const name = pos[0];
+  if (!name) bail('usage: cf-tunnel create <name> [--host <hostname>] [--service <url>|--port <n>]', 2);
+  const cfg = readEnvCfg();
+
+  const hostname = flagValue(args, '--host') || flagValue(args, '--hostname') || `${name}.${cfg.domain}`;
+  const port = flagValue(args, '--port');
+  const service = flagValue(args, '--service') || (port ? `http://localhost:${port}` : 'http://localhost:8008');
+  if (!hostname.endsWith('.' + cfg.domain) && hostname !== cfg.domain) {
+    bail(`hostname ${hostname} is outside ${cfg.domain} (zone_id would not match)`, 2);
+  }
+
+  // 1. find or create the tunnel
+  const found = await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel?is_deleted=false&name=${encodeURIComponent(name)}`, {}, cfg,
+  );
+  let tunnel = (found.result || []).find((t) => t.name === name);
+  let created = false;
+  if (!tunnel) {
+    const mk = await cfFetch(`/accounts/${cfg.account_id}/cfd_tunnel`, {
+      method: 'POST',
+      body: JSON.stringify({ name, config_src: 'cloudflare' }),
+    }, cfg);
+    tunnel = mk.result;
+    created = true;
+  }
+
+  // 2. ingress: keep existing rules, upsert this hostname, keep catch-all last
+  let config = {};
+  try {
+    const c = await cfFetch(`/accounts/${cfg.account_id}/cfd_tunnel/${tunnel.id}/configurations`, {}, cfg);
+    config = c.result?.config || {};
+  } catch { config = {}; }
+  const rules = (config.ingress || []).filter((r) => r.hostname && r.hostname !== hostname);
+  rules.push({ hostname, service });
+  const fallback = (config.ingress || []).find((r) => !r.hostname) || { service: 'http_status:404' };
+  await cfFetch(`/accounts/${cfg.account_id}/cfd_tunnel/${tunnel.id}/configurations`, {
+    method: 'PUT',
+    body: JSON.stringify({ config: { ...config, ingress: [...rules, fallback] } }),
+  }, cfg);
+
+  // 3. DNS CNAME (proxied) → <id>.cfargotunnel.com
+  const cnameTarget = `${tunnel.id}.cfargotunnel.com`;
+  const dns = await cfFetch(`/zones/${cfg.zone_id}/dns_records?type=CNAME&per_page=200`, {}, cfg);
+  const cur = (dns.result || []).find((r) => r.name === hostname);
+  let dnsState;
+  if (cur) {
+    if (cur.content !== cnameTarget || !cur.proxied) {
+      await cfFetch(`/zones/${cfg.zone_id}/dns_records/${cur.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ type: 'CNAME', name: hostname, content: cnameTarget, proxied: true }),
+      }, cfg);
+      dnsState = 'updated';
+    } else dnsState = 'already';
+  } else {
+    await cfFetch(`/zones/${cfg.zone_id}/dns_records`, {
+      method: 'POST',
+      body: JSON.stringify({ type: 'CNAME', name: hostname, content: cnameTarget, proxied: true, ttl: 1 }),
+    }, cfg);
+    dnsState = 'created';
+  }
+
+  // 4. connector token + registry entry (merge: keep other tunnels)
+  const tok = await cfFetch(`/accounts/${cfg.account_id}/cfd_tunnel/${tunnel.id}/token`, {}, cfg);
+  const hostnames = [...rules.filter((r) => r.hostname !== hostname).map((r) => ({ hostname: r.hostname, service: r.service })), { hostname, service }];
+  writeRegistryTunnels(cfg, { [name]: { id: tunnel.id, token: tok.result, hostnames } }, { merge: true });
+
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({
+      ok: true,
+      data: { env: ENV, name, id: tunnel.id, created, hostname, service, dns: dnsState, token_masked: maskToken(tok.result), registry: REGISTRY_PATH },
+    }));
+    return;
+  }
+  console.log(`✓ tunnel ${name} ${created ? 'created' : 'reused'} (${tunnel.id.slice(0, 8)}…)`);
+  console.log(`✓ ${hostname} → ${service}  (dns: ${dnsState})`);
+  console.log(`✓ token saved to ${REGISTRY_PATH} (${ENV}.tunnels.${name}, masked: ${maskToken(tok.result)})`);
+  console.log(`run the connector:  cloudflared tunnel run --token <token from registry>`);
+}
+
+// ── rm (delete a named tunnel + its DNS + registry entry) ──────────────
+
+async function cmdRm(args) {
+  const name = args.filter((a) => !a.startsWith('--'))[0];
+  if (!name) bail('usage: cf-tunnel rm <name>', 2);
+  const cfg = readEnvCfg();
+  const found = await cfFetch(
+    `/accounts/${cfg.account_id}/cfd_tunnel?is_deleted=false&name=${encodeURIComponent(name)}`, {}, cfg,
+  );
+  const tunnel = (found.result || []).find((t) => t.name === name);
+  if (!tunnel) bail(`no tunnel named '${name}'`, 3);
+
+  // DNS records pointing at it
+  const cnameTarget = `${tunnel.id}.cfargotunnel.com`;
+  const dns = await cfFetch(`/zones/${cfg.zone_id}/dns_records?type=CNAME&per_page=200`, {}, cfg);
+  const mine = (dns.result || []).filter((r) => r.content === cnameTarget);
+  for (const r of mine) {
+    await cfFetch(`/zones/${cfg.zone_id}/dns_records/${r.id}`, { method: 'DELETE' }, cfg);
+  }
+  await cfFetch(`/accounts/${cfg.account_id}/cfd_tunnel/${tunnel.id}?cascade=true`, { method: 'DELETE' }, cfg);
+
+  // drop from registry
+  if (existsSync(REGISTRY_PATH)) {
+    try {
+      const raw = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8'));
+      if (raw[ENV]?.tunnels?.[name]) {
+        delete raw[ENV].tunnels[name];
+        writeFileSync(REGISTRY_PATH, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
+      }
+    } catch { /* registry unreadable — CF side already cleaned */ }
+  }
+
+  if (argv.includes('--json')) {
+    console.log(JSON.stringify({ ok: true, data: { env: ENV, name, id: tunnel.id, dns_deleted: mine.map((r) => r.name) } }));
+  } else {
+    console.log(`✗ tunnel ${name} deleted (${tunnel.id.slice(0, 8)}…), dns removed: ${mine.map((r) => r.name).join(', ') || '(none)'}`);
+  }
+}
+
+function flagValue(args, flag) {
+  const i = args.indexOf(flag);
+  if (i >= 0 && i + 1 < args.length) return args[i + 1];
+  const pref = args.find((a) => a.startsWith(flag + '='));
+  return pref ? pref.slice(flag.length + 1) : undefined;
 }
 
 // ── list ────────────────────────────────────────────────────────────────
 
 async function cmdList() {
-  const cfg = readEnvCfg();
+  const cfg = readEnvCfg(REQUIRED_FIELDS);
   const json = argv.includes('--json');
 
   // Get tunnel ingress config
@@ -259,7 +496,7 @@ async function cmdList() {
 async function cmdAdd(args) {
   const ports = parsePorts(args);
   if (ports.length === 0) bail('usage: cf-tunnel add <port> [<port> ...]', 2);
-  const cfg = readEnvCfg();
+  const cfg = readEnvCfg(REQUIRED_FIELDS);
 
   // 1. fetch current ingress
   const cfgPayload = await cfFetch(
@@ -333,7 +570,7 @@ async function cmdAdd(args) {
 async function cmdDel(args) {
   const ports = parsePorts(args);
   if (ports.length === 0) bail('usage: cf-tunnel del <port> [<port> ...]', 2);
-  const cfg = readEnvCfg();
+  const cfg = readEnvCfg(REQUIRED_FIELDS);
 
   const cfgPayload = await cfFetch(
     `/accounts/${cfg.account_id}/cfd_tunnel/${cfg.tunnel_id}/configurations`,

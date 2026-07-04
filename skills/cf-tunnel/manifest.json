@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cf-tunnel",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "title": "Cloudflare Tunnel",
-  "description": "Manage Cloudflare Tunnel routes and DNS records on this host. Subcommands: config / status / list / add / del.",
+  "description": "Manage Cloudflare NAMED tunnels (token/name → hostname list), routes and DNS. Subcommands: config / status / tunnels / sync / create / rm / list / add / del.",
   "category": "cloud",
   "tags": [
     "cloudflare",
@@ -20,13 +20,13 @@
   "npm_dependencies": false,
   "entry": "bin/cf-tunnel",
   "config": {
-    "path": "~/cicy-ai/db/cf.json",
+    "path": "~/cicy-ai/db/cf-tunnel.json",
     "permissions": "0600",
     "secret_fields": [
       "api_token",
       "account_id",
-      "tunnel_id",
-      "zone_id"
+      "zone_id",
+      "tunnels.*.token"
     ]
   },
   "permissions": [
@@ -45,34 +45,54 @@
   "i18n": {
     "zh-CN": {
       "title": "Cloudflare Tunnel",
-      "description": "管理本机的 Cloudflare Tunnel 路由和 DNS 记录。子命令：config / status / list / add / del。"
+      "description": "管理 Cloudflare 具名隧道(token/name → 域名列表)、路由和 DNS。子命令:config / status / tunnels / sync / create / rm / list / add / del。"
     }
   },
   "tools": [
     {
+      "name": "cf-tunnel tunnels",
+      "example": "cf-tunnel tunnels",
+      "description": "Tree of named tunnels → their hostnames (live from CF API)"
+    },
+    {
+      "name": "cf-tunnel sync",
+      "example": "cf-tunnel sync",
+      "description": "Regenerate <env>.tunnels {id, token, hostnames[]} in ~/cicy-ai/db/cf-tunnel.json from the CF API"
+    },
+    {
+      "name": "cf-tunnel create",
+      "example": "cf-tunnel create cloudshell --port 8008",
+      "description": "Provision a named tunnel end-to-end (tunnel + ingress + DNS + connector token → registry)"
+    },
+    {
+      "name": "cf-tunnel rm",
+      "example": "cf-tunnel rm cloudshell",
+      "description": "Delete a named tunnel, its DNS records and its registry entry"
+    },
+    {
       "name": "cf-tunnel config",
       "example": "cf-tunnel config",
-      "description": "Show current tunnel configuration"
+      "description": "Show/edit credential configuration"
     },
     {
       "name": "cf-tunnel status",
       "example": "cf-tunnel status",
-      "description": "Check tunnel daemon status"
+      "description": "Check config state and registered tunnel names"
     },
     {
       "name": "cf-tunnel list",
       "example": "cf-tunnel list",
-      "description": "List all tunnel routes and DNS records"
+      "description": "(legacy) List g-<port> routes of the fixed tunnel_id"
     },
     {
       "name": "cf-tunnel add",
-      "example": "cf-tunnel add 8080 myapp.example.com",
-      "description": "Add a new tunnel route with DNS record"
+      "example": "cf-tunnel add 8080",
+      "description": "(legacy) Add g-<port>.<domain> route with DNS record"
     },
     {
       "name": "cf-tunnel del",
-      "example": "cf-tunnel del myapp.example.com",
-      "description": "Remove a tunnel route and DNS record"
+      "example": "cf-tunnel del 8080",
+      "description": "(legacy) Remove a g-<port> route and its DNS record"
     }
   ]
 }

@@ -1,64 +1,87 @@
 ---
 name: cf-tunnel
-description: Manage Cloudflare Tunnel routes and DNS records on this host. Subcommands: config / status / list / add / del.
+description: Manage Cloudflare NAMED tunnels (token/name → hostname list), routes and DNS. Subcommands: config / status / tunnels / sync / create / rm / list / add / del.
 ---
 
 # Cloudflare Tunnel
 
-> **Wrapper command:** `cf-tunnel`. Subcommands: `config` / `status` / `list` / `add` / `del`.
-> Credentials live in `~/cicy-ai/db/cf.json` (chmod 600). The wrapper reads them — the agent never sees them.
+> **Wrapper command:** `cf-tunnel`. Subcommands: `config` / `status` / `tunnels` /
+> `sync` / `create` / `rm` + legacy `list` / `add` / `del`.
+> Credentials + tunnel registry live in `~/cicy-ai/db/cf-tunnel.json` (chmod 600).
+> The wrapper reads them — the agent never sees them.
 
 ## Credentials: hard rules
 
-- **NEVER cat / Read / grep / print** `~/cicy-ai/db/cf.json`. The api_token is a user secret.
-- If config is missing or placeholder, run `cf-tunnel config`. **Never ask the user to paste the api_token into chat.**
-- `status` masks the api_token — trust its output.
+- **NEVER cat / Read / grep / print** `~/cicy-ai/db/cf-tunnel.json` or `~/cicy-ai/db/cf.json`.
+  The api_token and every `tunnels.*.token` are user secrets.
+- If config is missing or placeholder, run `cf-tunnel config`. **Never ask the user to paste tokens into chat.**
+- `status` / `sync` / `create` mask tokens in their output — trust that output.
 
-## Config shape
+## Registry shape (~/cicy-ai/db/cf-tunnel.json)
+
+One named tunnel = one connector token; under it, the list of hostnames it serves:
 
 ```json
 {
   "prod": {
-    "api_token":  "<paste-your-cloudflare-api-token-here>",
-    "account_id": "<paste-your-cloudflare-account-id-here>",
-    "tunnel_id":  "<paste-your-cloudflare-tunnel-id-here>",
-    "domain":     "<paste-your-domain-here>",
-    "zone_id":    "<paste-your-cloudflare-zone-id-here>"
+    "api_token":  "<cloudflare api token>",
+    "account_id": "<cloudflare account id>",
+    "domain":     "<zone apex, e.g. example.com>",
+    "zone_id":    "<cloudflare zone id>",
+    "tunnels": {
+      "cloudshell": {
+        "id": "<tunnel uuid>",
+        "token": "<connector token>",
+        "hostnames": [
+          { "hostname": "cloudshell.example.com", "service": "http://localhost:8008" }
+        ]
+      }
+    }
   }
 }
 ```
 
 A `dev` block is optional; use `CF_ENV=dev cf-tunnel ...` to target it.
+If only a flat `~/cicy-ai/db/cf.json` exists (from the `cf` skill), its
+credentials are used as fallback; writes always go to `cf-tunnel.json`.
 
-If the existing `~/cicy-ai/db/cf.json` is flat (just `{api_token, account_id}`
-from the `cf` skill), `cf-tunnel config` will preserve those values and add
-the missing tunnel-specific fields.
+## Named tunnels (primary workflow)
+
+```sh
+cf-tunnel tunnels                      # tree: each tunnel → its hostnames (live)
+cf-tunnel sync                         # regenerate <env>.tunnels in the registry from the CF API
+cf-tunnel create cloudshell            # provision: tunnel + ingress + DNS + token → registry
+cf-tunnel create api --port 8009       # api.<domain> → http://localhost:8009
+cf-tunnel rm api                       # delete tunnel + DNS + registry entry
+```
+
+`create` is end-to-end: create/reuse tunnel by name → upsert ingress rule →
+upsert proxied DNS CNAME → fetch connector token → save
+`{id, token, hostnames}` under `<env>.tunnels.<name>`. Run the connector on the
+target host with `cloudflared tunnel run --token <token from registry>` (or
+cicy-code's `--cft-token`).
+
+## Legacy fixed-tunnel routes
+
+`list` / `add <port>` / `del <port>` manage `g-<port>.<domain>` routes on the
+single tunnel configured as `tunnel_id` — kept for backward compatibility and
+only these three require `tunnel_id`.
 
 ## Bootstrap
 
-1. `cf-tunnel status` — confirm config + token + tunnel reachability.
-2. `cf-tunnel config` — opens placeholder in `$EDITOR`. Walk the user through
-   filling in the five fields. **Never ask them to paste api_token into chat.**
-3. `cf-tunnel list` — verify by listing current tunnel routes.
-4. `cf-tunnel add 8080` — add route; hostname becomes `g-8080.<domain>`.
-
-## Usage
-
-```sh
-cf-tunnel list                            # list current ingress + DNS
-cf-tunnel add 8080                        # add g-8080.<domain> → http://localhost:8080
-cf-tunnel add 5174 8010 13000             # add multiple at once
-cf-tunnel del 8080                        # remove g-8080.<domain>
-CF_ENV=dev cf-tunnel list                 # use the dev block
-```
+1. `cf-tunnel status` — confirm config + token; shows registered tunnel names.
+2. `cf-tunnel config` — opens the file in `$EDITOR`. Walk the user through the
+   four credential fields. **Never ask them to paste tokens into chat.**
+3. `cf-tunnel sync` — pull existing tunnels (+tokens) into the registry.
+4. `cf-tunnel create <name>` — provision a new stable hostname.
 
 ## Rules
 
-1. The wrapper is the only thing that reads `~/cicy-ai/db/cf.json`. You do not.
+1. The wrapper is the only thing that reads the registry. You do not.
 2. If `status` says missing/placeholder, run `cf-tunnel config`.
-3. `cf-tunnel` manages routes and DNS only — not the `cloudflared` daemon
+3. `cf-tunnel` manages tunnels, routes and DNS — not the `cloudflared` daemon
    itself. To install/start the daemon, refer to the README on the host.
-4. Hostname pattern is fixed: `g-<port>.<domain>`.
+4. `create` hostnames must be inside the configured zone (`<domain>`).
 
 ## References
 
