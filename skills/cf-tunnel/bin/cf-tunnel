@@ -454,39 +454,37 @@ async function cmdList() {
   );
   const ingress = cfgPayload.result?.config?.ingress || [];
 
-  // Get DNS records matching g-*.<domain>
+  // DNS CNAMEs pointing at this tunnel
   const dnsPayload = await cfFetch(
     `/zones/${cfg.zone_id}/dns_records?per_page=200`,
     {}, cfg,
   );
+  const cnameTarget = `${cfg.tunnel_id}.cfargotunnel.com`;
   const records = (dnsPayload.result || []).filter(
-    (r) => r.type === 'CNAME' && /^g-\d+\./.test(r.name) && r.name.endsWith('.' + cfg.domain),
+    (r) => r.type === 'CNAME' && r.content === cnameTarget,
   );
 
-  const routes = [];
-  for (const r of ingress) {
-    const m = (r.hostname || '').match(/^g-(\d+)\./);
-    if (!m) continue;
-    routes.push({
-      port: parseInt(m[1], 10),
-      hostname: r.hostname,
-      service: r.service,
-    });
-  }
-  routes.sort((a, b) => a.port - b.port);
+  // every hostname route on the tunnel (no naming convention)
+  const routes = ingress
+    .filter((r) => r.hostname)
+    .map((r) => {
+      const m = (r.service || '').match(/:(\d+)$/);
+      return { port: m ? parseInt(m[1], 10) : null, hostname: r.hostname, service: r.service };
+    })
+    .sort((a, b) => a.hostname.localeCompare(b.hostname));
 
   if (json) {
     console.log(JSON.stringify({ ok: true, data: { env: ENV, domain: cfg.domain, routes, dns_count: records.length } }));
     return;
   }
   if (routes.length === 0) {
-    console.log(`(no g-*.${cfg.domain} routes)`);
+    console.log(`(no routes on tunnel ${cfg.tunnel_id.slice(0, 8)}…)`);
     return;
   }
-  console.log(`PORT   HOSTNAME${' '.repeat(40 - 'HOSTNAME'.length)}SERVICE`);
+  console.log(`HOSTNAME${' '.repeat(40 - 'HOSTNAME'.length)}SERVICE`);
   console.log('-'.repeat(80));
   for (const r of routes) {
-    console.log(`${String(r.port).padEnd(6)} ${r.hostname.padEnd(40)} ${r.service}`);
+    console.log(`${r.hostname.padEnd(40)} ${r.service}`);
   }
   console.log(`\n${routes.length} route(s) in ${ENV}.`);
 }
@@ -509,7 +507,7 @@ async function cmdAdd(args) {
 
   const added = [];
   for (const port of ports) {
-    const hostname = `g-${port}.${cfg.domain}`;
+    const hostname = `${port}.${cfg.domain}`;
     const service = `http://localhost:${port}`;
     // remove any existing rule for this hostname
     const filtered = ingress.filter((r) => r.hostname !== hostname);
@@ -583,11 +581,15 @@ async function cmdDel(args) {
   const fallback = ingress.find((r) => !r.hostname);
   let kept = ingress.filter((r) => r.hostname);
   for (const port of ports) {
-    const hostname = `g-${port}.${cfg.domain}`;
-    const before = kept.length;
-    kept = kept.filter((r) => r.hostname !== hostname);
-    if (before !== kept.length) {
-      removed.push({ port, hostname });
+    // match `<port>.<domain>` plus the retired `g-<port>.<domain>` form so old
+    // routes can still be cleaned up
+    const names = [`${port}.${cfg.domain}`, `g-${port}.${cfg.domain}`];
+    for (const hostname of names) {
+      const before = kept.length;
+      kept = kept.filter((r) => r.hostname !== hostname);
+      if (before !== kept.length) {
+        removed.push({ port, hostname });
+      }
     }
   }
 

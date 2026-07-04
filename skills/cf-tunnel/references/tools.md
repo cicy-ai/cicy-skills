@@ -42,8 +42,8 @@ Registry layout (`sync` regenerates `tunnels`; `create` appends to it):
 }
 ```
 
-Legacy `tunnel_id` (a single fixed tunnel for `add`/`del`/`list` g-<port>
-routes) is still honored but no longer required for the named-tunnel commands.
+Legacy `tunnel_id` (a single fixed tunnel for `add`/`del`/`list` port
+routes, hostname `<port>.<domain>`) is still honored but no longer required for the named-tunnel commands.
 The wrapper also accepts a flat top-level form (without `prod`) for
 compatibility with the `cf` skill, treating it as the `prod` block.
 

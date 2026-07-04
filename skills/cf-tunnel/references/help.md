@@ -15,9 +15,9 @@ cf-tunnel create <name> [--host <h>] [--service <url>|--port <n>] [--json]
                                           the registry. Defaults: host=<name>.<domain>,
                                           service=http://localhost:8008
 cf-tunnel rm <name> [--json]              Delete a named tunnel + its DNS + registry entry
-cf-tunnel list   [--json]                 (legacy) List g-<port> routes of the fixed tunnel_id
-cf-tunnel add    <port> [<port> ...]      (legacy) Add g-<port>.<domain> route
-cf-tunnel del    <port> [<port> ...]      (legacy) Remove g-<port> route
+cf-tunnel list   [--json]                 (legacy) List all routes of the fixed tunnel_id
+cf-tunnel add    <port> [<port> ...]      (legacy) Add <port>.<domain> route
+cf-tunnel del    <port> [<port> ...]      (legacy) Remove <port>.<domain> route (also matches old g-<port>)
 cf-tunnel --help / -h / help              Print this help
 ```
 
@@ -61,7 +61,7 @@ cf-tunnel rm api
 # run a connector with a saved token (never print the token itself)
 cloudflared tunnel run --token "$(node -p "require(process.env.HOME+'/cicy-ai/db/cf-tunnel.json').prod.tunnels.cloudshell.token")"
 
-# legacy fixed-tunnel port routes
+# legacy fixed-tunnel port routes (add 8080 → 8080.<domain> → localhost:8080)
 cf-tunnel list
 cf-tunnel add 8080
 cf-tunnel del 8080

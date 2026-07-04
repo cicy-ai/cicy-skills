@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cf-tunnel",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "title": "Cloudflare Tunnel",
   "description": "Manage Cloudflare NAMED tunnels (token/name → hostname list), routes and DNS. Subcommands: config / status / tunnels / sync / create / rm / list / add / del.",
   "category": "cloud",
@@ -82,17 +82,17 @@
     {
       "name": "cf-tunnel list",
       "example": "cf-tunnel list",
-      "description": "(legacy) List g-<port> routes of the fixed tunnel_id"
+      "description": "(legacy) List all routes of the fixed tunnel_id"
     },
     {
       "name": "cf-tunnel add",
       "example": "cf-tunnel add 8080",
-      "description": "(legacy) Add g-<port>.<domain> route with DNS record"
+      "description": "(legacy) Add <port>.<domain> route with DNS record"
     },
     {
       "name": "cf-tunnel del",
       "example": "cf-tunnel del 8080",
-      "description": "(legacy) Remove a g-<port> route and its DNS record"
+      "description": "(legacy) Remove a <port>.<domain> route and its DNS record (also matches old g-<port>)"
     }
   ]
 }

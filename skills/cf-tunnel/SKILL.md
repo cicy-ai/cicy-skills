@@ -63,9 +63,10 @@ cicy-code's `--cft-token`).
 
 ## Legacy fixed-tunnel routes
 
-`list` / `add <port>` / `del <port>` manage `g-<port>.<domain>` routes on the
+`list` / `add <port>` / `del <port>` manage `<port>.<domain>` routes on the
 single tunnel configured as `tunnel_id` — kept for backward compatibility and
-only these three require `tunnel_id`.
+only these three require `tunnel_id` (`del` also matches the retired
+`g-<port>` naming for cleanup).
 
 ## Bootstrap
 
