@@ -25,13 +25,16 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import net from "node:net";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const HOME = homedir();
 const die = (m) => { process.stderr.write('❌ ' + m + '\n'); process.exit(1); };
 
 // ---------- args ----------
 const argv = process.argv.slice(2);
-const opt = { out: '.', mode: 'audio', tx: false, engine: 'gateway', model: 'small', lang: 'zh', json: false, proxy: '', cookies: '' };
+const opt = { out: '.', mode: 'audio', tx: false, engine: 'groq', model: 'small', lang: 'zh', json: false, proxy: '', cookies: '' };
 let input = '';
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -63,13 +66,16 @@ function usage() {
   -a, --audio         只下音频 mp3(默认)
   -v, --video         下视频 mp4
   -t, --transcribe    下完转写成文字(.txt)
-      --engine E      gateway|local(默认 gateway)
+      --engine E      groq|gateway|local(默认 groq = Groq whisper-large-v3-turbo,快且准)
       --model NAME    local whisper 模型(默认 small)
       --lang LANG     语言提示(默认 zh)
       --proxy URL     出站代理(默认 $HTTPS_PROXY,否则探测 127.0.0.1:1087)
       --cookies FILE  cookies 文件(抖音要 cookies 时用,传给 yt-dlp)
       --json          机器可读输出
   -h, --help          本帮助
+
+下载兜底: yt-dlp 被抖音 "fresh cookies" 风控拦时,自动用本机 agent-chrome
+profile(调试端口 11001/11002)CDP 嗅探 douyinvod 直链下载(需该 Chrome 在跑)。
 `;
 }
 
@@ -144,19 +150,52 @@ async function main() {
   const titleFile = `${base}.title.txt`;
   const px = proxy ? ['--proxy', proxy] : [];
   if (opt.cookies) px.push('--cookies', opt.cookies);
+  // CDP 嗅探兜底:yt-dlp 被 "fresh cookies" 风控拦时,用本机 agent-chrome 抓 douyinvod 直链
+  const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  const curlDl = (url, out) => run('curl', ['-sL', '-m', '300', '-A', UA, '-e', 'https://www.douyin.com/', '-o', out, url]).status === 0 && fs.existsSync(out) && fs.statSync(out).size > 10000;
+  function cdpFallback() {
+    log('🕵️  yt-dlp 被拦,改用本机 Chrome CDP 嗅探直链…');
+    const r = spawnSync('python3', [path.join(__dirname, 'cdp_sniff.py'), vid], { encoding: 'utf8' });
+    let j = {}; try { j = JSON.parse((r.stdout || '').trim().split('\n').pop()); } catch (e) {}
+    if (j.error || (!j.audio && !j.video)) die(`CDP 嗅探也失败: ${j.error || '无媒体地址'}(确认 agent-chrome profile 在跑且能开抖音)`);
+    if (opt.mode === 'audio') {
+      const src = j.audio || j.video;
+      const tmp = `${base}.cdp.mp4`;
+      if (!curlDl(src, tmp)) die('直链下载失败');
+      if (run('ffmpeg', ['-y', '-i', tmp, '-vn', '-b:a', '128k', `${base}.mp3`], { stdio: 'ignore' }).status !== 0) die('转 mp3 失败');
+      fs.rmSync(tmp, { force: true });
+      return `${base}.mp3`;
+    }
+    // 视频模式:抖音音视频轨分离,分别下再合流
+    if (!j.video) die('没嗅到视频轨');
+    const vt = `${base}.v.mp4`;
+    if (!curlDl(j.video, vt)) die('视频轨下载失败');
+    if (j.audio) {
+      const at = `${base}.a.mp4`;
+      if (curlDl(j.audio, at)) {
+        if (run('ffmpeg', ['-y', '-i', vt, '-i', at, '-c', 'copy', '-map', '0:v', '-map', '1:a', `${base}.mp4`], { stdio: 'ignore' }).status === 0) {
+          fs.rmSync(vt, { force: true }); fs.rmSync(at, { force: true });
+          return `${base}.mp4`;
+        }
+      }
+    }
+    fs.renameSync(vt, `${base}.mp4`);  // 没音轨就给纯视频
+    return `${base}.mp4`;
+  }
+
   let outfile;
   if (opt.mode === 'audio') {
     outfile = `${base}.mp3`;
     log('⬇️  下载音频…');
     const r = run(ytdlp, px.concat(['--no-playlist', '-x', '--audio-format', 'mp3', '--audio-quality', '0',
       '-o', `${base}.%(ext)s`, '--print-to-file', '%(title)s', titleFile, canon]));
-    if (r.status !== 0) die('下载失败(抖音反爬/链接失效/代理不通)');
+    if (r.status !== 0) outfile = cdpFallback();
   } else {
     outfile = `${base}.mp4`;
     log('⬇️  下载视频…');
     const r = run(ytdlp, px.concat(['--no-playlist', '-o', `${base}.%(ext)s`,
       '--print-to-file', '%(title)s', titleFile, canon]));
-    if (r.status !== 0) die('下载失败(抖音反爬/链接失效/代理不通)');
+    if (r.status !== 0) outfile = cdpFallback();
   }
   if (!fs.existsSync(outfile)) {
     const g = fs.readdirSync(opt.out).filter(f => f.startsWith(`dy_${vid}`) && !f.endsWith('.txt'));
@@ -177,7 +216,46 @@ async function main() {
       audioIn = `${base}.audio.mp3`;
       if (run('ffmpeg', ['-y', '-i', outfile, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', audioIn], { stdio: 'ignore' }).status !== 0) die('抽音轨失败');
     }
-    if (opt.engine === 'gateway') {
+    if (opt.engine === 'groq') {
+      // Groq whisper-large-v3-turbo:快、准、免费额度大。凭据: $GROQ_API_KEY 或 global.json providers key=groqStt
+      let gk = process.env.GROQ_API_KEY || '', gu = 'https://api.groq.com/openai/v1';
+      if (!gk) {
+        try {
+          const gj = JSON.parse(fs.readFileSync(path.join(HOME, 'cicy-ai/global.json'), 'utf8'));
+          const p = ((gj.providers && gj.providers.items) || []).find(x => x.key === 'groqStt');
+          if (p) { gk = p.apiKey; gu = p.url || gu; }
+        } catch (e) {}
+      }
+      if (!gk) die('缺 Groq 凭据($GROQ_API_KEY 或 global.json providers key=groqStt);或换 --engine gateway/local');
+      log('📝 Groq 转写(whisper-large-v3-turbo)…');
+      // >20MB 或 >10min 切片,否则整段直传
+      const sz = fs.statSync(audioIn).size;
+      const sttGroq = (file) => new Promise((res) => {
+        const args = ['-s', '-m', '300', `${gu.replace(/\/$/, '')}/audio/transcriptions`,
+          '-H', `Authorization: Bearer ${gk}`,
+          '-F', `file=@${file}`, '-F', 'model=whisper-large-v3-turbo', '-F', `language=${opt.lang}`];
+        if (proxy) args.unshift('--proxy', proxy);
+        execFile('curl', args, { maxBuffer: 64 * 1024 * 1024 }, (e, out) => {
+          let t = ''; try { t = JSON.parse(out).text || ''; } catch (_) { }
+          if (!t && out) log(`groq 返回异常: ${String(out).slice(0, 160)}`);
+          res(t);
+        });
+      });
+      if (sz <= 20 * 1024 * 1024) {
+        text = (await sttGroq(audioIn)).trim();
+      } else {
+        const chk = path.join(opt.out, `_chunks_${vid}`);
+        fs.rmSync(chk, { recursive: true, force: true }); fs.mkdirSync(chk, { recursive: true });
+        if (run('ffmpeg', ['-y', '-i', audioIn, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k',
+          '-f', 'segment', '-segment_time', '600', path.join(chk, 'c_%03d.mp3')], { stdio: 'ignore' }).status !== 0) die('切片失败');
+        const chunks = fs.readdirSync(chk).filter(f => /^c_\d+\.mp3$/.test(f)).sort();
+        const parts = [];
+        for (const c of chunks) parts.push(await sttGroq(path.join(chk, c)));  // 串行,别触发限速
+        text = parts.join(' ').trim();
+        fs.rmSync(chk, { recursive: true, force: true });
+      }
+      fs.writeFileSync(txtFile, text);
+    } else if (opt.engine === 'gateway') {
       const gj = JSON.parse(fs.readFileSync(path.join(HOME, 'cicy-ai/global.json'), 'utf8'));
       const items = (gj.providers && gj.providers.items) || [];
       const p = items.find(x => x.key === 'defaultOpenAi') || items[0];
