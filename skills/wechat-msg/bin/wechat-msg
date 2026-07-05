@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+// wechat-msg — send a message to your WeChat through the ilink bot channel.
+//
+// Speaks the same ilink-bot protocol as cicy-code's im_wechat.go (a Go port of
+// the cicy-wechat npm package): Bearer bot_token → POST ilink/bot/sendmessage.
+// Reads the login state cicy-code already persisted (~/cicy-ai/db/im-wechat-<N>.json),
+// so no extra auth — if the WeChat channel works in cicy-code, this works.
+//
+// ilink will NOT let a bot push outside the user's active session window
+// (ret=-2). If sending fails with that, open WeChat and send the bot any
+// message first, then retry.
+
+import { readFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+const DB_DIR = join(homedir(), 'cicy-ai', 'db');
+const CHANNEL_VERSION = '0.2.9';
+const CLIENT_VERSION = (0 << 16) | (2 << 8) | 9; // keep in sync with im_wechat.go
+
+const argv = process.argv.slice(2);
+if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { console.log('Usage: wechat-msg send <text...> [--to <ilink_user_id>] [--acc N] | status'); }
+  process.exit(0);
+}
+
+function bail(msg, code = 1) { process.stderr.write(`wechat-msg: ${msg}\n`); process.exit(code); }
+
+// ── state: pick the im-wechat-<N>.json (single account → auto) ────────────
+function listAccounts() {
+  let files = [];
+  try { files = readdirSync(DB_DIR).filter((f) => /^im-wechat-\d+\.json$/.test(f)); } catch { /* no db dir */ }
+  return files.map((f) => ({ acc: Number(f.match(/\d+/)[0]), file: join(DB_DIR, f) })).sort((a, b) => a.acc - b.acc);
+}
+
+function loadState(accFlag) {
+  const accounts = listAccounts();
+  if (!accounts.length) bail(`no WeChat login state (im-wechat-*.json) under ${DB_DIR} — bind the WeChat channel in cicy-code first`);
+  let picked = accounts[0];
+  if (accFlag != null) {
+    picked = accounts.find((a) => a.acc === Number(accFlag));
+    if (!picked) bail(`account ${accFlag} not found (have: ${accounts.map((a) => a.acc).join(', ')})`);
+  } else if (accounts.length > 1) {
+    bail(`multiple WeChat accounts (${accounts.map((a) => a.acc).join(', ')}) — pick one with --acc N`);
+  }
+  let st;
+  try { st = JSON.parse(readFileSync(picked.file, 'utf8')); }
+  catch (e) { bail(`failed to parse ${picked.file}: ${e.message}`); }
+  if (!st.bot_token || !st.base_url) bail(`${picked.file} missing bot_token/base_url — re-bind the WeChat channel`);
+  return { ...st, _acc: picked.acc, _file: picked.file };
+}
+
+// ── ilink protocol ────────────────────────────────────────────────────────
+function commonHeaders(token) {
+  return {
+    'Content-Type': 'application/json',
+    'AuthorizationType': 'ilink_bot_token',
+    'X-WECHAT-UIN': Buffer.from(String(randomBytes(4).readUInt32BE(0))).toString('base64'),
+    'iLink-App-Id': 'bot',
+    'iLink-App-ClientVersion': String(CLIENT_VERSION),
+    'Authorization': `Bearer ${token}`,
+  };
+}
+
+async function ilinkPost(state, path, payload) {
+  const url = `${state.base_url.replace(/\/+$/, '')}/${path}`;
+  const body = JSON.stringify({ ...payload, base_info: { channel_version: CHANNEL_VERSION } });
+  const res = await fetch(url, {
+    method: 'POST', headers: commonHeaders(state.bot_token), body,
+    signal: AbortSignal.timeout(20000),
+  });
+  const text = await res.text();
+  if (res.status >= 400) bail(`POST ${path} → HTTP ${res.status}: ${text.slice(0, 200)}`);
+  try { return JSON.parse(text); } catch { return {}; }
+}
+
+async function sendText(state, to, text) {
+  const msg = {
+    message_type: 2,      // bot
+    message_state: 2,     // finish
+    from_user_id: '',
+    to_user_id: to,
+    client_id: 'cicy-wechat-' + randomBytes(4).toString('hex'),
+    context_token: '',    // skill runs out-of-process; ilink accepts empty inside the session window
+    item_list: [{ type: 1, text_item: { text } }],
+  };
+  const resp = await ilinkPost(state, 'ilink/bot/sendmessage', { msg });
+  if (resp.ret === -2) {
+    bail('ilink refused (ret=-2): outside the user\'s active session window — open WeChat, send the bot any message, then retry.', 4);
+  }
+  if (resp.ret && resp.ret !== 0) bail(`ilink ret=${resp.ret} msg=${resp.errmsg || ''}`, 3);
+  return true;
+}
+
+// ── commands ──────────────────────────────────────────────────────────────
+function parseFlags(args) {
+  const pos = []; let to = ''; let acc = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--to') { to = args[++i] || ''; continue; }
+    if (args[i] === '--acc') { acc = args[++i]; continue; }
+    pos.push(args[i]);
+  }
+  return { pos, to, acc };
+}
+
+const cmd = argv[0];
+const { pos, to, acc } = parseFlags(argv.slice(1));
+
+if (cmd === 'status') {
+  const st = loadState(acc);
+  console.log(`account:    im-wechat-${st._acc} (${st._file})`);
+  console.log(`base_url:   ${st.base_url}`);
+  console.log(`bot_id:     ${st.ilink_bot_id || '-'}`);
+  console.log(`bound user: ${st.ilink_user_id || '-'}`);
+  process.exit(0);
+}
+
+if (cmd === 'send') {
+  const text = pos.join(' ').trim();
+  if (!text) bail('Usage: wechat-msg send <text...> [--to <ilink_user_id>] [--acc N]', 2);
+  const st = loadState(acc);
+  const target = (to || st.ilink_user_id || '').trim();
+  if (!target) bail('no recipient: state has no ilink_user_id and no --to given');
+  await sendText(st, target, text);
+  console.log(`sent → ${target}`);
+  process.exit(0);
+}
+
+bail(`unknown command: ${cmd}. Use send|status (see --help).`, 2);

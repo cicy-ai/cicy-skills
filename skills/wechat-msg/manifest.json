@@ -1,0 +1,33 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "wechat-msg",
+  "version": "0.1.0",
+  "title": "WeChat Msg",
+  "description": "Send a text message to the bound WeChat user through the ilink bot channel, reusing cicy-code's persisted login (~/cicy-ai/db/im-wechat-N.json). Subcommands: send / status.",
+  "category": "productivity",
+  "tags": [
+    "wechat",
+    "im",
+    "message",
+    "ilink",
+    "notify"
+  ],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/wechat-msg",
+  "permissions": [],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}
