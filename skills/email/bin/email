@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// email — Resend transactional email wrapper. Subcommands: config / status / send.
-// Zero npm dependencies. Pure ESM. Node 18+.
+// email — self-hosted email over standard protocols. Send via SMTP, receive via
+// IMAP or POP3. Zero npm dependencies (Node built-in net/tls only). Pure ESM,
+// Node 18+. Subcommands: config / status / send / list / read.
 
 import { readFileSync, writeFileSync, existsSync, statSync, chmodSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
+import { connect as tlsConnect } from 'node:tls';
+import { createConnection } from 'node:net';
 
 const CONFIG_PATH = process.env.CICY_EMAIL_CONFIG || join(homedir(), 'cicy-ai', 'db', 'email.json');
-const RESEND_API = 'https://api.resend.com/emails';
 
 const argv = process.argv.slice(2);
 
@@ -19,18 +21,25 @@ if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] 
 
 const cmd = argv[0];
 
-try {
-  switch (cmd) {
-    case 'config': await cmdConfig(); break;
-    case 'status': await cmdStatus(); break;
-    case 'send':   await cmdSend(argv.slice(1)); break;
-    default: bail(`unknown command: ${cmd}. Try email --help.`, 2);
+// Dispatch runs at the END of the module (see main() call at the bottom) so that
+// every `const` helper below is already initialized — calling a command up here
+// would hit a temporal-dead-zone error on const arrow helpers.
+async function main() {
+  try {
+    switch (cmd) {
+      case 'config': await cmdConfig(); break;
+      case 'status': await cmdStatus(); break;
+      case 'send':   await cmdSend(argv.slice(1)); break;
+      case 'list':   await cmdList(argv.slice(1)); break;
+      case 'read':   await cmdRead(argv.slice(1)); break;
+      default: bail(`unknown command: ${cmd}. Try email --help.`, 2);
+    }
+  } catch (e) {
+    bail(e.message, e.exitCode || 1);
   }
-} catch (e) {
-  bail(e.message, e.exitCode || 1);
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────
+// ── helpers ─────────────────────────────────────────────────────────────────
 
 function bail(msg, code = 1) {
   process.stderr.write(`email: ${msg}\n`);
@@ -45,15 +54,15 @@ function printHelp() {
   email config
   email status [--json]
   email send --to <addr> --subject <s> [--body <text>|--html <html>] [--from <addr>]
+  email list [--n <count>] [--protocol imap|pop3] [--json]
+  email read <n> [--protocol imap|pop3] [--json]
 `);
   }
 }
 
 function readConfig() {
   if (!existsSync(CONFIG_PATH)) {
-    const e = new Error(`config missing: ${CONFIG_PATH} — run 'email config'`);
-    e.exitCode = 3;
-    throw e;
+    throw Object.assign(new Error(`config missing: ${CONFIG_PATH} — run 'email config'`), { exitCode: 3 });
   }
   let cfg;
   try {
@@ -61,33 +70,46 @@ function readConfig() {
   } catch (e) {
     throw Object.assign(new Error(`parse ${CONFIG_PATH}: ${e.message}`), { exitCode: 1 });
   }
-  if (!cfg.api_key || cfg.api_key.startsWith('<paste')) {
-    throw Object.assign(new Error(`api_key missing or placeholder in ${CONFIG_PATH}`), { exitCode: 3 });
-  }
-  if (!cfg.from_address || cfg.from_address.startsWith('<paste')) {
-    throw Object.assign(new Error(`from_address missing or placeholder in ${CONFIG_PATH}`), { exitCode: 3 });
-  }
   return cfg;
 }
+
+const isPlaceholder = (v) => typeof v === 'string' && v.startsWith('<paste');
+const filled = (v) => typeof v === 'string' && v.length > 0 && !isPlaceholder(v);
+
+function requireSMTP(cfg) {
+  const s = cfg.smtp || {};
+  for (const k of ['host', 'port', 'user', 'pass', 'from']) {
+    if (s[k] === undefined || s[k] === null || s[k] === '' || isPlaceholder(s[k])) {
+      throw Object.assign(new Error(`smtp.${k} missing or placeholder in ${CONFIG_PATH} — run 'email config'`), { exitCode: 3 });
+    }
+  }
+  return s;
+}
+
+function pickReceiver(cfg, want) {
+  const imapReady = cfg.imap && filled(cfg.imap.host) && filled(cfg.imap.user) && filled(cfg.imap.pass);
+  const popReady  = cfg.pop3 && filled(cfg.pop3.host) && filled(cfg.pop3.user) && filled(cfg.pop3.pass);
+  if (want === 'imap') { if (!imapReady) throw cfgErr('imap'); return 'imap'; }
+  if (want === 'pop3') { if (!popReady) throw cfgErr('pop3'); return 'pop3'; }
+  if (imapReady) return 'imap';
+  if (popReady) return 'pop3';
+  throw Object.assign(new Error(`no receive protocol configured (imap or pop3) in ${CONFIG_PATH}`), { exitCode: 3 });
+}
+const cfgErr = (p) => Object.assign(new Error(`${p} not fully configured in ${CONFIG_PATH}`), { exitCode: 3 });
 
 function writePlaceholder() {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true, mode: 0o700 });
   const tmpl = {
-    api_key:      '<paste-your-resend-api-key-here>',
-    from_address: '<paste-your-verified-from-address-here>',
-    default_to:   '',
+    smtp: { host: '<paste-smtp-host>', port: 465, secure: true, user: '<paste-smtp-user>', pass: '<paste-smtp-pass>', from: '<paste-from-address>' },
+    imap: { host: '<paste-imap-host>', port: 993, user: '<paste-imap-user>', pass: '<paste-imap-pass>' },
+    pop3: { host: '<paste-pop3-host>', port: 995, user: '<paste-pop3-user>', pass: '<paste-pop3-pass>' },
+    default_to: '',
   };
   writeFileSync(CONFIG_PATH, JSON.stringify(tmpl, null, 2) + '\n', { mode: 0o600 });
   try { chmodSync(CONFIG_PATH, 0o600); } catch {}
 }
 
-function maskKey(k) {
-  if (!k) return '';
-  if (k.length <= 8) return '***';
-  return k.slice(0, 4) + '***' + k.slice(-4);
-}
-
-// ── config ──────────────────────────────────────────────────────────────
+// ── config ───────────────────────────────────────────────────────────────────
 
 async function cmdConfig() {
   if (!existsSync(CONFIG_PATH)) {
@@ -99,92 +121,433 @@ async function cmdConfig() {
   await runChild(editor, [CONFIG_PATH]);
 }
 
-// ── status ──────────────────────────────────────────────────────────────
+// ── status ───────────────────────────────────────────────────────────────────
 
 async function cmdStatus() {
   const status = {
-    config_path: CONFIG_PATH,
-    exists: existsSync(CONFIG_PATH),
-    permissions: null,
-    api_key_set: false,
-    from_address_set: false,
-    default_to: null,
-    api_key_masked: '',
+    config_path: CONFIG_PATH, exists: existsSync(CONFIG_PATH), permissions: null,
+    smtp_ready: false, imap_ready: false, pop3_ready: false, default_to: null, send_ready: false, receive_ready: false,
   };
   if (status.exists) {
-    try {
-      const m = statSync(CONFIG_PATH).mode & 0o777;
-      status.permissions = '0' + m.toString(8);
-    } catch {}
+    try { status.permissions = '0' + (statSync(CONFIG_PATH).mode & 0o777).toString(8); } catch {}
     try {
       const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
-      const isPlaceholder = (v) => typeof v === 'string' && v.startsWith('<paste');
-      status.api_key_set = !!(cfg.api_key && !isPlaceholder(cfg.api_key));
-      status.from_address_set = !!(cfg.from_address && !isPlaceholder(cfg.from_address));
+      const s = cfg.smtp || {}, im = cfg.imap || {}, pp = cfg.pop3 || {};
+      status.smtp_ready = ['host','port','user','pass','from'].every((k) => k === 'port' ? !!s.port : filled(s[k]));
+      status.imap_ready = filled(im.host) && filled(im.user) && filled(im.pass);
+      status.pop3_ready = filled(pp.host) && filled(pp.user) && filled(pp.pass);
       status.default_to = cfg.default_to || null;
-      if (status.api_key_set) status.api_key_masked = maskKey(cfg.api_key);
-    } catch (e) {
-      status.error = e.message;
-    }
+      status.smtp_from = status.smtp_ready ? s.from : null;
+    } catch (e) { status.error = e.message; }
   }
+  status.send_ready = status.smtp_ready;
+  status.receive_ready = status.imap_ready || status.pop3_ready;
+
+  // --check (alias --probe): actually CONNECT + authenticate to each configured
+  // protocol and report live ✓/✗ + the failure reason — like `cicy-agent team
+  // ping`. Without it, status only reports whether the fields are filled in
+  // (cheap, no network). The probe logs in and cleanly disconnects; it never
+  // sends mail or fetches messages.
+  const doCheck = argv.includes('--check') || argv.includes('--probe');
+  if (doCheck && status.exists && !status.error) {
+    const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+    status.checked = true;
+    if (status.smtp_ready) status.smtp_check = await probe(() => probeSMTP(cfg.smtp));
+    if (status.imap_ready) status.imap_check = await probe(() => probeIMAP(cfg.imap));
+    if (status.pop3_ready) status.pop3_check = await probe(() => probePOP3(cfg.pop3));
+  }
+
   if (argv.includes('--json')) {
     console.log(JSON.stringify({ ok: true, data: status }));
   } else {
-    console.log(`config:       ${status.config_path}`);
-    console.log(`exists:       ${status.exists}`);
-    console.log(`permissions:  ${status.permissions || '(n/a)'}`);
-    console.log(`api_key:      ${status.api_key_set ? status.api_key_masked : '(missing)'}`);
-    console.log(`from_address: ${status.from_address_set ? '(set)' : '(missing)'}`);
-    if (status.default_to) console.log(`default_to:   ${status.default_to}`);
-    if (status.error) console.log(`error:        ${status.error}`);
+    const line = (label, ready, chk) => {
+      if (!ready) return `${label}(missing)`;
+      if (!chk) return `${label}ready`;
+      return chk.ok ? `${label}✓ online` : `${label}✗ ${chk.error}`;
+    };
+    console.log(`config:        ${status.config_path}`);
+    console.log(`exists:        ${status.exists}`);
+    console.log(`permissions:   ${status.permissions || '(n/a)'}`);
+    console.log(line('smtp (send):   ', status.smtp_ready, status.smtp_check) + (status.smtp_ready && status.smtp_from ? `  (from ${status.smtp_from})` : ''));
+    console.log(line('imap (recv):   ', status.imap_ready, status.imap_check));
+    console.log(line('pop3 (recv):   ', status.pop3_ready, status.pop3_check));
+    if (status.default_to) console.log(`default_to:    ${status.default_to}`);
+    if (status.error) console.log(`error:         ${status.error}`);
+    if (!doCheck && (status.smtp_ready || status.imap_ready || status.pop3_ready)) {
+      console.log(`\n(add --check to actually connect + verify login)`);
+    }
+  }
+  // Non-zero exit when a probe was requested and something is down, so callers
+  // (and CI) can gate on it.
+  if (doCheck) {
+    const bad = [status.smtp_check, status.imap_check, status.pop3_check].some((c) => c && !c.ok);
+    if (bad) process.exitCode = 1;
   }
 }
 
-// ── send ────────────────────────────────────────────────────────────────
+// probe runs fn() with a hard timeout and never throws — returns {ok,error}.
+async function probe(fn) {
+  try {
+    await Promise.race([
+      fn(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000)),
+    ]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e).split('\n')[0].slice(0, 120) };
+  }
+}
+
+// probeSMTP: connect → (STARTTLS) → AUTH LOGIN → QUIT. Verifies host/port/TLS +
+// credentials WITHOUT sending a message.
+async function probeSMTP(s) {
+  const wire = await openWire(s.host, Number(s.port), s.secure !== false ? 'tls' : 'plain', s.host);
+  try {
+    await smtpRead(wire, 220);
+    const ehlo = await smtpCmd(wire, `EHLO ${safeHost()}`, 250);
+    if (s.secure === false) {
+      if (!/STARTTLS/i.test(ehlo)) throw new Error('server does not advertise STARTTLS on this port');
+      await smtpCmd(wire, 'STARTTLS', 220);
+      await wire.upgradeTLS(s.host);
+      await smtpCmd(wire, `EHLO ${safeHost()}`, 250);
+    }
+    await smtpCmd(wire, 'AUTH LOGIN', 334);
+    await smtpCmd(wire, Buffer.from(s.user, 'utf8').toString('base64'), 334);
+    await smtpCmd(wire, Buffer.from(s.pass, 'utf8').toString('base64'), 235); // 235 = auth ok
+    await smtpCmd(wire, 'QUIT', 221).catch(() => {});
+  } finally { wire.end(); }
+}
+
+async function probeIMAP(im) {
+  const wire = await openWire(im.host, Number(im.port) || 993, 'tls', im.host);
+  try {
+    await imapGreeting(wire);
+    await imapCmd(wire, `LOGIN ${imapQuote(im.user)} ${imapQuote(im.pass)}`); // throws on NO/BAD
+    await imapCmd(wire, 'LOGOUT').catch(() => {});
+  } finally { wire.end(); }
+}
+
+async function probePOP3(p) {
+  const wire = await openWire(p.host, Number(p.port) || 995, 'tls', p.host);
+  try {
+    await pop3Ok(wire);
+    await pop3Cmd(wire, `USER ${p.user}`);
+    await pop3Cmd(wire, `PASS ${p.pass}`); // assertOk throws on -ERR (bad login)
+    await pop3Cmd(wire, 'QUIT').catch(() => {});
+  } finally { wire.end(); }
+}
+
+// ── send (SMTP) ───────────────────────────────────────────────────────────────
 
 async function cmdSend(args) {
   const flags = parseFlags(args);
   const cfg = readConfig();
+  const s = requireSMTP(cfg);
 
-  let toRaw = flags.to || cfg.default_to;
+  const toRaw = flags.to || cfg.default_to;
   if (!toRaw) bail('--to required (or set default_to in config)', 2);
-  const to = toRaw.split(',').map((s) => s.trim()).filter(Boolean);
-
+  const to = String(toRaw).split(',').map((x) => x.trim()).filter(Boolean);
   if (!flags.subject) bail('--subject required', 2);
+  if (!flags.html && !flags.body) bail('one of --body or --html required', 2);
 
-  const body = {
-    from: flags.from || cfg.from_address,
-    to,
-    subject: flags.subject,
-  };
-  if (flags.html) body.html = flags.html;
-  else if (flags.body) body.text = flags.body;
-  else bail('one of --body or --html required', 2);
+  const from = flags.from || s.from;
+  const mime = buildMime({ from, to, subject: flags.subject, text: flags.body, html: flags.html });
 
-  const res = await fetch(RESEND_API, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${cfg.api_key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  await smtpSend(s, { from, to, data: mime });
 
-  const text = await res.text();
-  let payload;
-  try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
+  if (flags.json) console.log(JSON.stringify({ ok: true, data: { to, from, subject: flags.subject } }));
+  else console.log(`✓ sent to ${to.join(', ')}`);
+}
 
-  if (!res.ok) {
-    if (flags.json) console.log(JSON.stringify({ ok: false, status: res.status, response: payload }));
-    else process.stderr.write(`send failed (${res.status}): ${text}\n`);
-    process.exit(4);
-  }
+function addrOnly(a) {
+  const m = String(a).match(/<([^>]+)>/);
+  return (m ? m[1] : a).trim();
+}
 
-  if (flags.json) {
-    console.log(JSON.stringify({ ok: true, data: payload }));
+function encodeWord(s) {
+  // RFC 2047 for non-ASCII headers (e.g. Chinese subjects).
+  if (/^[\x00-\x7F]*$/.test(s)) return s;
+  return '=?UTF-8?B?' + Buffer.from(s, 'utf8').toString('base64') + '?=';
+}
+
+function buildMime({ from, to, subject, text, html }) {
+  const date = new Date().toUTCString();
+  const boundary = 'cicy_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const headers = [
+    `From: ${from}`,
+    `To: ${to.join(', ')}`,
+    `Subject: ${encodeWord(subject)}`,
+    `Date: ${date}`,
+    `MIME-Version: 1.0`,
+  ];
+  let bodyPart;
+  if (html && text) {
+    headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+    bodyPart =
+      `--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64wrap(text)}\r\n` +
+      `--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64wrap(html)}\r\n` +
+      `--${boundary}--`;
+  } else if (html) {
+    headers.push(`Content-Type: text/html; charset=UTF-8`, `Content-Transfer-Encoding: base64`);
+    bodyPart = b64wrap(html);
   } else {
-    console.log(`✓ sent. id=${payload.id || '?'}`);
+    headers.push(`Content-Type: text/plain; charset=UTF-8`, `Content-Transfer-Encoding: base64`);
+    bodyPart = b64wrap(text);
   }
+  return headers.join('\r\n') + '\r\n\r\n' + bodyPart;
+}
+
+function b64wrap(s) {
+  const b = Buffer.from(String(s), 'utf8').toString('base64');
+  return b.replace(/(.{76})/g, '$1\r\n');
+}
+
+// dot-stuffing per RFC 5321 §4.5.2: lines beginning with '.' get an extra '.'.
+function dotStuff(data) {
+  return data.replace(/\r\n/g, '\n').split('\n').map((l) => (l.startsWith('.') ? '.' + l : l)).join('\r\n');
+}
+
+async function smtpSend(s, { from, to, data }) {
+  const wire = await openWire(s.host, Number(s.port), s.secure !== false ? 'tls' : 'plain', s.host);
+  try {
+    await smtpRead(wire, 220);
+    const ehlo = await smtpCmd(wire, `EHLO ${safeHost()}`, 250);
+    if (s.secure === false) {
+      if (!/STARTTLS/i.test(ehlo)) throw new Error('server does not advertise STARTTLS on this port');
+      await smtpCmd(wire, 'STARTTLS', 220);
+      await wire.upgradeTLS(s.host);
+      await smtpCmd(wire, `EHLO ${safeHost()}`, 250);
+    }
+    await smtpCmd(wire, 'AUTH LOGIN', 334);
+    await smtpCmd(wire, Buffer.from(s.user, 'utf8').toString('base64'), 334);
+    await smtpCmd(wire, Buffer.from(s.pass, 'utf8').toString('base64'), 235);
+    await smtpCmd(wire, `MAIL FROM:<${addrOnly(from)}>`, 250);
+    for (const r of to) await smtpCmd(wire, `RCPT TO:<${addrOnly(r)}>`, 250);
+    await smtpCmd(wire, 'DATA', 354);
+    await smtpCmd(wire, dotStuff(data) + '\r\n.', 250);
+    await smtpCmd(wire, 'QUIT', 221).catch(() => {});
+  } finally {
+    wire.end();
+  }
+}
+
+// Read one full SMTP reply (handles multiline CODE- continuations).
+function smtpRead(wire, expect) {
+  return wire.readUntil((buf) => {
+    const lines = buf.split('\r\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (/^\d{3} /.test(lines[i])) return true;
+    }
+    return false;
+  }).then((buf) => {
+    const code = parseInt(buf.match(/^(\d{3})/)?.[1] || '0', 10);
+    if (expect && code !== expect) {
+      throw new Error(`SMTP expected ${expect}, got: ${buf.trim().split('\r\n').pop()}`);
+    }
+    return buf;
+  });
+}
+
+async function smtpCmd(wire, line, expect) {
+  wire.write(line + '\r\n');
+  return smtpRead(wire, expect);
+}
+
+// ── receive: list / read (IMAP or POP3) ───────────────────────────────────────
+
+async function cmdList(args) {
+  const flags = parseFlags(args);
+  const cfg = readConfig();
+  const proto = pickReceiver(cfg, flags.protocol);
+  const n = Math.max(1, Number(flags.n) || 10);
+  const items = proto === 'imap' ? await imapList(cfg.imap, n) : await pop3List(cfg.pop3, n);
+  if (flags.json) console.log(JSON.stringify({ ok: true, data: { protocol: proto, messages: items } }));
+  else {
+    console.log(`# ${proto} — ${items.length} message(s)`);
+    for (const m of items) console.log(`${String(m.index).padStart(3)}  ${(m.from || '?').slice(0, 30).padEnd(30)}  ${m.subject || '(no subject)'}`);
+  }
+}
+
+async function cmdRead(args) {
+  const flags = parseFlags(args);
+  const idx = Number(args.find((a) => !a.startsWith('--')));
+  if (!idx) bail('usage: email read <n>', 2);
+  const cfg = readConfig();
+  const proto = pickReceiver(cfg, flags.protocol);
+  const msg = proto === 'imap' ? await imapRead(cfg.imap, idx) : await pop3Read(cfg.pop3, idx);
+  if (flags.json) console.log(JSON.stringify({ ok: true, data: { protocol: proto, ...msg } }));
+  else process.stdout.write(msg.raw + '\n');
+}
+
+// POP3 (implicit TLS, e.g. :995)
+async function pop3List(p, n) {
+  const wire = await openWire(p.host, Number(p.port) || 995, 'tls', p.host);
+  try {
+    await pop3Ok(wire);
+    await pop3Cmd(wire, `USER ${p.user}`);
+    await pop3Cmd(wire, `PASS ${p.pass}`);
+    const stat = await pop3Cmd(wire, 'STAT');
+    const total = parseInt(stat.split(/\s+/)[1] || '0', 10);
+    const out = [];
+    for (let i = total; i >= 1 && out.length < n; i--) {
+      const top = await pop3Multiline(wire, `TOP ${i} 0`);
+      out.push({ index: i, ...parseHeaders(top) });
+    }
+    await pop3Cmd(wire, 'QUIT').catch(() => {});
+    return out;
+  } finally { wire.end(); }
+}
+
+async function pop3Read(p, i) {
+  const wire = await openWire(p.host, Number(p.port) || 995, 'tls', p.host);
+  try {
+    await pop3Ok(wire);
+    await pop3Cmd(wire, `USER ${p.user}`);
+    await pop3Cmd(wire, `PASS ${p.pass}`);
+    const raw = await pop3Multiline(wire, `RETR ${i}`);
+    await pop3Cmd(wire, 'QUIT').catch(() => {});
+    return { index: i, ...parseHeaders(raw), raw };
+  } finally { wire.end(); }
+}
+
+const pop3Ok = (wire) => wire.readUntil((b) => /\r\n$/.test(b)).then(assertOk);
+function assertOk(line) { if (!/^\+OK/.test(line)) throw new Error(`POP3 error: ${line.trim()}`); return line; }
+async function pop3Cmd(wire, line) { wire.write(line + '\r\n'); return wire.readUntil((b) => /\r\n$/.test(b)).then(assertOk); }
+async function pop3Multiline(wire, line) {
+  wire.write(line + '\r\n');
+  const buf = await wire.readUntil((b) => /\r\n\.\r\n$/.test(b) || /^-ERR/.test(b));
+  assertOk(buf);
+  const body = buf.replace(/^\+OK[^\r\n]*\r\n/, '').replace(/\r\n\.\r\n$/, '');
+  return body.replace(/^\.\./gm, '.');
+}
+
+// IMAP (implicit TLS, e.g. :993) — minimal LOGIN/SELECT/FETCH subset.
+async function imapList(im, n) {
+  const wire = await openWire(im.host, Number(im.port) || 993, 'tls', im.host);
+  try {
+    await imapGreeting(wire);
+    await imapCmd(wire, `LOGIN ${imapQuote(im.user)} ${imapQuote(im.pass)}`);
+    const sel = await imapCmd(wire, `SELECT INBOX`);
+    const exists = parseInt(sel.match(/\* (\d+) EXISTS/)?.[1] || '0', 10);
+    const out = [];
+    for (let seq = exists; seq >= 1 && out.length < n; seq--) {
+      const r = await imapCmd(wire, `FETCH ${seq} (BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])`);
+      out.push({ index: seq, ...parseHeaders(extractLiteral(r)) });
+    }
+    await imapCmd(wire, 'LOGOUT').catch(() => {});
+    return out;
+  } finally { wire.end(); }
+}
+
+async function imapRead(im, seq) {
+  const wire = await openWire(im.host, Number(im.port) || 993, 'tls', im.host);
+  try {
+    await imapGreeting(wire);
+    await imapCmd(wire, `LOGIN ${imapQuote(im.user)} ${imapQuote(im.pass)}`);
+    await imapCmd(wire, `SELECT INBOX`);
+    const r = await imapCmd(wire, `FETCH ${seq} (BODY.PEEK[])`);
+    const raw = extractLiteral(r);
+    await imapCmd(wire, 'LOGOUT').catch(() => {});
+    return { index: seq, ...parseHeaders(raw), raw };
+  } finally { wire.end(); }
+}
+
+let imapTag = 0;
+const imapQuote = (s) => '"' + String(s).replace(/(["\\])/g, '\\$1') + '"';
+const imapGreeting = (wire) => wire.readUntil((b) => /\r\n$/.test(b));
+async function imapCmd(wire, line) {
+  const tag = 'A' + (++imapTag);
+  wire.write(`${tag} ${line}\r\n`);
+  const buf = await wire.readUntil((b) => new RegExp(`(^|\\r\\n)${tag} (OK|NO|BAD)`, 'm').test(b));
+  const m = buf.match(new RegExp(`(^|\\r\\n)${tag} (OK|NO|BAD)([^\\r\\n]*)`));
+  if (m && m[2] !== 'OK') throw new Error(`IMAP ${m[2]}:${m[3]}`);
+  return buf;
+}
+// Pull the {N}-literal payload out of a FETCH response.
+function extractLiteral(buf) {
+  const m = buf.match(/\{(\d+)\}\r\n/);
+  if (!m) return '';
+  const start = buf.indexOf(m[0]) + m[0].length;
+  return buf.slice(start, start + parseInt(m[1], 10));
+}
+
+function parseHeaders(raw) {
+  const head = raw.split(/\r?\n\r?\n/)[0] || raw;
+  const get = (name) => {
+    const re = new RegExp(`^${name}:\\s*(.*(?:\\r?\\n[ \\t].*)*)`, 'im');
+    const m = head.match(re);
+    return m ? decodeWord(m[1].replace(/\r?\n[ \t]+/g, ' ').trim()) : '';
+  };
+  return { from: get('From'), subject: get('Subject'), date: get('Date') };
+}
+
+function decodeWord(s) {
+  return s.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (_, cs, enc, txt) => {
+    try {
+      if (enc.toUpperCase() === 'B') return Buffer.from(txt, 'base64').toString('utf8');
+      return Buffer.from(txt.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16))), 'binary').toString('utf8');
+    } catch { return txt; }
+  });
+}
+
+// ── socket wire (shared by SMTP/POP3/IMAP) ────────────────────────────────────
+
+function openWire(host, port, mode, servername) {
+  return new Promise((resolve, reject) => {
+    const onErr = (e) => reject(new Error(`connect ${host}:${port}: ${e.message}`));
+    let sock;
+    if (mode === 'tls') sock = tlsConnect({ host, port, servername }, () => resolve(wrapWire(sock)));
+    else sock = createConnection({ host, port }, () => resolve(wrapWire(sock)));
+    sock.setTimeout(30000, () => sock.destroy(new Error('timeout')));
+    sock.once('error', onErr);
+  });
+}
+
+function wrapWire(initialSock) {
+  let sock = initialSock;
+  let buf = '';
+  let pending = null; // { test, resolve, reject }
+  let fatal = null;
+
+  function attach(s) {
+    s.setEncoding('utf8');
+    s.on('data', (d) => { buf += d; pump(); });
+    s.on('error', (e) => { fatal = e; if (pending) { pending.reject(e); pending = null; } });
+    s.on('close', () => { fatal = fatal || new Error('connection closed'); if (pending) { pending.reject(fatal); pending = null; } });
+  }
+  function pump() {
+    if (pending && pending.test(buf)) {
+      const out = buf; buf = '';
+      const p = pending; pending = null; p.resolve(out);
+    }
+  }
+  attach(sock);
+
+  return {
+    write: (s) => sock.write(s),
+    readUntil: (test) => new Promise((resolve, reject) => {
+      if (fatal) return reject(fatal);
+      pending = { test, resolve, reject };
+      pump();
+    }),
+    upgradeTLS: (servername) => new Promise((resolve, reject) => {
+      const plain = sock;
+      plain.removeAllListeners('data');
+      plain.removeAllListeners('error');
+      plain.removeAllListeners('close');
+      buf = '';
+      const tlsSock = tlsConnect({ socket: plain, servername }, () => { sock = tlsSock; attach(sock); resolve(); });
+      tlsSock.once('error', reject);
+    }),
+    end: () => { try { sock.end(); } catch {} },
+  };
+}
+
+// ── misc ──────────────────────────────────────────────────────────────────────
+
+function safeHost() {
+  const h = (hostname() || 'localhost').replace(/[^A-Za-z0-9.\-]/g, '');
+  return h || 'localhost';
 }
 
 function parseFlags(args) {
@@ -195,12 +558,8 @@ function parseFlags(args) {
     else if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = args[i + 1];
-      if (next === undefined || next.startsWith('--')) {
-        out[key] = true;
-      } else {
-        out[key] = next;
-        i++;
-      }
+      if (next === undefined || next.startsWith('--')) out[key] = true;
+      else { out[key] = next; i++; }
     }
   }
   return out;
@@ -213,3 +572,5 @@ function runChild(cmd, args, opts = {}) {
     child.on('exit', (code) => code === 0 ? resolve() : reject(Object.assign(new Error(`${cmd} exited ${code}`), { exitCode: code })));
   });
 }
+
+main();
