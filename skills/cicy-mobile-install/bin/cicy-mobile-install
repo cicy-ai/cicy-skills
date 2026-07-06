@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-// cicy-mobile-install — install the latest cicy-mobile build onto a USB-connected
-// phone through the Mac build host. The phone plugs into the Mac; this runs on
-// the host and drives the Mac over ssh.
-//   Android → pull the APK from R2 and `adb install` (zero account).
-//   iOS     → AltServer re-sign with a free Apple ID (unsigned IPA).
+// cicy-mobile-install — install the latest cicy-mobile build onto a phone that's
+// plugged into THIS Mac by USB. Runs locally (adb / idevice / Sideloadly / Xcode
+// are on this machine) — no remote host, no ssh.
+//   Android → download the build zip, unzip, `adb install` the apk (zero account).
+//   iOS     → re-sign the unsigned IPA with a free Apple ID (guided).
+// Distribution (no R2): global → GitHub Releases; CN → Aliyun OSS Shanghai.
+//   Android is a .zip on both mirrors (unzipped before install); iOS is a bare
+//   .ipa. Region auto-detected here, overridable via CICY_INSTALL_REGION /
+//   cfg.region = cn|global.
 // Zero deps, Node 18+.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
@@ -12,17 +16,22 @@ import { join } from 'node:path';
 
 const CFG_PATH = join(homedir(), 'cicy-ai', 'db', 'cicy-mobile-install.json');
 const cfg = existsSync(CFG_PATH) ? JSON.parse(readFileSync(CFG_PATH, 'utf8')) : {};
-const SSH_HOST = process.env.CICY_INSTALL_SSH_HOST || cfg.ssh_host || 'mac';
-const R2_BASE = (cfg.r2_base || 'https://r2.deepfetch.de5.net/cicy-mobile').replace(/\/+$/, '');
+// Distribution endpoints (R2 dropped). global = GitHub Releases; CN = Aliyun OSS.
+const GH_LATEST = 'https://github.com/cicy-ai/cicy-mobile/releases/latest/download'; // stable alias
+const GH_TAG = 'https://github.com/cicy-ai/cicy-mobile/releases/download';           // versioned: /v<ver>/cicy-<ver>.<ext>
+const OSS_BASE = (cfg.oss_base || 'https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/cicy-mobile').replace(/\/+$/, '');
+const VERSION_URL = cfg.version_url || 'https://m.cicy-ai.com/version.json';         // geo-agnostic latest-version manifest
 const IOS_SOURCE_DIR = cfg.ios_source_dir || '~/Downloads/cicy-mobile'; // Xcode method: clone target
 const DL_DIR = cfg.download_dir || '~/Downloads'; // where the IPA is downloaded
 
 const die = (m) => { process.stderr.write(`✗ ${m}\n`); process.exit(1); };
 const log = (m) => process.stdout.write(`${m}\n`);
 
-function ssh(remote, { stream = false } = {}) {
+// Run a shell command locally (this Mac). Everything the skill drives — adb,
+// idevice_id, curl, unzip, open, xcodebuild — is on this machine.
+function sh(cmd, { stream = false } = {}) {
   try {
-    const out = execFileSync('ssh', ['-o', 'ConnectTimeout=12', SSH_HOST, remote],
+    const out = execFileSync('bash', ['-c', cmd],
       { encoding: 'utf8', stdio: stream ? 'inherit' : ['ignore', 'pipe', 'pipe'], timeout: 600000 });
     return { ok: true, out: (out || '').trim() };
   } catch (e) {
@@ -30,9 +39,37 @@ function ssh(remote, { stream = false } = {}) {
   }
 }
 
-// One round-trip probe: connected devices + which tools the Mac has.
+// Which mirror to pull from — cn → Aliyun OSS Shanghai, global → GitHub Releases.
+// Explicit override wins; otherwise probe GitHub reachability once.
+let _region = null;
+function region() {
+  if (_region) return _region;
+  const forced = (process.env.CICY_INSTALL_REGION || cfg.region || '').toLowerCase();
+  if (forced === 'cn' || forced === 'global') return (_region = forced);
+  // auto: can we reach GitHub's release CDN quickly? yes → global, else cn.
+  const r = sh(`curl -fsS -m 6 -o /dev/null -w '%{http_code}' -I "https://github.com/cicy-ai/cicy-mobile/releases/latest" 2>/dev/null || echo 000`);
+  const code = (r.out || '').trim().slice(-3);
+  return (_region = (code === '200' || code === '301' || code === '302') ? 'global' : 'cn');
+}
+
+// Android download URL — a .zip on BOTH mirrors (OSS forbids bare .apk, and
+// GitHub hosts the same zip for one code path). Skill unzips before install.
+function androidZipUrl(version) {
+  const name = version ? `cicy-${version}.zip` : 'cicy-latest.zip';
+  if (region() === 'cn') return `${OSS_BASE}/${name}`;
+  return version ? `${GH_TAG}/v${version}/${name}` : `${GH_LATEST}/cicy-latest.zip`;
+}
+
+// iOS download URL — bare .ipa both sides (.ipa isn't blocked; no unzip).
+function iosUrl(version) {
+  const name = version ? `cicy-${version}.ipa` : 'cicy-latest.ipa';
+  if (region() === 'cn') return `${OSS_BASE}/${name}`;
+  return version ? `${GH_TAG}/v${version}/${name}` : `${GH_LATEST}/cicy-latest.ipa`;
+}
+
+// One probe: connected devices + which tools this machine has.
 function detect() {
-  const remote =
+  const probe =
     'echo "IOS:$(idevice_id -l 2>/dev/null | tr \'\\n\' \',\')"; ' +
     'echo "AND:$(adb devices 2>/dev/null | sed -n \'2,$p\' | grep -w device | cut -f1 | tr \'\\n\' \',\')"; ' +
     'echo "UNAUTH:$(adb devices 2>/dev/null | sed -n \'2,$p\' | grep -w unauthorized | cut -f1 | tr \'\\n\' \',\')"; ' +
@@ -42,47 +79,46 @@ function detect() {
     'xcode=$(xcode-select -p >/dev/null 2>&1 && echo 1 || echo 0),' +
     `src=$([ -d ${IOS_SOURCE_DIR} ] && echo 1 || echo 0),` +
     'idev=$(command -v ideviceinstaller >/dev/null && echo 1 || echo 0)"';
-  const r = ssh(remote);
+  const r = sh(probe);
   const grab = (k) => (r.out.match(new RegExp(`${k}:([^\\n]*)`))?.[1] || '');
   return {
-    reachable: r.ok,
     ios: grab('IOS').split(',').filter(Boolean),
     android: grab('AND').split(',').filter(Boolean),
     androidUnauth: grab('UNAUTH').split(',').filter(Boolean),
     tools: Object.fromEntries(grab('TOOLS').split(',').filter(Boolean).map((kv) => kv.split('='))),
-    err: r.err,
   };
-}
-
-function requireReachable(d) {
-  if (!d.reachable) die(`cannot reach Mac host '${SSH_HOST}' over ssh${d.err ? ` — ${d.err}` : ''}`);
 }
 
 function installAndroid(version) {
   const d = detect();
-  requireReachable(d);
-  if (d.tools.adb !== '1') die(`adb is not installed on ${SSH_HOST} (brew install android-platform-tools)`);
+  if (d.tools.adb !== '1') die('adb is not installed (brew install android-platform-tools)');
   if (!d.android.length) {
     if (d.androidUnauth.length) die(`Android device ${d.androidUnauth[0]} is unauthorized — on the phone, accept the "Allow USB debugging?" prompt (tick "Always allow from this computer"), then re-run.`);
-    die(`no Android device connected to ${SSH_HOST}. Enable Developer options → USB debugging, plug in, accept the prompt.`);
+    die('no Android device connected. Enable Developer options → USB debugging, plug in, accept the prompt.');
   }
-  const file = version ? `cicy-${version}.apk` : 'cicy-latest.apk';
-  const url = `${R2_BASE}/${file}`;
+  const url = androidZipUrl(version);
   const serial = d.android[0];
-  log(`▶ Android → ${serial}: ${url}`);
-  const r = ssh(`set -e; curl -fsSL "${url}" -o /tmp/cicy-mobile-install.apk && adb -s ${serial} install -r -d /tmp/cicy-mobile-install.apk`, { stream: true });
+  log(`▶ Android → ${serial} [${region()}]: ${url}`);
+  // Download the zip, unzip, grab the .apk at the zip root, then adb install.
+  const r = sh(
+    `set -e; TMP=$(mktemp -d); ` +
+    `curl -fsSL "${url}" -o "$TMP/pkg.zip"; ` +
+    `unzip -o -q "$TMP/pkg.zip" -d "$TMP"; ` +
+    `APK=$(ls "$TMP"/*.apk 2>/dev/null | head -1); ` +
+    `[ -n "$APK" ] || { echo "no .apk found inside $(basename "${url}")"; exit 1; }; ` +
+    `adb -s ${serial} install -r -d "$APK"; rm -rf "$TMP"`,
+    { stream: true });
   if (!r.ok) die('adb install failed (see output above)');
   log('✓ installed on Android');
 }
 
 // The iOS IPA is built UNSIGNED, so installing it needs a re-sign with YOUR
 // Apple ID. Two guided methods — the agent walks the user through whichever they
-// pick, doing the Mac-side automatable steps and teaching the interactive ones
-// (Apple ID login / 2FA / trusting the cert can only be done by the user).
+// pick, doing the automatable steps and teaching the interactive ones (Apple ID
+// login / 2FA / trusting the cert can only be done by the user).
 function installIos(method, version) {
   const d = detect();
-  requireReachable(d);
-  if (!d.ios.length) die(`没有连接的 iPhone(${SSH_HOST})。插上 iPhone,在手机上点“信任此电脑”,再重试。`);
+  if (!d.ios.length) die('没有连接的 iPhone。插上 iPhone,在手机上点“信任此电脑”,再重试。');
   const udid = d.ios[0];
   if (method === 'sideloadly') return iosSideloadly(d, udid, version);
   if (method === 'xcode') return iosXcode(d, udid);
@@ -107,26 +143,26 @@ function iosChooser(d, udid) {
 // ① Sideloadly: download the IPA + open it in Sideloadly, then guide login/2FA/trust.
 function iosSideloadly(d, udid, version) {
   const file = version ? `cicy-${version}.ipa` : 'cicy-latest.ipa';
-  const url = `${R2_BASE}/${file}`;
-  log(`▶ iOS · Sideloadly 方式 (设备 ${udid})`);
+  const url = iosUrl(version);
+  log(`▶ iOS · Sideloadly 方式 (设备 ${udid}) [${region()}]`);
   if (d.tools.sideloadly !== '1') {
     log('');
-    log('① Mac 上没装 Sideloadly,先装:');
+    log('① 本机没装 Sideloadly,先装:');
     log('   • 打开 https://sideloadly.io/ 下载 macOS 版 → 拖进“应用程序” → 打开一次');
-    ssh('open https://sideloadly.io/ >/dev/null 2>&1 || true');
+    sh('open https://sideloadly.io/ >/dev/null 2>&1 || true');
     log('   • 我已帮你打开下载页。装好后重跑: cicy-mobile-install ios --method sideloadly');
     return;
   }
   const dst = `${DL_DIR}/${file}`;
   log('');
   log(`① 下载 IPA 到 ${dst}: ${url}`);
-  const r = ssh(`mkdir -p ${DL_DIR} && curl -fsSL "${url}" -o ${dst} && ls -lh ${dst} | awk '{print $5}'`);
+  const r = sh(`mkdir -p ${DL_DIR} && curl -fsSL "${url}" -o ${dst} && ls -lh ${dst} | awk '{print $5}'`);
   if (!r.ok) die(`下载 IPA 失败: ${r.err || r.out}`);
   log(`   ✓ ${dst} (${r.out})`);
-  ssh(`open -a Sideloadly ${dst} >/dev/null 2>&1 || true`);
+  sh(`open -a Sideloadly ${dst} >/dev/null 2>&1 || true`);
   log('   ✓ 已用 Sideloadly 打开该 IPA');
   log('');
-  log('② 在 Mac 的 Sideloadly 窗口里手动完成(登录和验证码我没法替你做):');
+  log('② 在 Sideloadly 窗口里手动完成(登录和验证码我没法替你做):');
   log(`   • 顶部 device 选你的 iPhone(${udid})`);
   log('   • Apple ID 填你自己的(免费 ID 也行,签出来 7 天有效)');
   log('   • 点 Start → 输 Apple ID 密码 → 输发到你设备上的 2FA 验证码');
@@ -153,7 +189,7 @@ function iosXcode(d, udid) {
     return;
   }
   log('');
-  log(`① 准备工程(Mac, ${IOS_SOURCE_DIR}):`);
+  log(`① 准备工程(${IOS_SOURCE_DIR}):`);
   log(`   cd ${IOS_SOURCE_DIR} && npm install && npx expo prebuild -p ios --no-install && (cd ios && pod install)`);
   log('');
   log('② 自动签名构建并安装(开发者账号需已在 Xcode 登录):');
@@ -173,9 +209,11 @@ function iosXcode(d, udid) {
 
 function status() {
   const d = detect();
-  if (!d.reachable) die(`Mac host '${SSH_HOST}' unreachable${d.err ? ` — ${d.err}` : ''}`);
-  log(`host:    ${SSH_HOST}`);
-  log(`r2:      ${R2_BASE}`);
+  const reg = region();
+  log(`region:  ${reg}  (${reg === 'cn' ? 'Aliyun OSS Shanghai' : 'GitHub Releases'})`);
+  // latest available version, from the geo-agnostic manifest (best-effort).
+  const vr = sh(`curl -fsS -m 6 "${VERSION_URL}" 2>/dev/null || true`);
+  try { const j = JSON.parse(vr.out); if (j.version) log(`latest:  ${j.version}`); } catch { /* manifest unavailable */ }
   const t = d.tools;
   log(`tools:   adb=${t.adb === '1' ? '✓' : '✗'}  ideviceinstaller=${t.idev === '1' ? '✓' : '✗'}  Sideloadly=${t.sideloadly === '1' ? '✓' : '✗'}  Xcode=${t.xcode === '1' ? '✓' : '✗'}  src=${t.src === '1' ? '✓' : '✗'}`);
   log(`android: ${d.android.length ? d.android.join(', ') : '(none connected)'}`);
@@ -184,31 +222,35 @@ function status() {
 
 function auto(method, version) {
   const d = detect();
-  requireReachable(d);
   if (d.android.length) return installAndroid(version);
   if (d.ios.length) return installIos(method, version);
-  die(`no device connected to ${SSH_HOST} (plug an Android with USB-debugging, or an iPhone)`);
+  die('no device connected (plug an Android with USB-debugging, or an iPhone)');
 }
 
-const HELP = `cicy-mobile-install — install the latest cicy-mobile build onto a USB-connected phone via the Mac host.
+const HELP = `cicy-mobile-install — install the latest cicy-mobile build onto a phone plugged into THIS Mac.
 
 usage:
   cicy-mobile-install auto                      auto-detect the connected device and install latest
-  cicy-mobile-install android [ver]             pull APK from R2 and adb install (ver defaults to latest)
+  cicy-mobile-install android [ver]             download the build zip, unzip, adb install (ver defaults to latest)
   cicy-mobile-install ios [--method M] [ver]    iOS install — guided. M = sideloadly | xcode
                                                   (no --method → prints the two options to choose from)
-  cicy-mobile-install status                    show host reachability, tools, connected devices
+  cicy-mobile-install status                    show region, latest version, tools, connected devices
   cicy-mobile-install help
+
+Runs locally on this Mac (adb / idevice / Sideloadly / Xcode are here) — no ssh, no remote host.
 
 iOS notes: the IPA is unsigned, so it must be re-signed with YOUR Apple ID.
   • sideloadly — download the IPA + open it in Sideloadly; you do Apple ID login / 2FA / Start.
   • xcode      — build from source with automatic signing + ios-deploy. Both methods walk you
                  through trusting the developer cert at the end.
 
+distribution: global → GitHub Releases; CN → Aliyun OSS Shanghai. Android is a
+  .zip on both (unzipped before install); iOS is a bare .ipa. Region auto-detected;
+  force it with CICY_INSTALL_REGION or cfg.region.
+
 config (optional): ${CFG_PATH}
-  { "ssh_host": "mac", "r2_base": "https://r2.deepfetch.de5.net/cicy-mobile",
-    "download_dir": "~/Downloads", "ios_source_dir": "~/Downloads/cicy-mobile" }
-env: CICY_INSTALL_SSH_HOST overrides ssh_host.`;
+  { "region": "auto", "download_dir": "~/Downloads", "ios_source_dir": "~/Downloads/cicy-mobile" }
+env: CICY_INSTALL_REGION = cn|global.`;
 
 // flags: --method/-m <sideloadly|xcode>; remaining positionals = [cmd, version]
 const argv = process.argv.slice(2);
