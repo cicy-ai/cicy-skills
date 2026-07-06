@@ -7,11 +7,13 @@ description: Install the latest cicy-mobile build onto a USB-connected phone via
 
 Install the latest **cicy-mobile** build onto a phone that's plugged into the
 Mac build host. The phone connects to the Mac by USB; this skill runs on the
-host and drives the Mac over ssh, pulling the build artifact from the public R2
-CDN.
+host and drives the Mac over ssh, pulling the build artifact from the region's
+mirror (**global → GitHub Releases, CN → Aliyun OSS Shanghai**; no R2). Region is
+auto-detected on the Mac, or forced via `CICY_INSTALL_REGION` / `cfg.region`.
 
-- **Android** — pulls `cicy-latest.apk` (or a pinned version) from R2 and runs
-  `adb install -r`. No account needed.
+- **Android** — pulls `cicy-latest.apk` (or a pinned version) and runs
+  `adb install -r`. No account needed. (CN: the OSS asset is a `.zip` because
+  OSS forbids bare `.apk`; the skill unzips it before installing.)
 - **iOS** — the IPA is unsigned, so it must be re-signed with the user's own
   Apple ID. The skill **guides the user through one of two methods** (acting as a
   step-by-step copilot, doing the Mac-side automatable parts):
@@ -28,7 +30,8 @@ Use this skill when:
 
 - you want to install/update cicy-mobile on a USB-connected Android or iPhone,
 - the phone is plugged into the Mac build host (reachable as ssh `mac`),
-- you have the latest build on R2 (produced by the cicy-mobile release CI).
+- the cicy-mobile release CI has published the latest build (GitHub Release +
+  OSS mirror; the skill resolves the right one by region).
 
 Do **not** use it to build the app (that's the cicy-mobile release workflow) or
 for over-the-air installs.
@@ -49,7 +52,7 @@ Optional config `~/cicy-ai/db/cicy-mobile-install.json`:
 
 ```json
 { "ssh_host": "mac",
-  "r2_base": "https://r2.deepfetch.de5.net/cicy-mobile",
+  "region": "auto",
   "download_dir": "~/Downloads",
   "ios_source_dir": "~/Downloads/cicy-mobile" }
 ```

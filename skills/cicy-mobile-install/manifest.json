@@ -1,11 +1,19 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-mobile-install",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "title": "Cicy Mobile Install",
   "description": "Install the latest cicy-mobile build onto a USB-connected phone via the Mac build host — Android via adb install; iOS guided two ways: Sideloadly IPA re-sign or Xcode source build.",
   "category": "dev",
-  "tags": ["android", "ios", "install", "adb", "sideloadly", "xcode", "cicy-mobile"],
+  "tags": [
+    "android",
+    "ios",
+    "install",
+    "adb",
+    "sideloadly",
+    "xcode",
+    "cicy-mobile"
+  ],
   "author": "cicy",
   "license": "MIT",
   "runtime": {
