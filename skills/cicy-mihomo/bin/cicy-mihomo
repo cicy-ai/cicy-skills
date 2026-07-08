@@ -3,9 +3,9 @@
 // Subcommands: install / template / gen-config / show-config / status /
 //              start / stop / restart / reload / logs / test
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync, openSync, closeSync, chmodSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync, openSync, closeSync, chmodSync, readdirSync, symlinkSync, readlinkSync, renameSync, copyFileSync } from 'node:fs';
 import { homedir, platform, arch, tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 
@@ -22,22 +22,36 @@ const rest = argv.slice(1).filter((a) => a !== '--json');
 
 const HOME = homedir();
 const CONFIG_PATH = process.env.MIHOMO_CONFIG || join(HOME, 'cicy-ai', 'db', 'mihomo.yaml');
-// Binary resolution (Runtime Bundle v1 — 指定目录优先):
-//   1. MIHOMO_BIN env (cicy-desktop injects its runtime path)
-//   2. ~/cicy-ai/runtime/mihomo/<versions.json current>/mihomo(.exe)
-//   3. legacy ~/.local/bin/mihomo(.exe)  (docker base image / old installs)
+// Binary resolution + versioning (Runtime Bundle v2 — versioned in ~/.local/bin,
+// so mihomo is ON PATH and still version-managed + atomically rollback-able, the
+// same {symlink + pointer} convention cicy-code's own desktop localbin uses):
+//   ~/.local/bin/mihomo-<ver>        versioned binary (real file)
+//   ~/.local/bin/mihomo  → symlink → mihomo-<current>   (atomic switch = up/rollback)
+// Resolution order:
+//   1. MIHOMO_BIN env (cicy-desktop injects its own runtime path — unaffected)
+//   2. ~/.local/bin/mihomo (the symlink, on PATH)
+//   3. ~/.local/bin/mihomo-<current> (pointer from versions.json)
+//   4. legacy ~/cicy-ai/runtime/mihomo/<current>/mihomo (pre-v2 store)
+const LOCAL_BIN   = join(HOME, '.local', 'bin');
 const RUNTIME_DIR = join(HOME, 'cicy-ai', 'runtime');
-const RT_VERSIONS = join(RUNTIME_DIR, 'versions.json');
+const RT_VERSIONS = join(RUNTIME_DIR, 'versions.json'); // kept as the pointer/history record (current/previous)
 const BIN_NAME = platform() === 'win32' ? 'mihomo.exe' : 'mihomo';
+const SYMLINK = join(LOCAL_BIN, BIN_NAME);              // ~/.local/bin/mihomo
+function legacyBinPath(ver) { return join(RUNTIME_DIR, 'mihomo', ver, BIN_NAME); } // pre-v2 store
+// Versioned binary name in ~/.local/bin, e.g. mihomo-1.10.4 (mihomo-1.10.4.exe on win).
+function rtBinPath(ver) { return join(LOCAL_BIN, `mihomo-${ver}${platform() === 'win32' ? '.exe' : ''}`); }
 function rtCurrent() {
+  // The live symlink target is the source of truth; fall back to versions.json.
+  try { const m = basename(readlinkSync(SYMLINK)).match(/^mihomo-(.+?)(?:\.exe)?$/); if (m) return m[1]; } catch { /* not a symlink */ }
   try { return JSON.parse(readFileSync(RT_VERSIONS, 'utf8'))?.mihomo?.current || null; } catch { return null; }
 }
-function rtBinPath(ver) { return join(RUNTIME_DIR, 'mihomo', ver, BIN_NAME); }
 function resolveBinary() {
   if (process.env.MIHOMO_BIN) return process.env.MIHOMO_BIN;
+  if (existsSync(SYMLINK)) return SYMLINK;                       // on PATH: ~/.local/bin/mihomo
   const cur = rtCurrent();
-  if (cur && existsSync(rtBinPath(cur))) return rtBinPath(cur);
-  return join(HOME, '.local', 'bin', BIN_NAME);
+  if (cur && existsSync(rtBinPath(cur))) return rtBinPath(cur);  // versioned real file
+  if (cur && existsSync(legacyBinPath(cur))) return legacyBinPath(cur); // pre-v2 store
+  return SYMLINK;
 }
 const BINARY_PATH = resolveBinary();
 const STATE_DIR   = join(HOME, '.local', 'state', 'cicy-skills', 'mihomo');
@@ -258,10 +272,25 @@ async function npmLatest() {
   } catch { return null; }
 }
 
+// Make <ver> the active binary by (atomically) repointing ~/.local/bin/mihomo →
+// mihomo-<ver>. Rollback = call this with the previous version. versions.json is
+// kept as the pointer/history record (current/previous) for a stable rollback UX.
 function rtSwitch(ver) {
+  ensureDir(LOCAL_BIN);
+  const prev = rtCurrent();
+  if (platform() === 'win32') {
+    // Windows symlinks need admin — copy the versioned binary onto the stable name.
+    try { copyFileSync(rtBinPath(ver), SYMLINK); } catch (e) { throw new Error(`activate ${ver} failed: ${e.message}`); }
+  } else {
+    // atomic swap: make a temp symlink → rename over the stable name.
+    const tmp = `${SYMLINK}.tmp-${process.pid}`;
+    try { unlinkSync(tmp); } catch {}
+    symlinkSync(`mihomo-${ver}`, tmp);   // relative target, resolves within ~/.local/bin
+    renameSync(tmp, SYMLINK);            // atomic replace (no window where mihomo is missing)
+  }
   ensureDir(RUNTIME_DIR);
   let v = {}; try { v = JSON.parse(readFileSync(RT_VERSIONS, 'utf8')); } catch {}
-  v.mihomo = { ...(v.mihomo || {}), previous: v.mihomo?.current || undefined, current: ver, switched_at: new Date().toISOString() };
+  v.mihomo = { ...(v.mihomo || {}), previous: prev || v.mihomo?.current || undefined, current: ver, switched_at: new Date().toISOString() };
   writeFileSync(RT_VERSIONS, JSON.stringify(v, null, 2));
 }
 
@@ -286,7 +315,11 @@ async function cmdInstall() {
 
   const url = process.env.CICY_MIHOMO_RELEASE_URL || resolveDownloadURL();
   console.log(`→ downloading ${url} ...`);
-  ensureDir(dirname(BINARY_PATH));
+  // GitHub-fallback lands the binary as a versioned file in ~/.local/bin, then
+  // the symlink is repointed to it (same as the npm path).
+  const ghVer = MIHOMO_VERSION.replace(/^v/, '');
+  const dest = rtBinPath(ghVer);
+  ensureDir(dirname(dest));
   // OS temp dir, not hardcoded /tmp (msys /tmp ≠ %TEMP% under native Windows node)
   const tmp = join(tmpdir(), `cicy-mihomo-${process.pid}`);
   ensureDir(tmp);
@@ -317,27 +350,20 @@ async function cmdInstall() {
       return '';
     })(tmp);
     if (!out) throw Object.assign(new Error('mihomo binary not found in archive'), { exitCode: 4 });
-    writeFileSync(BINARY_PATH, readFileSync(out), { mode: 0o755 });
+    writeFileSync(dest, readFileSync(out), { mode: 0o755 });
   } else if (isGz) {
     // single-file gzip: gunzip in place
     execFileSync('gunzip', ['-f', archive], { stdio: 'inherit' });
     const extracted = archive.replace(/\.gz$/i, '');
-    writeFileSync(BINARY_PATH, readFileSync(extracted), { mode: 0o755 });
+    writeFileSync(dest, readFileSync(extracted), { mode: 0o755 });
   } else {
     // raw binary (cicy-ai/cicy-mihomo): install directly, no extraction
-    writeFileSync(BINARY_PATH, readFileSync(archive), { mode: 0o755 });
+    writeFileSync(dest, readFileSync(archive), { mode: 0o755 });
   }
-  // GitHub-fallback installs also land in the runtime store so the version
-  // pointer stays truthful (BINARY_PATH already resolves through it).
-  try {
-    const ver = MIHOMO_VERSION.replace(/^v/, '');
-    if (BINARY_PATH !== rtBinPath(ver)) {
-      ensureDir(dirname(rtBinPath(ver)));
-      writeFileSync(rtBinPath(ver), readFileSync(BINARY_PATH), { mode: 0o755 });
-    }
-    rtSwitch(ver);
-  } catch {}
-  console.log(`✓ installed mihomo → ${BINARY_PATH}`);
+  // Activate it: repoint ~/.local/bin/mihomo → mihomo-<ghVer> (dest is already
+  // the versioned file written above).
+  try { rtSwitch(ghVer); } catch (e) { console.warn(`! activate failed: ${e.message}`); }
+  console.log(`✓ installed mihomo ${ghVer} → ${dest} (active: ${SYMLINK})`);
 }
 
 async function verifySha256(archive, assetURL) {
