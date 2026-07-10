@@ -250,11 +250,28 @@ async function cmdReply(args, node) {
 // Idempotent: leaves the text alone if it already carries either marker
 // (the receiver may forward the stamped text back to us). The 📨 check stays
 // so text stamped by older installs is still recognized during the rollover.
-function stampSender(text) {
-  const senderID = (process.env.X_AGENT_SHORT_ID || '').trim();
-  if (!senderID) return { text, senderID: '' };
+function stampSender(text, teamId) {
+  const raw = (process.env.X_AGENT_SHORT_ID || '').trim();
+  if (!raw) return { text, senderID: '' };
+  // In team mode (the local node has an --id), the sender is team-qualified so a
+  // cross-team recipient sees the full address: [teamA.w-1001]. Otherwise plain.
+  const senderID = teamId ? `${teamId}.${raw}` : raw;
   if (text.startsWith('📮 ') || text.startsWith('📨 ') || text.startsWith(`[${senderID}]`)) return { text, senderID };
   return { text: `📮 [${senderID}] ${text}`, senderID };
+}
+
+// localTeamId returns THIS node's cicy-hub team id (from /api/health.team_id),
+// or '' when not in team mode. Cached for the process.
+var _localTeamId;
+async function localTeamId() {
+  if (_localTeamId !== undefined) return _localTeamId;
+  _localTeamId = '';
+  try {
+    const { api: base, token } = resolveTarget('');
+    const res = await fetch(base + '/api/health', { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3000) });
+    if (res.ok) { const d = await res.json(); _localTeamId = (d.team_id || '').trim(); }
+  } catch { /* not in team mode / unreachable */ }
+  return _localTeamId;
 }
 
 async function cmdMsg(args, node) {
@@ -274,14 +291,27 @@ async function cmdMsg(args, node) {
     else if (a === '--notify') notify = true;
     else filtered.push(a);
   }
-  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane> <text> [--no-callback] [--notify]'), { exitCode: 2 });
-  const { text, senderID } = stampSender(filtered.slice(1).join(' '));
-  const payload = { pane_id: filtered[0], text };
-  // callback_to only works with a sender id; outside a pane (no env) it's skipped.
-  if (callback && senderID) payload.callback_to = senderID;
-  // notify only matters alongside a callback; it gates the completion chat push.
-  if (callback && senderID && notify) payload.notify = true;
-  const data = await api('POST', '/api/tmux/send', payload, node);
+  if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane|team.agent> <text> [--no-callback] [--notify]'), { exitCode: 2 });
+  // Address parsing: "teamA.1001" → route to team teamA, pane w-1001 (when teamA
+  // is a registered team). An explicit --team still takes precedence.
+  let pane = filtered[0];
+  let target = node;
+  if (!target && pane.includes('.')) {
+    const dot = pane.indexOf('.');
+    const maybeTeam = pane.slice(0, dot);
+    if (loadTeams().some((t) => t.name === maybeTeam)) { target = maybeTeam; pane = pane.slice(dot + 1); }
+  }
+  if (/^\d+$/.test(pane)) pane = 'w-' + pane; // bare agent number → w-<n>
+  const crossTeam = !!target;
+  const teamId = await localTeamId(); // team mode → sender stamp is [teamId.me]
+  const { text, senderID } = stampSender(filtered.slice(1).join(' '), teamId);
+  const payload = { pane_id: pane, text };
+  // callback_to (auto-reply tracking) only works when sender+recipient share the
+  // node. Cross-team replies must route back through the hub (not built yet), so
+  // skip callback there — the team-qualified stamp still shows who sent it.
+  if (callback && senderID && !crossTeam) payload.callback_to = senderID;
+  if (callback && senderID && notify && !crossTeam) payload.notify = true;
+  const data = await api('POST', '/api/tmux/send', payload, target);
   if (json) return ok(data);
   // Echo the message id (when the send was recorded in the agent_messages store)
   // so the sender can later `cicy-agent msgs` it by id. Falls back to the raw
