@@ -22,8 +22,8 @@ All todos live in a single store under the **master pane** workspace
 | sub        | usage                                                                  |
 |------------|------------------------------------------------------------------------|
 | `list`     | `cicy-todo list [--status=todo\|test\|done\|dropped] [-q <kw>] [--all] [--pane <w-xxxxx>]` |
-| `add`      | `cicy-todo add "<title>" [--pane <w-xxxxx>]`                           |
-| `show`     | `cicy-todo show <id-prefix>`                                           |
+| `add`      | `cicy-todo add "<title>" [--body <brief> \| --body-file <path\|->] [--pane <w-xxxxx>]` |
+| `show`     | `cicy-todo show <id-prefix>` — prints the brief in full                |
 | `test`     | `cicy-todo test <id>`    → status=`test` (done coding, awaiting review) |
 | `done`     | `cicy-todo done <id>`    → status=`done`                                |
 | `drop`     | `cicy-todo drop <id>`    → status=`dropped`                             |
@@ -53,12 +53,40 @@ cicy-todo                         # list own active todos (ID column shown)
 cicy-todo --json                  # JSON output
 cicy-todo list --all              # include done/dropped
 cicy-todo list --status=done
-cicy-todo list -q "release"       # title contains "release"
+cicy-todo list -q "release"       # title OR brief contains "release"
 
 cicy-todo add "Migrate cf-tunnel skill"
 cicy-todo done 7                  # by stable id (the ID column)
 cicy-todo test #1                 # by positional ref into the active view
 cicy-todo done ab                 # by id prefix (works for any status)
+```
+
+## The brief (`--body`)
+
+A todo carries a **brief**: the goal, the acceptance criteria, and the relevant
+files. This is where task detail belongs — the dispatch convention is that
+`cicy-agent msg` carries only the **todo id + a one-line title**, and everything
+else lives in the todo. `show` prints the brief in full; `-q` searches it.
+
+```sh
+# inline
+cicy-todo add "Fix the gateway 2× overcharge" --body "目标: ...
+验收: - [ ] 测试绿"
+
+# from a file, or piped in via stdin — the sane way to pass a long markdown
+# brief without fighting shell quoting
+cicy-todo add "Ship the worker protocol" --body-file brief.md
+cat brief.md | cicy-todo add "Ship the worker protocol" --body-file -
+
+cicy-todo show 12                 # prints the brief in full
+cicy-todo edit 12 --body-file -   # replace the brief (pass --body "" to clear)
+```
+
+Unknown flags are a hard error. (They used to be accepted and silently
+discarded, which is how `--body` appeared to work while throwing every brief
+away.)
+
+```sh
 
 # From master pane (w-1001).
 cicy-todo                          # every worker's active todos (PANE col shown)
