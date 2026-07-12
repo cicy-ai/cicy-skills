@@ -51,21 +51,77 @@ const SELF_PANE = SELF_PANE_RAW;
 const json = args.includes('--json');
 const isMaster = SELF_PANE === MASTER_PANE;
 
-// --pane <filter> (master-only) selects which worker's todos to act on
+// Every flag this CLI understands. Anything else is a HARD ERROR — an unknown
+// flag used to be pushed into `rest`, and its VALUE (which doesn't start with
+// `--`) landed there too, silently becoming a positional arg. That is exactly
+// how `--body "<brief>"` was accepted-and-discarded for so long: no error, no
+// output, the brief just vanished. Fail loudly instead.
+const KNOWN_FLAGS = new Set([
+  '--json', '--pane', '--all', '--status', '--query', '-q',
+  '--body', '--body-file', '--help', '-h',
+]);
+
+// Flags that consume the NEXT argv entry as their value.
+const VALUE_FLAGS = new Set(['--pane', '--body', '--body-file', '--status', '--query', '-q']);
+
+// --pane <filter> (master-only) selects which worker's todos to act on.
+// --body / --body-file carry the task brief (goal, acceptance criteria, files).
 let paneFilter = '';
-const rest = [];
+let bodyText = null;      // null = "not supplied"; "" = "explicitly cleared"
+let bodyFile = '';
+const rest = [];          // flags + their values, for cmdList's own --status/-q parsing
+const positionals = [];   // NON-flag args only — a flag's value never lands here
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
-  if (a === '--pane') { paneFilter = args[++i] || ''; continue; }
-  if (a.startsWith('--pane=')) { paneFilter = a.slice('--pane='.length); continue; }
+  const eq = a.startsWith('--') ? a.indexOf('=') : -1;
+  const name = eq > 0 ? a.slice(0, eq) : a;
+
+  if (!name.startsWith('-')) { positionals.push(a); rest.push(a); continue; }
+
+  if (!KNOWN_FLAGS.has(name)) {
+    bail(`unknown flag: ${name}. Try cicy-todo --help.`, 2);
+  }
+
+  const takeValue = () => {
+    if (eq > 0) return a.slice(eq + 1);
+    if (i + 1 >= args.length) bail(`${name} needs a value`, 2);
+    return args[++i];
+  };
+
+  if (name === '--pane') { paneFilter = takeValue(); continue; }
+  if (name === '--body') { bodyText = takeValue(); continue; }
+  if (name === '--body-file') { bodyFile = takeValue(); continue; }
+
+  // --status / -q keep their value in `rest` (cmdList parses them from there),
+  // but the value must NOT become a positional — that's how `-q foo` used to
+  // get mistaken for the command `foo`.
+  if (VALUE_FLAGS.has(name) && eq < 0) { rest.push(a, takeValue()); continue; }
   rest.push(a);
 }
 if (paneFilter && !isMaster) {
   bail('--pane is only available from the master pane (w-1001)', 2);
 }
+if (bodyText !== null && bodyFile) {
+  bail('use either --body or --body-file, not both', 2);
+}
 
-const cmd = rest.find((a) => !a.startsWith('--')) || 'list';
-const cmdArgs = rest.filter((a) => !a.startsWith('--') && a !== cmd);
+// resolveBody returns the brief to send, or null when none was supplied.
+// --body-file - reads stdin, so a long markdown brief can be piped in without
+// fighting shell quoting (which is what a multi-paragraph brief always becomes).
+function resolveBody() {
+  if (bodyFile) {
+    try {
+      // fd 0 = stdin, so `--body-file -` pipes a brief in.
+      return readFileSync(bodyFile === '-' ? 0 : bodyFile, 'utf8').trim();
+    } catch (e) {
+      bail(`cannot read --body-file ${bodyFile}: ${e.message}`, 2);
+    }
+  }
+  return bodyText;
+}
+
+const cmd = positionals[0] || 'list';
+const cmdArgs = positionals.slice(1);
 
 // IIFE so module-level `const` declarations below (GLYPH, helpers) are out
 // of the temporal dead zone by the time the dispatch runs.
@@ -73,7 +129,7 @@ const cmdArgs = rest.filter((a) => !a.startsWith('--') && a !== cmd);
   try {
     switch (cmd) {
       case 'list': case 'ls':  await cmdList(rest); break;
-      case 'add':              await cmdAdd(rest); break;
+      case 'add':              await cmdAdd(); break;
       case 'show':             await cmdShow(cmdArgs); break;
       case 'test':             await cmdSetStatus('test', cmdArgs); break;
       case 'done':             await cmdSetStatus('done', cmdArgs); break;
@@ -294,16 +350,35 @@ async function cmdList(restArgs) {
   }
 }
 
-async function cmdAdd(restArgs) {
-  const title = restArgs.find((a, i) => i > restArgs.indexOf('add') && !a.startsWith('--'));
-  if (!title) bail('usage: cicy-todo add "<title>" [--pane <w-xxxxx>]', 2);
+async function cmdAdd() {
+  const title = cmdArgs[0];
+  if (!title) {
+    bail('usage: cicy-todo add "<title>" [--body <brief> | --body-file <path|->] [--pane <w-xxxxx>]', 2);
+  }
   // Master with --pane creates on behalf of the named worker; everyone else
   // creates for themselves.
-  const body = { title };
-  if (isMaster && paneFilter) body.pane_id = paneFilter;
-  const resp = await api('POST', '/add', body);
-  if (json) console.log(JSON.stringify({ ok: true, data: resp }));
-  else console.log(`+ ${resp.todo?.id || '?'}  [${resp.todo?.pane_id || SELF_PANE}]  ${resp.todo?.title || title}`);
+  const payload = { title };
+  if (isMaster && paneFilter) payload.pane_id = paneFilter;
+
+  // The brief. The dispatch convention is that `cicy-agent msg` carries only
+  // the id + title and ALL the detail lives here.
+  const brief = resolveBody();
+  if (brief) payload.body = brief;
+
+  const resp = await api('POST', '/add', payload);
+  if (json) { console.log(JSON.stringify({ ok: true, data: resp })); return; }
+
+  const t = resp.todo || {};
+  console.log(`+ ${t.id || '?'}  [${t.pane_id || SELF_PANE}]  ${t.title || title}`);
+  // Confirm the brief actually landed. Silence here is what let the old
+  // --body-is-ignored bug hide: you could not tell a stored brief from a
+  // discarded one.
+  if (brief && !t.body) {
+    console.error('! brief was NOT stored — the cicy-code server is too old (needs the todo `body` field)');
+    process.exitCode = 1;
+  } else if (t.body) {
+    console.log(`  brief: ${t.body.split('\n').length} 行`);
+  }
 }
 
 async function cmdShow(args) {
@@ -329,6 +404,13 @@ async function cmdShow(args) {
     console.log(`created:    ${t.created_at}`);
     console.log(`updated:    ${t.updated_at}`);
     console.log(`title:      ${t.title}`);
+    // The brief is the whole point of `show` — it carries the goal, the
+    // acceptance criteria and the relevant files. Print it in full; truncating
+    // it would just push the reader back to guessing.
+    if (t.body) {
+      console.log('');
+      console.log(t.body);
+    }
   }
 }
 
@@ -344,11 +426,25 @@ async function cmdSetStatus(newStatus, args) {
 async function cmdEdit(args) {
   const id = args[0];
   const title = args[1];
-  if (!id || !title) bail('usage: cicy-todo edit <id> "<new title>"', 2);
+  const brief = resolveBody();
+  if (!id || (!title && brief === null)) {
+    bail('usage: cicy-todo edit <id> ["<new title>"] [--body <brief> | --body-file <path|->]', 2);
+  }
   const target = await resolveId(id);
-  const resp = await api('PATCH', `/${target.id}`, { title });
-  if (json) console.log(JSON.stringify({ ok: true, data: resp }));
-  else console.log(`~ ${resp.todo?.id || target.id}  ${resp.todo?.title || title}`);
+  const patch = {};
+  if (title) patch.title = title;
+  if (brief !== null) patch.body = brief;   // "" clears the brief
+  const resp = await api('PATCH', `/${target.id}`, patch);
+  if (json) { console.log(JSON.stringify({ ok: true, data: resp })); return; }
+
+  const t = resp.todo || {};
+  console.log(`~ ${t.id || target.id}  ${t.title || title || target.title}`);
+  if (brief && !t.body) {
+    console.error('! brief was NOT stored — the cicy-code server is too old (needs the todo `body` field)');
+    process.exitCode = 1;
+  } else if (brief !== null) {
+    console.log(brief ? `  brief: ${t.body.split('\n').length} 行` : '  brief: 已清空');
+  }
 }
 
 async function cmdRm(args) {
