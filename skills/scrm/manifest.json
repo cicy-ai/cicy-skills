@@ -1,0 +1,81 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "scrm",
+  "version": "0.1.0",
+  "title": "WeChat SCRM",
+  "description": "WeChat SCRM CLI: read customer/session/unread data from a local data source, and run device-side sync - unread brief to the CS supervisor, list rescan, chat archive.",
+  "category": "productivity",
+  "tags": [
+    "wechat",
+    "scrm",
+    "crm",
+    "unread",
+    "adb"
+  ],
+  "author": "cicy",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/scrm",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/scrm",
+  "permissions": [
+    "network",
+    "process:spawn",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "微信 SCRM",
+      "description": "微信 SCRM CLI：从本地数据源查客户/会话/未读数据，并触发设备侧同步（真人未读简报发客服主管、重跑列表、抓聊天存档）。读走 API，设备操作转发 scrm 二进制。"
+    }
+  },
+  "tools": [
+    {
+      "name": "scrm unread",
+      "example": "scrm unread",
+      "description": "Current unread: total + per real-person unread"
+    },
+    {
+      "name": "scrm sessions",
+      "example": "scrm sessions --real --unread",
+      "description": "List sessions (filter by --real / --group / --unread)"
+    },
+    {
+      "name": "scrm session",
+      "example": "scrm session hayabusa --ocr",
+      "description": "One session's archive status + OCR text"
+    },
+    {
+      "name": "scrm state",
+      "example": "scrm state",
+      "description": "Live phone page / unread / online (watcher)"
+    },
+    {
+      "name": "scrm inbox",
+      "example": "scrm inbox",
+      "description": "Detect real-person unread then brief the CS supervisor agent"
+    },
+    {
+      "name": "scrm sync",
+      "example": "scrm sync sessions",
+      "description": "Rescan the session list / address book on device"
+    },
+    {
+      "name": "scrm feed",
+      "example": "scrm feed",
+      "description": "Scan list then push new messages to each session's agent"
+    }
+  ]
+}

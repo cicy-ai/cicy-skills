@@ -1,0 +1,120 @@
+#!/usr/bin/env node
+// scrm — WeChat SCRM CLI.
+// Read commands (unread / sessions / session / state) hit the SCRM data-source
+// API (:8900). Device commands (inbox / sync / feed / archive) shell out to the
+// scrm Go binary. Zero npm dependencies. Pure ESM. Node 18+.
+
+import { spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+
+const API = (process.env.SCRM_API || 'http://127.0.0.1:8900').replace(/\/$/, '');
+const HOME = process.env.SCRM_HOME || join(homedir(), 'projects', 'wechat-scrm');
+const BIN = process.env.SCRM_BIN || join(HOME, 'bin', 'scrm');
+
+const argv = process.argv.slice(2);
+const cmd = argv[0];
+const rest = argv.slice(1);
+const wantJSON = rest.includes('--json');
+
+function die(msg) { console.error(msg); process.exit(1); }
+
+async function api(path) {
+  let r;
+  try { r = await fetch(API + path); }
+  catch { die(`连不上 SCRM 服务 ${API}（是否已 scrm serve？设 SCRM_API 覆盖地址）`); }
+  if (!r.ok) die(`API ${path} → HTTP ${r.status}`);
+  return r.json();
+}
+
+// 转发到 Go 二进制（设备操作）
+function runBin(args) {
+  if (!existsSync(BIN)) die(`找不到 scrm 二进制：${BIN}（设 SCRM_BIN 覆盖，或先 go build）`);
+  const r = spawnSync(BIN, args, { stdio: 'inherit', env: { ...process.env, WSCRM_HOME: HOME } });
+  process.exit(r.status ?? 1);
+}
+
+const isReal = (s) => s.type === 'friend' || s.type === 'real';
+const pad = (s, n) => (String(s) + ' '.repeat(n)).slice(0, n);
+
+async function cmdUnread() {
+  const st = await api('/api/state').catch(() => ({}));
+  const data = await api('/api/data');
+  const reals = data.sessions.filter((s) => isReal(s) && (s.unread || 0) > 0);
+  if (wantJSON) { console.log(JSON.stringify({ total: st.unread ?? null, online: !!(st.state && st.state !== 'offline'), reals })); return; }
+  const online = st.state && st.state !== 'offline';
+  console.log(`总未读 ${st.unread ?? '?'} · 设备${online ? '在线' : '离线'}${st.unread_at ? ' · ' + st.unread_at : ''}`);
+  if (!reals.length) { console.log('真人无未读'); return; }
+  console.log(`真人未读 ${reals.length} 位：`);
+  for (const s of reals) console.log(`  · ${pad(s.name, 18)} 未读${s.unread}   ${s.preview || ''}`);
+}
+
+async function cmdSessions() {
+  const data = await api('/api/data');
+  let list = data.sessions;
+  if (rest.includes('--real')) list = list.filter(isReal);
+  if (rest.includes('--group')) list = list.filter((s) => s.type === 'group');
+  if (rest.includes('--unread')) list = list.filter((s) => (s.unread || 0) > 0);
+  if (wantJSON) { console.log(JSON.stringify(list)); return; }
+  console.log(`${list.length} 个会话：`);
+  for (const s of list) {
+    const u = (s.unread || 0) > 0 ? ` 未读${s.unread}` : '';
+    console.log(`  ${pad(s.name, 20)} [${pad(s.type, 7)}] 同步:${pad(s.sync, 7)} ${s.msgCount}条${u}`);
+  }
+}
+
+async function cmdSession() {
+  const name = rest.find((a) => !a.startsWith('--'));
+  if (!name) die('用法: scrm session <名字> [--ocr] [--json]');
+  const a = await api('/api/archive?name=' + encodeURIComponent(name));
+  if (wantJSON) { console.log(JSON.stringify(a)); return; }
+  if (!a.archived) { console.log(`${name}：未截图存档（scrm archive --only ${name} 抓取）`); return; }
+  console.log(`${name}：截图 ${a.shot_count} 张 · 截图${a.shots_done ? '全' : '部分'} · OCR ${a.ocr_done ? '✓ ' + a.msg_count + ' 行' : '✗ 未完成'}`);
+  if (rest.includes('--ocr') && a.ocr_text) console.log('\n' + a.ocr_text);
+}
+
+async function cmdState() {
+  const st = await api('/api/state');
+  if (wantJSON) { console.log(JSON.stringify(st)); return; }
+  console.log(`页面：${st.label || st.state}`);
+  console.log(`未读：${st.unread ?? '?'}${st.unread_at ? '（' + st.unread_at + '）' : ''}`);
+  console.log(`设备：${st.device || '?'} · ${st.state === 'offline' ? '离线' : '在线'}`);
+}
+
+function help() {
+  console.log(`scrm — 微信 SCRM CLI
+
+读数据（走 :8900 数据源，不碰设备）：
+  scrm unread                 当前未读：总数 + 真人每人未读
+  scrm sessions [--real|--group|--unread] [--json]   会话列表
+  scrm session <名字> [--ocr] [--json]               某会话存档状态 + OCR 文本
+  scrm state [--json]         当前手机页面 / 未读 / 在线状态（watcher）
+
+操作设备（转发 scrm 二进制，需设备在线+亮屏+列表页）：
+  scrm inbox [--dry]          检测真人未读 → 简报发客服主管处理
+  scrm sync <sessions|contacts>   重跑列表（去重+分类+入库）
+  scrm feed [--prime|--dry]   扫列表 → 新消息推给对应 agent
+  scrm archive [页数] [--only 名字]   抓某会话聊天截图 + 拼接 OCR
+
+环境变量：SCRM_API（默认 http://127.0.0.1:8900）· SCRM_HOME · SCRM_BIN`);
+}
+
+const run = async () => {
+  switch (cmd) {
+    case 'unread': return cmdUnread();
+    case 'sessions': return cmdSessions();
+    case 'session': return cmdSession();
+    case 'state': return cmdState();
+    case 'inbox': return runBin(['inbox', ...rest]);
+    case 'sync': return runBin(['rescan', ...rest]);
+    case 'feed': return runBin(['feed', ...rest]);
+    case 'archive': return runBin(['archive', ...rest]);
+    case undefined:
+    case '-h':
+    case '--help':
+    case 'help': return help();
+    default: die(`未知命令：${cmd}（scrm help 看全部）`);
+  }
+};
+run().catch((e) => die(String(e && e.message || e)));
