@@ -6,12 +6,21 @@
 
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, chmodSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const API = (process.env.SCRM_API || 'http://127.0.0.1:8900').replace(/\/$/, '');
 const HOME = process.env.SCRM_HOME || join(homedir(), 'projects', 'wechat-scrm');
 const BIN = process.env.SCRM_BIN || join(HOME, 'bin', 'scrm');
+
+// Prebuilt engine binaries live in object storage; `scrm setup` fetches the one
+// for this platform so users never need a Go toolchain. Override the base with
+// SCRM_ENGINE_BASE (or --base) to pull from a mirror.
+const ENGINE_VER = '0.1.0';
+const ENGINE_BASE = (process.env.SCRM_ENGINE_BASE || `https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/binaries/scrm/engine/v${ENGINE_VER}`).replace(/\/$/, '');
+const SKILL_DIR = dirname(dirname(fileURLToPath(import.meta.url))); // …/skills/scrm
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -82,8 +91,95 @@ async function cmdState() {
   console.log(`设备：${st.device || '?'} · ${st.state === 'offline' ? '离线' : '在线'}`);
 }
 
+// node platform/arch → Go GOOS/GOARCH
+function goTarget() {
+  const os = { darwin: 'darwin', linux: 'linux' }[process.platform];
+  const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch];
+  if (!os) die(`不支持的系统：${process.platform}(引擎仅 darwin/linux)`);
+  if (!arch) die(`不支持的架构：${process.arch}(引擎仅 amd64/arm64)`);
+  return `${os}-${arch}`;
+}
+
+async function download(url) {
+  let r;
+  try { r = await fetch(url); } catch (e) { die(`下载失败 ${url}：${e.message}`); }
+  if (!r.ok) die(`下载失败 ${url} → HTTP ${r.status}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+// recursively copy a bundled asset dir into dest (skip existing unless force)
+function copyTree(src, dst, force) {
+  mkdirSync(dst, { recursive: true });
+  for (const e of readdirSync(src)) {
+    const s = join(src, e), d = join(dst, e);
+    if (statSync(s).isDirectory()) copyTree(s, d, force);
+    else if (force || !existsSync(d)) writeFileSync(d, readFileSync(s));
+  }
+}
+
+async function cmdSetup() {
+  const arg = (k) => { const i = rest.indexOf(k); return i >= 0 ? rest[i + 1] : undefined; };
+  const target = arg('--target') || goTarget();
+  const base = (arg('--base') || ENGINE_BASE).replace(/\/$/, '');
+  const force = rest.includes('--force');
+  console.log(`scrm setup · 平台 ${target} · 引擎 v${ENGINE_VER}`);
+  console.log(`  SCRM_HOME = ${HOME}`);
+
+  // 1) 引擎二进制:从对象存储下载(带 sha256 校验)
+  if (existsSync(BIN) && !force) {
+    console.log(`  ✓ 引擎已存在:${BIN}(--force 覆盖重下)`);
+  } else {
+    const url = `${base}/scrm-${target}`;
+    console.log(`  ↓ 下载引擎 ${url}`);
+    const bin = await download(url);
+    const got = createHash('sha256').update(bin).digest('hex');
+    const sumBuf = await fetch(url + '.sha256').then((r) => r.ok ? r.text() : null).catch(() => null);
+    if (sumBuf) {
+      const want = sumBuf.trim().split(/\s+/)[0];
+      if (want && want !== got) die(`  ✗ sha256 不匹配!期望 ${want} 实得 ${got}(拒绝安装)`);
+      console.log(`  ✓ sha256 校验通过 ${got.slice(0, 16)}…`);
+    } else {
+      console.log(`  ⚠ 无 .sha256 可校验,跳过(sha256=${got.slice(0, 16)}…)`);
+    }
+    mkdirSync(dirname(BIN), { recursive: true });
+    writeFileSync(BIN, bin);
+    chmodSync(BIN, 0o755);
+    console.log(`  ✓ 引擎装好:${BIN}`);
+  }
+
+  // 2) OCR sidecar + 配置模板 + 运行目录(从 skill 包内落地)
+  copyTree(join(SKILL_DIR, 'assets', 'ocr'), join(HOME, 'ocr'), force);
+  copyTree(join(SKILL_DIR, 'assets', 'config'), join(HOME, 'config'), force);
+  for (const d of ['data', 'archives']) mkdirSync(join(HOME, d), { recursive: true });
+  console.log(`  ✓ OCR 脚本 + config 模板已就位,data/ archives/ 已建`);
+
+  // 3) OCR Python 依赖(可选,--with-ocr 才装)
+  if (rest.includes('--with-ocr')) {
+    console.log('  ↻ pip 安装 rapidocr_onnxruntime …');
+    const r = spawnSync('python3', ['-m', 'pip', 'install', '--user', '--quiet', 'rapidocr_onnxruntime'], { stdio: 'inherit' });
+    console.log(r.status === 0 ? '  ✓ OCR 依赖装好' : '  ⚠ OCR 依赖安装失败,稍后手动 pip install rapidocr_onnxruntime');
+  }
+
+  // 4) 环境自检
+  const has = (c) => spawnSync(c, ['--version'], { stdio: 'ignore' }).status === 0 || spawnSync('which', [c], { stdio: 'ignore' }).status === 0;
+  const okBin = spawnSync(BIN, [], { stdio: 'ignore' }).status === 0;
+  const okPy = spawnSync('python3', ['-c', 'import rapidocr_onnxruntime'], { stdio: 'ignore' }).status === 0;
+  const okAdb = has('adb');
+  console.log('\n环境自检:');
+  console.log(`  引擎可执行  ${okBin ? '✓' : '✗'}`);
+  console.log(`  OCR 依赖    ${okPy ? '✓' : '✗ 未装(scrm setup --with-ocr 或 pip install rapidocr_onnxruntime)'}`);
+  console.log(`  adb         ${okAdb ? '✓' : '✗ 未装(设备命令需要;brew install android-platform-tools)'}`);
+  console.log('\n下一步:数据源二选一 —— 独立 `scrm serve`(:8900),或指向 cicy-code:');
+  console.log('  export SCRM_API=http://127.0.0.1:8008/api/scrm');
+  console.log('然后 `scrm unread` / `scrm inbox`(设备命令需手机经 adb 在线+亮屏+停在会话列表)。');
+}
+
 function help() {
   console.log(`scrm — 微信 SCRM CLI
+
+首次安装（不用装 Go，从对象存储下预编译引擎）：
+  scrm setup [--with-ocr] [--force]   下载本平台引擎 + 铺 OCR/config + 自检
+                                      覆盖:SCRM_HOME / SCRM_ENGINE_BASE / --target <os-arch>
 
 读数据（走 :8900 数据源，不碰设备）：
   scrm unread                 当前未读：总数 + 真人每人未读
@@ -102,6 +198,7 @@ function help() {
 
 const run = async () => {
   switch (cmd) {
+    case 'setup': return cmdSetup();
     case 'unread': return cmdUnread();
     case 'sessions': return cmdSessions();
     case 'session': return cmdSession();

@@ -38,19 +38,29 @@ scrm sync sessions              # 重跑会话列表
 
 所有读命令支持 `--json`,便于 agent 解析。
 
-## 前置
+## 首次安装
 
-这个 skill 只是**命令行前端**;真正干活的引擎不在包里,首次使用需自备:
+这个 skill 只是**命令行前端**,引擎不在包里。装完 skill **先跑一次 `scrm setup`** —— 它从对象存储
+下载本平台预编译引擎、铺好 OCR 脚本 + config 模板、建运行目录并自检,**无需 Go 工具链**:
 
-1. **Go 引擎二进制** —— 从 `wechat-scrm` 源码构建(纯 Go 无 cgo,可跨平台):
-   `go build -o bin/scrm ./cmd/scrm`。默认位置 `~/projects/wechat-scrm/bin/scrm`,用 `SCRM_BIN` 覆盖。
-2. **OCR sidecar** —— `pip install rapidocr_onnxruntime`(引擎首次会自动拉起,常驻 `:8781`)。
-3. **数据源** —— 二选一:跑 `scrm serve`(监听 `:8900`),或指向已内置 `/api/scrm/*` 的 cicy-code
+```sh
+scrm setup              # 下引擎 + 铺 OCR/config + 自检
+scrm setup --with-ocr   # 顺带 pip 装 rapidocr_onnxruntime
+scrm setup --force      # 覆盖重下引擎
+```
+
+引擎装到 `$SCRM_HOME/bin/scrm`(默认 `~/projects/wechat-scrm`)。支持 darwin/linux × amd64/arm64;
+自建镜像用 `SCRM_ENGINE_BASE` 指向别的下载源。
+
+`setup` 之后还需:
+
+1. **OCR 依赖** —— `pip install rapidocr_onnxruntime`(或 `scrm setup --with-ocr`;引擎首次会自动拉起,常驻 `:8781`)。
+2. **数据源** —— 二选一:跑 `scrm serve`(监听 `:8900`),或指向已内置 `/api/scrm/*` 的 cicy-code
    (`SCRM_API=http://127.0.0.1:8008/api/scrm`)。
-4. **设备**(仅 `inbox`/`sync`/`feed`/`archive` 需要)—— Android 手机经 ADB 在线、亮屏、停在微信会话列表;
+3. **设备**(仅 `inbox`/`sync`/`feed`/`archive` 需要)—— Android 手机经 ADB 在线、亮屏、停在微信会话列表;
    采集为纯人工模拟,不碰微信进程。
 
-覆盖默认的环境变量:`SCRM_API`(数据源地址)、`SCRM_HOME`(项目根)、`SCRM_BIN`(引擎二进制路径)。
+覆盖默认的环境变量:`SCRM_API`(数据源地址)、`SCRM_HOME`(运行根目录)、`SCRM_BIN`(引擎二进制路径)、`SCRM_ENGINE_BASE`(引擎下载源)。
 
 ## References
 

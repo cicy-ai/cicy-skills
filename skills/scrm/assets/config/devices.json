@@ -1,0 +1,53 @@
+{
+  "XGIJUSDM4TRS6PX4": {
+    "serial": "XGIJUSDM4TRS6PX4",
+    "model": "2409BRN2CC",
+    "android": "14",
+    "size": [
+      720,
+      1640
+    ],
+    "density": 320,
+    "launcher_pkg": "com.miui.home",
+    "wechat_version": "8.0.70",
+    "windows": {
+      "shade": [
+        "NotificationShade",
+        "StatusBar"
+      ],
+      "lock": [
+        "Keyguard",
+        "keyguard",
+        "dream"
+      ]
+    },
+    "bubble_hsv": [
+      [
+        35,
+        72,
+        166
+      ],
+      [
+        65,
+        212,
+        255
+      ]
+    ],
+    "nav_labels": [
+      "微信",
+      "通讯录",
+      "发现"
+    ],
+    "coords_ratio": {
+      "back": [
+        0.05,
+        0.045
+      ],
+      "nav_tap_y": 0.972,
+      "title_band": [
+        0.018,
+        0.05
+      ]
+    }
+  }
+}

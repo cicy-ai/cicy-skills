@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "scrm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "WeChat SCRM",
   "description": "WeChat SCRM CLI: read customer/session/unread data from a local data source, and run device-side sync - unread brief to the CS supervisor, list rescan, chat archive.",
   "category": "productivity",
