@@ -46,6 +46,13 @@ cicy-agent clear <pane>                       Clear pane
 cicy-agent fork <src> [--title T] [--master PANE]     Replicate an agent so a new one inherits its context
 cicy-agent create <title> [--type cicy] [--model M]   Create a BRAND-NEW agent from scratch (POST /api/panes/create).
             [--role R] [--role-template RT] [--master PANE]   agent_type defaults to cicy. NOT a clone — use fork to inherit context.
+            --role is NOT the persona. It sets agent_config.role: a roster label shown in
+              UI lists, whose magic values "worker" (default) / "master" also mark the
+              pane in master/worker topology + worker-completion tracking. Free-form text
+              here silently drops the "worker" marker — leave it alone unless you mean that.
+            --role-template picks the PERSONA (default: assistant): the template dir
+              ~/cicy-ai/memory/agents/<RT>/ whose system.md becomes the system prompt and
+              whose role.md seeds the agent's AGENTS.md (edit that file to customize).
 
 cicy-agent team add <name> <api> <token>      Register another team's cicy-code (probes it immediately)
             [--proxy http://127.0.0.1:9001]    --proxy: reach this team via an egress proxy (curl-based;

@@ -540,9 +540,13 @@ async function cmdClear(args, node) {
 //   cicy-agent create <title...> [--type cicy] [--model M] [--role R]
 //                                [--role-template RT] [--master PANE]
 // agent_type defaults to `cicy`; the title can be positional or via --title.
-// role defaults to `worker` and role_template to `assistant` — WITHOUT a worker
-// role the agent has no shell/skill tools and degrades to chat-only, so these
-// must be set for a functional agent (override --role/--role-template as needed).
+// --role is NOT the persona: it sets agent_config.role, a roster label whose
+// magic values "worker" (default) / "master" also mark master/worker topology
+// and worker-completion tracking — free-form text silently drops the "worker"
+// marker. The PERSONA comes from --role-template (default `assistant`): its
+// template dir's system.md is the system prompt, its role.md seeds AGENTS.md,
+// and its meta.yaml `tools:` decides the tool set (a chat-only template
+// degrades the agent to chat-only).
 async function cmdCreate(args, node) {
   let title = '', type = 'cicy', model = '', role = 'worker', roleTemplate = 'assistant', master = '';
   const pos = [];
