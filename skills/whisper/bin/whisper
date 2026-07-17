@@ -1,0 +1,337 @@
+#!/usr/bin/env node
+// whisper — local offline speech-to-text via whisper.cpp.
+//
+// Zero npm dependencies. Shells out to: whisper-cli (whisper.cpp), curl
+// (model download), brew (install fallback, macOS), ffmpeg (only for input
+// formats whisper-cli can't read natively).
+//
+// Layout:
+//   binary  → ~/.local/bin/whisper-cli   (symlink; created by `install`)
+//   models  → ~/.cache/whisper-cpp/ggml-<model>.bin   (WHISPER_MODEL_DIR to override)
+
+import { spawnSync } from 'node:child_process';
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, extname, join, resolve } from 'node:path';
+
+const HOME = homedir();
+const LOCAL_BIN = join(HOME, '.local', 'bin');
+const MODEL_DIR = process.env.WHISPER_MODEL_DIR || join(HOME, '.cache', 'whisper-cpp');
+const DEFAULT_MODEL = process.env.WHISPER_MODEL || 'base';
+
+// name → approx download size (display only). URLs are derived from the name.
+const CATALOG = {
+  'tiny': '75MB', 'tiny.en': '75MB',
+  'base': '141MB', 'base.en': '141MB',
+  'small': '466MB', 'small.en': '466MB',
+  'medium': '1.5GB', 'medium.en': '1.5GB',
+  'large-v2': '2.9GB', 'large-v3': '2.9GB', 'large-v3-turbo': '1.5GB',
+};
+// Mirror first (mainland-friendly), then upstream. WHISPER_HF_BASE prepends.
+const MODEL_BASES = [
+  ...(process.env.WHISPER_HF_BASE ? [process.env.WHISPER_HF_BASE] : []),
+  'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main',
+  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main',
+];
+// Formats whisper-cli 1.7+ decodes itself; anything else goes through ffmpeg.
+const NATIVE_EXT = new Set(['.wav', '.mp3', '.flac', '.ogg']);
+
+const log = (m) => process.stderr.write(m + '\n');
+const die = (m, code = 1) => { log(`whisper: ${m}`); process.exit(code); };
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+function which(cmd) {
+  const r = spawnSync('command', ['-v', cmd], { shell: '/bin/sh', encoding: 'utf8' });
+  const p = (r.stdout || '').trim();
+  return r.status === 0 && p ? p : null;
+}
+
+function findWhisperCli() {
+  const local = join(LOCAL_BIN, 'whisper-cli');
+  if (existsSync(local)) return local;
+  return which('whisper-cli');
+}
+
+function modelPath(name) { return join(MODEL_DIR, `ggml-${name}.bin`); }
+
+function localModels() {
+  if (!existsSync(MODEL_DIR)) return [];
+  return readdirSync(MODEL_DIR)
+    .filter((f) => /^ggml-.+\.bin$/.test(f))
+    .map((f) => {
+      const st = statSync(join(MODEL_DIR, f));
+      return { name: f.replace(/^ggml-/, '').replace(/\.bin$/, ''), file: f, mb: Math.round(st.size / 1048576) };
+    });
+}
+
+function ensureModel(name) {
+  const p = modelPath(name);
+  if (existsSync(p)) return p;
+  if (!CATALOG[name]) die(`unknown model "${name}". known: ${Object.keys(CATALOG).join(' ')}`, 2);
+  log(`model "${name}" not found locally — downloading (${CATALOG[name]}) …`);
+  pullModel(name);
+  return p;
+}
+
+function pullModel(name) {
+  if (!CATALOG[name]) die(`unknown model "${name}". known: ${Object.keys(CATALOG).join(' ')}`, 2);
+  if (!which('curl')) die('curl is required to download models', 1);
+  mkdirSync(MODEL_DIR, { recursive: true });
+  const dst = modelPath(name);
+  if (existsSync(dst)) { log(`already present: ${dst}`); return; }
+  const partial = dst + '.partial';
+  let lastErr = '';
+  for (const base of MODEL_BASES) {
+    const url = `${base}/ggml-${name}.bin`;
+    log(`→ ${url}${existsSync(partial) ? ' (resuming)' : ''}`);
+    // -C - resumes a previous .partial; --fail turns HTTP errors into exit != 0.
+    const r = spawnSync('curl', ['-L', '--fail', '-C', '-', '--progress-bar', '-o', partial, url], { stdio: ['ignore', 'inherit', 'inherit'] });
+    if (r.status === 0) {
+      renameSync(partial, dst);
+      log(`✓ ${dst} (${Math.round(statSync(dst).size / 1048576)}MB)`);
+      return;
+    }
+    lastErr = `curl exit ${r.status} for ${url}`;
+    // 416 (range beyond size) means the .partial is corrupt for this source —
+    // keep it, the next source may still resume; a full mismatch is caught by
+    // whisper-cli failing to load, at which point `whisper rm <model>` resets.
+  }
+  die(`download failed from all sources (${lastErr}). partial kept at ${partial} — re-run to resume.`, 1);
+}
+
+// buildFromSource clones whisper.cpp and cmake-builds a STATIC whisper-cli
+// (BUILD_SHARED_LIBS=OFF so the binary is standalone — no rpath into a build
+// dir that might get cleaned), then copies it into ~/.local/bin.
+// This is the primary Linux path; needs git + cmake + a C++ toolchain.
+function buildFromSource(target) {
+  const missing = ['git', 'cmake', 'make'].filter((c) => !which(c));
+  if (missing.length || !(which('c++') || which('g++') || which('clang++'))) {
+    const need = [...missing, 'a C++ compiler (g++/clang++)'].join(', ');
+    die(`whisper-cli not found; no brew, and source build needs: ${need}\n` +
+      `  debian/ubuntu:  sudo apt install -y git cmake build-essential\n` +
+      `  then re-run:    whisper install`, 1);
+  }
+  const srcDir = join(MODEL_DIR, 'src', 'whisper.cpp');
+  if (!existsSync(join(srcDir, 'CMakeLists.txt'))) {
+    mkdirSync(join(MODEL_DIR, 'src'), { recursive: true });
+    log('cloning whisper.cpp (shallow) …');
+    const repos = [
+      ...(process.env.WHISPER_GIT_REPO ? [process.env.WHISPER_GIT_REPO] : []),
+      'https://github.com/ggerganov/whisper.cpp',
+      'https://gitee.com/mirrors/whisper.cpp',
+    ];
+    let cloned = false;
+    for (const repo of repos) {
+      const r = spawnSync('git', ['clone', '--depth', '1', repo, srcDir], { stdio: ['ignore', 'inherit', 'inherit'] });
+      if (r.status === 0) { cloned = true; break; }
+      rmSync(srcDir, { recursive: true, force: true });
+    }
+    if (!cloned) die('git clone failed from all sources (set WHISPER_GIT_REPO to a reachable mirror)', 1);
+  }
+  log('building whisper-cli (few minutes on first run) …');
+  const cfg = spawnSync('cmake', ['-B', 'build', '-DBUILD_SHARED_LIBS=OFF', '-DCMAKE_BUILD_TYPE=Release'], { cwd: srcDir, stdio: ['ignore', 'inherit', 'inherit'] });
+  if (cfg.status !== 0) die('cmake configure failed', 1);
+  const build = spawnSync('cmake', ['--build', 'build', '-j', '--config', 'Release', '--target', 'whisper-cli'], { cwd: srcDir, stdio: ['ignore', 'inherit', 'inherit'] });
+  if (build.status !== 0) die('cmake build failed', 1);
+  const built = join(srcDir, 'build', 'bin', 'whisper-cli');
+  if (!existsSync(built)) die(`build finished but ${built} is missing`, 1);
+  cpSync(built, target);
+  chmodSync(target, 0o755);
+  log(`✓ built from source → ${target}`);
+  return target;
+}
+
+// ── commands ───────────────────────────────────────────────────────────────
+
+function cmdStatus() {
+  const cli = findWhisperCli();
+  let ver = '';
+  if (cli) {
+    const r = spawnSync(cli, ['--version'], { encoding: 'utf8' });
+    ver = ((r.stdout || '') + (r.stderr || '')).split('\n').find((l) => /whisper|version/i.test(l)) || '';
+  }
+  console.log(`whisper-cli : ${cli || '(not installed — run: whisper install)'}${ver ? `\n  ${ver.trim()}` : ''}`);
+  console.log(`ffmpeg      : ${which('ffmpeg') || '(missing — only wav/mp3/flac/ogg inputs will work)'}`);
+  console.log(`model dir   : ${MODEL_DIR}`);
+  const models = localModels();
+  if (!models.length) console.log('models      : (none — run: whisper pull base)');
+  for (const m of models) console.log(`  ggml-${m.name}.bin  ${m.mb}MB`);
+  const partials = existsSync(MODEL_DIR) ? readdirSync(MODEL_DIR).filter((f) => f.endsWith('.partial')) : [];
+  for (const p of partials) console.log(`  ${p}  (incomplete — \`whisper pull ${p.replace(/^ggml-/, '').replace(/\.bin\.partial$/, '')}\` resumes)`);
+}
+
+function cmdInstall(args) {
+  const noModel = args.includes('--no-model');
+  const model = argValue(args, '--model') || DEFAULT_MODEL;
+  mkdirSync(LOCAL_BIN, { recursive: true });
+  const target = join(LOCAL_BIN, 'whisper-cli');
+
+  let src = which('whisper-cli');
+  if (!src && !existsSync(target)) {
+    // 1) brew (macOS, or linuxbrew if the user has it)
+    const brew = which('brew');
+    if (brew) {
+      log('installing whisper-cpp via brew …');
+      const r = spawnSync(brew, ['install', 'whisper-cpp'], { stdio: ['ignore', 'inherit', 'inherit'] });
+      if (r.status !== 0) die('brew install whisper-cpp failed', 1);
+      src = which('whisper-cli');
+      if (!src) die('brew succeeded but whisper-cli still not in PATH', 1);
+    } else {
+      // 2) source build — the normal Linux path (no distro ships whisper-cpp).
+      src = buildFromSource(target);
+    }
+  }
+  if (src && resolve(src) !== resolve(target)) {
+    // symlink, not copy: the brew binary resolves its dylibs via absolute
+    // Cellar paths, and a symlink keeps following brew upgrades.
+    try { unlinkSync(target); } catch { /* absent */ }
+    symlinkSync(src, target);
+    log(`✓ ${target} → ${src}`);
+  } else if (existsSync(target)) {
+    log(`✓ ${target} (already installed)`);
+  }
+  if (!noModel) ensureModel(model);
+  cmdStatus();
+}
+
+function cmdModels() {
+  const local = new Map(localModels().map((m) => [m.name, m]));
+  console.log('model            size   status');
+  for (const [name, size] of Object.entries(CATALOG)) {
+    const have = local.get(name);
+    console.log(`${name.padEnd(16)} ${size.padEnd(6)} ${have ? `installed (${have.mb}MB)` : '-'}`);
+  }
+  for (const m of local.values()) {
+    if (!CATALOG[m.name]) console.log(`${m.name.padEnd(16)} ${'?'.padEnd(6)} installed (${m.mb}MB, custom)`);
+  }
+  console.log(`\ndir: ${MODEL_DIR}   ·   whisper pull <model> / whisper rm <model>`);
+}
+
+function cmdRm(name) {
+  if (!name) die('usage: whisper rm <model>', 2);
+  let removed = false;
+  for (const p of [modelPath(name), modelPath(name) + '.partial']) {
+    if (existsSync(p)) { rmSync(p); log(`removed ${p}`); removed = true; }
+  }
+  if (!removed) die(`no local files for model "${name}"`, 1);
+}
+
+function argValue(args, flag, short) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === flag || (short && args[i] === short)) return args[i + 1];
+  }
+  return null;
+}
+
+function cmdTranscribe(args) {
+  const model = argValue(args, '--model', '-m') || DEFAULT_MODEL;
+  const lang = argValue(args, '--lang', '-l') || 'auto';
+  const out = argValue(args, '--output', '-o');
+  const prompt = argValue(args, '--prompt');
+  const threads = argValue(args, '--threads', '-t');
+  const translate = args.includes('--translate');
+  const timestamps = args.includes('--timestamps');
+  const fmts = ['srt', 'vtt', 'json', 'txt', 'csv', 'lrc'].filter((f) => args.includes(`--${f}`));
+
+  const flagsTakingValue = new Set(['--model', '-m', '--lang', '-l', '--output', '-o', '--prompt', '--threads', '-t']);
+  const boolFlags = new Set(['--translate', '--timestamps', ...fmts.map((f) => `--${f}`)]);
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (flagsTakingValue.has(a)) { i++; continue; }
+    if (a.startsWith('-')) {
+      if (!boolFlags.has(a)) die(`unknown option ${a}`, 2);
+      continue;
+    }
+    files.push(a);
+  }
+  if (!files.length) die('usage: whisper transcribe <audio-or-video-file> [--model base] [--lang auto] [--srt|--vtt|--json|--txt] [-o out]', 2);
+  if (out && files.length > 1) die('-o only works with a single input file', 2);
+  // Validate inputs BEFORE resolving binary/model — a typo'd path must not
+  // trigger a multi-hundred-MB model download.
+  for (const f of files) if (!existsSync(f)) die(`no such file: ${f}`, 2);
+
+  const cli = findWhisperCli();
+  if (!cli) die('whisper-cli not installed — run: whisper install', 1);
+  const modelFile = ensureModel(model);
+
+  for (const f of files) {
+    let input = f;
+    let tmp = null;
+    if (!NATIVE_EXT.has(extname(f).toLowerCase())) {
+      const ffmpeg = which('ffmpeg');
+      if (!ffmpeg) die(`"${extname(f)}" input needs ffmpeg (whisper-cli reads wav/mp3/flac/ogg natively)`, 1);
+      tmp = join(tmpdir(), `whisper-${process.pid}-${basename(f).replace(/\W+/g, '_')}.wav`);
+      const r = spawnSync(ffmpeg, ['-y', '-hide_banner', '-loglevel', 'error', '-i', f, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', tmp], { stdio: ['ignore', 'ignore', 'inherit'] });
+      if (r.status !== 0) die(`ffmpeg failed to decode ${f}`, 1);
+      input = tmp;
+    }
+
+    const cliArgs = ['-m', modelFile, '-l', lang, '-np'];
+    if (prompt) cliArgs.push('--prompt', prompt);
+    if (threads) cliArgs.push('-t', threads);
+    if (translate) cliArgs.push('-tr');
+    for (const fmt of fmts) cliArgs.push(`-o${fmt === 'json' ? 'j' : fmt}`);
+    // -of is the output path *without* extension; default = input minus ext.
+    const prefix = out ? out.replace(/\.(txt|srt|vtt|json|csv|lrc)$/, '') : f.replace(/\.[^.]+$/, '');
+    if (fmts.length) cliArgs.push('-of', prefix);
+    if (!timestamps && !fmts.length) cliArgs.push('-nt');
+    cliArgs.push('-f', input);
+
+    const r = spawnSync(cli, cliArgs, { encoding: 'utf8', maxBuffer: 64 * 1048576 });
+    if (tmp) { try { rmSync(tmp); } catch { /* best effort */ } }
+    if (r.status !== 0) die(`whisper-cli failed on ${f}:\n${(r.stderr || '').trim().split('\n').slice(-8).join('\n')}`, 1);
+    for (const fmt of fmts) log(`✓ ${prefix}.${fmt}`);
+    const text = (r.stdout || '').trim();
+    if (text) console.log(text);
+  }
+}
+
+// ── entry ──────────────────────────────────────────────────────────────────
+
+const HELP = `whisper — local offline speech-to-text (whisper.cpp)
+
+usage:
+  whisper transcribe <file…> [options]   audio/video → text (stdout)
+  whisper <file> [options]               shortcut for transcribe
+  whisper install [--model base]         whisper-cli → ~/.local/bin + default model
+  whisper models                         list catalog + installed models
+  whisper pull <model>                   download a model (resumable, mirror-aware)
+  whisper rm <model>                     delete a local model
+  whisper status                         binary / ffmpeg / models overview
+
+transcribe options:
+  -m, --model <name>    model to use (default: ${DEFAULT_MODEL}; auto-downloads)
+  -l, --lang <code>     spoken language, e.g. zh, en (default: auto)
+      --srt --vtt --json --txt --csv --lrc   write file(s) next to input
+  -o, --output <path>   output path for the above (single input only)
+      --timestamps      keep [00:00:00] timestamps in stdout text
+      --translate       translate result to English
+      --prompt <text>   initial prompt (names, jargon → better accuracy)
+  -t, --threads <n>     CPU threads
+
+models: ${Object.keys(CATALOG).join(' ')}
+env:    WHISPER_MODEL (default model) · WHISPER_MODEL_DIR · WHISPER_HF_BASE
+`;
+
+const [cmd, ...rest] = process.argv.slice(2);
+switch (cmd) {
+  case undefined:
+  case '-h':
+  case '--help':
+  case 'help':
+    console.log(HELP);
+    process.exit(cmd ? 0 : 2);
+    break;
+  case 'transcribe': cmdTranscribe(rest); break;
+  case 'install': cmdInstall(rest); break;
+  case 'models': cmdModels(); break;
+  case 'pull': rest[0] ? pullModel(rest[0]) : die('usage: whisper pull <model>', 2); break;
+  case 'rm': cmdRm(rest[0]); break;
+  case 'status': cmdStatus(); break;
+  default:
+    // `whisper 会议.mp4 --lang zh` — treat an existing file as transcribe.
+    if (existsSync(cmd)) { cmdTranscribe([cmd, ...rest]); break; }
+    die(`unknown command "${cmd}" (and no such file). see: whisper --help`, 2);
+}
