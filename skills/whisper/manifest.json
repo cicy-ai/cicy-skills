@@ -1,0 +1,68 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "whisper",
+  "version": "1.0.0",
+  "title": "Whisper",
+  "description": "Local offline speech-to-text CLI (whisper.cpp): install whisper-cli to ~/.local/bin, pull ggml models with resume + mirror, transcribe audio/video to txt/srt/vtt/json.",
+  "category": "ai",
+  "tags": [
+    "stt",
+    "speech-to-text",
+    "transcribe",
+    "whisper",
+    "offline"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/whisper",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "curl"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/whisper",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Whisper",
+      "description": "本地离线语音转文字 CLI（whisper.cpp）：安装 whisper-cli 到 ~/.local/bin，模型下载支持断点续传和国内镜像，音频/视频转 txt/srt/vtt/json。"
+    }
+  },
+  "tools": [
+    {
+      "name": "transcribe",
+      "example": "whisper transcribe 会议录音.m4a --lang zh",
+      "description": "Transcribe an audio/video file to text (stdout) or subtitle files"
+    },
+    {
+      "name": "install",
+      "example": "whisper install --model base",
+      "description": "Install whisper-cli into ~/.local/bin (existing binary or brew) + default model"
+    },
+    {
+      "name": "pull",
+      "example": "whisper pull small",
+      "description": "Download a ggml model (resumable, hf-mirror first)"
+    },
+    {
+      "name": "status",
+      "example": "whisper status",
+      "description": "Show binary, ffmpeg, and installed models"
+    }
+  ]
+}

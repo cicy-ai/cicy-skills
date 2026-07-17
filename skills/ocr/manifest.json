@@ -1,0 +1,68 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "ocr",
+  "version": "1.0.0",
+  "title": "OCR",
+  "description": "Local offline OCR CLI (RapidOCR/ONNX, strong at Chinese): ocr <image> prints the text; --json gives boxes with coordinates and confidence. One-command venv install, no API key.",
+  "category": "ai",
+  "tags": [
+    "ocr",
+    "image-to-text",
+    "rapidocr",
+    "offline",
+    "chinese"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/ocr",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "python3"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/ocr",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "OCR",
+      "description": "本地离线 OCR CLI（RapidOCR/ONNX，中文识别强）：ocr <图片> 直接出文字，--json 带坐标和置信度。一条命令装好独立 venv，无需 API key。"
+    }
+  },
+  "tools": [
+    {
+      "name": "recognize",
+      "example": "ocr screenshot.png",
+      "description": "Recognize text in image(s); batch shares one engine load"
+    },
+    {
+      "name": "json",
+      "example": "ocr screenshot.png --json --min-score 0.6",
+      "description": "Boxes with x/y coordinates and confidence, filtered by score"
+    },
+    {
+      "name": "install",
+      "example": "ocr install",
+      "description": "Create dedicated venv + pip install rapidocr_onnxruntime (mirror fallback)"
+    },
+    {
+      "name": "status",
+      "example": "ocr status",
+      "description": "Show resolved python and rapidocr state"
+    }
+  ]
+}

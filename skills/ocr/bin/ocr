@@ -1,0 +1,172 @@
+#!/usr/bin/env node
+// ocr — local offline OCR (image → text) via RapidOCR (ONNX), pure CLI.
+//
+// Zero npm dependencies. Python does exactly one thing (bin/ocr_run.py:
+// image → [[x,y,text,score]]); everything else lives here.
+//
+// Python resolution order:
+//   1. dedicated venv  ~/.cache/ocr-skill/venv   (created by `ocr install`)
+//   2. system python3 that already has rapidocr_onnxruntime
+//   3. neither → "run: ocr install"
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HOME = homedir();
+const VENV = process.env.OCR_VENV_DIR || join(HOME, '.cache', 'ocr-skill', 'venv');
+const VENV_PY = join(VENV, 'bin', 'python3');
+const RUNNER = join(dirname(fileURLToPath(import.meta.url)), 'ocr_run.py');
+// pip sources in order; OCR_PIP_INDEX prepends (mainland: tuna fallback built in).
+const PIP_INDEXES = [
+  ...(process.env.OCR_PIP_INDEX ? [process.env.OCR_PIP_INDEX] : []),
+  '', // pypi default
+  'https://pypi.tuna.tsinghua.edu.cn/simple',
+];
+
+const log = (m) => process.stderr.write(m + '\n');
+const die = (m, code = 1) => { log(`ocr: ${m}`); process.exit(code); };
+
+function which(cmd) {
+  const r = spawnSync('command', ['-v', cmd], { shell: '/bin/sh', encoding: 'utf8' });
+  const p = (r.stdout || '').trim();
+  return r.status === 0 && p ? p : null;
+}
+
+function hasModule(py) {
+  return spawnSync(py, ['-c', 'import rapidocr_onnxruntime'], { stdio: 'ignore' }).status === 0;
+}
+
+// findPython returns a python able to run the runner, or null.
+function findPython() {
+  if (existsSync(VENV_PY) && hasModule(VENV_PY)) return VENV_PY;
+  const sys = process.env.OCR_PYTHON || which('python3');
+  if (sys && hasModule(sys)) return sys;
+  return null;
+}
+
+// ── commands ───────────────────────────────────────────────────────────────
+
+function cmdStatus() {
+  const py = findPython();
+  console.log(`python      : ${py || '(no usable python — run: ocr install)'}`);
+  if (py) {
+    const v = spawnSync(py, ['-c', 'import rapidocr_onnxruntime as m, sys; print(sys.version.split()[0], getattr(m, "__version__", ""))'], { encoding: 'utf8' });
+    console.log(`rapidocr    : installed (python ${(v.stdout || '').trim()})`);
+    console.log(`source      : ${py === VENV_PY ? 'dedicated venv' : 'system python3'}`);
+  }
+  console.log(`venv dir    : ${VENV}${existsSync(VENV_PY) ? '' : ' (absent)'}`);
+}
+
+function cmdInstall() {
+  if (findPython()) { log('✓ already usable'); cmdStatus(); return; }
+  const sys = process.env.OCR_PYTHON || which('python3');
+  if (!sys) {
+    die(`python3 not found.\n  macOS: brew install python3\n  debian/ubuntu: sudo apt install -y python3 python3-venv\n  then re-run: ocr install`, 1);
+  }
+  if (!existsSync(VENV_PY)) {
+    log(`creating venv ${VENV} …`);
+    mkdirSync(dirname(VENV), { recursive: true });
+    const r = spawnSync(sys, ['-m', 'venv', VENV], { stdio: ['ignore', 'inherit', 'inherit'] });
+    if (r.status !== 0) die('venv creation failed (debian needs: sudo apt install python3-venv)', 1);
+  }
+  let ok = false;
+  for (const idx of PIP_INDEXES) {
+    const args = ['-m', 'pip', 'install', '--disable-pip-version-check', 'rapidocr_onnxruntime'];
+    if (idx) args.push('-i', idx);
+    log(`pip install rapidocr_onnxruntime${idx ? ` (index: ${idx})` : ''} …`);
+    if (spawnSync(VENV_PY, args, { stdio: ['ignore', 'inherit', 'inherit'] }).status === 0) { ok = true; break; }
+  }
+  if (!ok) die('pip install failed from all indexes (set OCR_PIP_INDEX to a reachable mirror)', 1);
+  if (!hasModule(VENV_PY)) die('installed but import still fails — see pip output above', 1);
+  log('✓ installed');
+  cmdStatus();
+}
+
+function argValue(args, flag) {
+  const i = args.indexOf(flag);
+  return i >= 0 ? args[i + 1] : null;
+}
+
+function cmdRecognize(args) {
+  const asJson = args.includes('--json');
+  const joined = args.includes('--joined');
+  const minScore = parseFloat(argValue(args, '--min-score') || '0');
+  const valueFlags = new Set(['--min-score']);
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (valueFlags.has(a)) { i++; continue; }
+    if (a.startsWith('-')) {
+      if (!['--json', '--joined'].includes(a)) die(`unknown option ${a}`, 2);
+      continue;
+    }
+    files.push(a);
+  }
+  if (!files.length) die('usage: ocr <image…> [--json] [--joined] [--min-score 0.5]', 2);
+  for (const f of files) if (!existsSync(f)) die(`no such file: ${f}`, 2);
+
+  const py = findPython();
+  if (!py) die('rapidocr not available — run: ocr install', 1);
+
+  const r = spawnSync(py, [RUNNER, ...files], { encoding: 'utf8', maxBuffer: 64 * 1048576 });
+  if (r.status !== 0 || !r.stdout) die(`runner failed:\n${(r.stderr || '').trim().split('\n').slice(-6).join('\n')}`, 1);
+  let out;
+  try { out = JSON.parse(r.stdout); } catch { die(`runner returned invalid JSON:\n${r.stdout.slice(0, 400)}`, 1); }
+  if (out.error) die(out.error, 1);
+
+  let hadError = false;
+  if (asJson) {
+    for (const v of Object.values(out)) {
+      if (v.boxes) v.boxes = v.boxes.filter((b) => b[3] >= minScore);
+      if (v.error) hadError = true;
+    }
+    console.log(JSON.stringify(out, null, 2));
+  } else {
+    for (const f of files) {
+      const v = out[f] || {};
+      if (v.error) { hadError = true; log(`ocr: ${f}: ${v.error}`); continue; }
+      if (files.length > 1) console.log(`── ${f}`);
+      const texts = (v.boxes || []).filter((b) => b[3] >= minScore).map((b) => b[2]);
+      console.log(joined ? texts.join('') : texts.join('\n'));
+    }
+  }
+  process.exit(hadError ? 1 : 0);
+}
+
+// ── entry ──────────────────────────────────────────────────────────────────
+
+const HELP = `ocr — local offline OCR (RapidOCR / ONNX, strong at Chinese)
+
+usage:
+  ocr <image…> [options]     recognize text (stdout; batch = one engine load)
+  ocr install                set up python venv + rapidocr_onnxruntime
+  ocr status                 show python / rapidocr state
+
+options:
+  --json               full boxes: {"<file>": {"boxes": [[x, y, text, score], …]}}
+  --joined             concatenate texts without newlines (w-style single blob)
+  --min-score <0-1>    drop boxes below this confidence (default 0)
+
+formats: png jpg jpeg bmp webp … (anything OpenCV decodes)
+env:     OCR_PYTHON · OCR_VENV_DIR · OCR_PIP_INDEX (extra pip mirror, tried first)
+`;
+
+const [cmd, ...rest] = process.argv.slice(2);
+switch (cmd) {
+  case undefined:
+  case '-h':
+  case '--help':
+  case 'help':
+    console.log(HELP);
+    process.exit(cmd ? 0 : 2);
+    break;
+  case 'install': cmdInstall(); break;
+  case 'status': cmdStatus(); break;
+  case 'recognize': cmdRecognize(rest); break;
+  default:
+    if (cmd.startsWith('-') && !existsSync(cmd)) die(`unknown option "${cmd}". see: ocr --help`, 2);
+    cmdRecognize([cmd, ...rest]);
+}
