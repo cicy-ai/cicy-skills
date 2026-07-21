@@ -1,0 +1,33 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "desktop-notify",
+  "version": "0.1.0",
+  "title": "Desktop Notify",
+  "description": "通过 cicy-desktop 的 notify RPC 发送系统桌面通知(mac 通知中心 / Windows toast),点击可聚焦主窗口/打开 URL;旧版桌面自动回退 exec_js 网页通知。",
+  "category": "system",
+  "tags": [
+    "notify",
+    "desktop",
+    "electron",
+    "mac",
+    "windows"
+  ],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/desktop-notify",
+  "permissions": [],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  }
+}
