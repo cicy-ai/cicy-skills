@@ -27,7 +27,10 @@ desktop-notify status          # 桌面是否在线、notify RPC 是否可用
 
 ## 平台说明
 
-- **macOS**:原生通知中心;`--subtitle` 支持;首次弹出后可在系统设置里管理权限。
+- **macOS(必读)**:**必须先在 系统设置 → 通知 里允许该应用**,否则 `show()` 静默无效果、
+  RPC 仍返回 ok。开发模式跑的 cicy-desktop 显示为 **Electron**,打包版为 **CiCy Desktop**。
+  `--subtitle` 支持。快速打开设置页:
+  `open "x-apple.systempreferences:com.apple.Notifications-Settings.extension"`
 - **Windows**:toast 通知;依赖 AppUserModelId(cicy-desktop main.js 已设 `com.cicy.desktop`);
   `--subtitle` 被忽略。
 - 点击通知 → 聚焦 CiCy Desktop 主窗口(`--no-focus` 关闭),`--url` 额外用系统浏览器打开。
