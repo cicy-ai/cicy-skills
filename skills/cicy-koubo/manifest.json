@@ -1,0 +1,96 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cicy-koubo",
+  "version": "0.2.0",
+  "title": "Cicy Koubo",
+  "description": "Install the source-free cicy-koubo npm app and operate its complete spoken-video UI, runtime, GPU/Colab environment, and Electron profile 1 workflow.",
+  "category": "agent",
+  "tags": [
+    "koubo",
+    "spoken-content",
+    "douyin",
+    "digital-human",
+    "electron",
+    "colab"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-koubo",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "node",
+    "npm",
+    "python3"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/cicy-koubo",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "filesystem:db",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/db/cicy-koubo-runtime.json",
+    "secret_fields": []
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "口播工作台",
+      "description": "无源码安装并操作 cicy-koubo 完整口播工作流，识别 Mac、WSL、本机 GPU 与 Colab，固定使用 Electron profile 1。"
+    }
+  },
+  "tools": [
+    {
+      "name": "install",
+      "example": "cicy-koubo install",
+      "description": "Install the npm application and prepare runtime dependencies without source"
+    },
+    {
+      "name": "start",
+      "example": "cicy-koubo start",
+      "description": "Start the workspace in the background and open it with agent-electron profile 1"
+    },
+    {
+      "name": "status",
+      "example": "cicy-koubo status --json",
+      "description": "Report package, process, HTTP, URL, version, environment, and log status"
+    },
+    {
+      "name": "restart",
+      "example": "cicy-koubo restart",
+      "description": "Stop the managed process, start it again, and reopen the workspace"
+    },
+    {
+      "name": "rebuild",
+      "example": "cicy-koubo rebuild",
+      "description": "Run the project's build and restart it when it was running"
+    },
+    {
+      "name": "update",
+      "example": "cicy-koubo update",
+      "description": "Refresh the npm application and restore its prior running state"
+    },
+    {
+      "name": "douyin",
+      "example": "cicy-koubo douyin 'https://v.douyin.com/...' ",
+      "description": "Open a Douyin URL only in agent-electron profile 1, then focus the workspace"
+    },
+    {
+      "name": "logs",
+      "example": "cicy-koubo logs --lines 100",
+      "description": "Read or follow the managed service log"
+    }
+  ]
+}

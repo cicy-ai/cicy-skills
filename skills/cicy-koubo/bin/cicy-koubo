@@ -1,0 +1,451 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { spawn, spawnSync } from 'node:child_process';
+
+const home = os.homedir();
+const project = path.resolve(process.env.CICY_KOUBO_PROJECT || path.join(home, 'projects', 'cicy-koubo'));
+const statePath = path.resolve(process.env.CICY_KOUBO_STATE || path.join(home, 'cicy-ai', 'db', 'cicy-koubo-runtime.json'));
+const logPath = path.resolve(process.env.CICY_KOUBO_LOG || path.join(home, 'logs', 'cicy-koubo.log'));
+const packageSpec = process.env.CICY_KOUBO_PACKAGE || 'cicy-koubo@latest';
+const argv = process.argv.slice(2);
+const command = argv[0] || 'help';
+
+function fail(message, code = 1) {
+  process.stderr.write(`error: ${message}\n`);
+  process.exit(code);
+}
+
+function option(name, fallback) {
+  const index = argv.indexOf(name);
+  return index >= 0 && argv[index + 1] ? argv[index + 1] : fallback;
+}
+
+function portValue() {
+  const value = Number(option('--port', readState().port || 8770));
+  if (!Number.isInteger(value) || value < 1 || value > 65535) fail('invalid --port', 2);
+  return value;
+}
+
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeState(value) {
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  const temp = `${statePath}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temp, statePath);
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(Number(pid)) || Number(pid) <= 1) return false;
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requestJSON(port, pathname = '/', timeout = 1500) {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: pathname, timeout }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => {
+        let data = null;
+        try { data = JSON.parse(body); } catch {}
+        resolve({ ok: res.statusCode === 200, statusCode: res.statusCode, data });
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, statusCode: 0, data: null }); });
+    req.on('error', () => resolve({ ok: false, statusCode: 0, data: null }));
+  });
+}
+
+function packageVersion() {
+  const state = readState();
+  if (state.package_version) return state.package_version;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(project, 'package.json'), 'utf8')).version || '';
+  } catch {
+    return '';
+  }
+}
+
+async function runtimeStatus() {
+  const state = readState();
+  const port = Number(state.port) || 8770;
+  const running = pidAlive(state.pid);
+  const health = await requestJSON(port, '/');
+  const service = health.ok ? await requestJSON(port, '/api/status', 1500) : { ok: false, data: null };
+  return {
+    installed: Boolean(state.package_ready) || fs.existsSync(path.join(project, 'bin', 'cli.js')),
+    running,
+    healthy: health.ok,
+    managed: running,
+    pid: running ? Number(state.pid) : null,
+    port,
+    url: `http://127.0.0.1:${port}`,
+    version: packageVersion() || null,
+    package: packageSpec,
+    project: fs.existsSync(path.join(project, 'bin', 'cli.js')) ? project : null,
+    state: statePath,
+    log: logPath,
+    started_at: state.started_at || null,
+    service: service.ok ? service.data : null,
+  };
+}
+
+function run(commandName, args, options = {}) {
+  const result = spawnSync(commandName, args, {
+    cwd: options.cwd || project,
+    encoding: 'utf8',
+    stdio: options.inherit ? 'inherit' : 'pipe',
+    env: { ...process.env, ...(options.env || {}) },
+  });
+  if (result.error) fail(`${commandName}: ${result.error.message}`);
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || '').trim();
+    fail(`${commandName} exited ${result.status}${detail ? `: ${detail}` : ''}`);
+  }
+  return result;
+}
+
+function ensureInstalled() {
+  const state = readState();
+  if (!state.package_ready && !fs.existsSync(path.join(project, 'bin', 'cli.js'))) {
+    fail('application package is not installed; run: cicy-koubo install');
+  }
+}
+
+function npmLaunchArgs(extra = []) {
+  return ['--yes', packageSpec, ...extra];
+}
+
+function electronOpen(url) {
+  const probe = spawnSync('agent-electron', ['profile', '1', '--json'], { encoding: 'utf8' });
+  if (probe.error || probe.status !== 0) {
+    fail('agent-electron profile 1 is unavailable; ensure cicy-desktop is running and connected');
+  }
+  const listed = spawnSync('agent-electron', ['tabs', '1', '--json'], { encoding: 'utf8' });
+  if (!listed.error && listed.status === 0) {
+    try {
+      const payload = JSON.parse(listed.stdout || '{}');
+      const data = payload.data || payload;
+      const tabs = Array.isArray(data) ? data : (data.tabs || []);
+      const existing = tabs.find((item) =>
+        item &&
+        String(item.url || '').replace(/\/$/, '') === String(url).replace(/\/$/, ''));
+      const tabId = Number(existing?.webContentsId ?? existing?.tabId);
+      if (tabId > 0) {
+        const focused = spawnSync('agent-electron', ['tab-activate', String(tabId), '--json'], {
+          encoding: 'utf8',
+        });
+        if (!focused.error && focused.status === 0) {
+          const output = String(focused.stdout || '').trim();
+          if (output) process.stdout.write(`${output}\n`);
+          return;
+        }
+      }
+    } catch {}
+  }
+  const opened = spawnSync('agent-electron', ['tab-open', '1', url, '--json'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (opened.error || opened.status !== 0) {
+    fail(`agent-electron profile 1 tab open failed: ${String(opened.stderr || opened.error?.message || '').trim()}`);
+  }
+  const output = String(opened.stdout || '').trim();
+  if (output) process.stdout.write(`${output}\n`);
+}
+
+async function waitHealthy(port, attempts = 60) {
+  for (let index = 0; index < attempts; index += 1) {
+    const health = await requestJSON(port, '/');
+    if (health.ok) return health;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return { ok: false };
+}
+
+async function stopManaged(quiet = false) {
+  const state = readState();
+  const pid = Number(state.pid);
+  if (!pidAlive(pid)) {
+    if (!quiet) process.stdout.write('cicy-koubo is already stopped\n');
+    return false;
+  }
+  process.kill(pid, 'SIGTERM');
+  for (let index = 0; index < 25 && pidAlive(pid); index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  if (pidAlive(pid)) process.kill(pid, 'SIGKILL');
+  writeState({ ...state, pid: null, stopped_at: new Date().toISOString() });
+  if (!quiet) process.stdout.write(`stopped cicy-koubo pid=${pid}\n`);
+  return true;
+}
+
+async function startManaged({ open = true, port = portValue() } = {}) {
+  ensureInstalled();
+  const current = await runtimeStatus();
+  if (current.healthy) {
+    process.stdout.write(`cicy-koubo is already healthy at ${current.url}\n`);
+    if (open) electronOpen(current.url);
+    return current;
+  }
+  if (current.running) await stopManaged(true);
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const fd = fs.openSync(logPath, 'a');
+  const sourceEntry = process.env.CICY_KOUBO_PROJECT && path.join(project, 'bin', 'cli.js');
+  const useSource = sourceEntry && fs.existsSync(sourceEntry);
+  const child = spawn(
+    useSource ? process.execPath : 'npx',
+    useSource ? [sourceEntry, '--port', String(port)] : npmLaunchArgs(['--port', String(port)]),
+    {
+    cwd: useSource ? project : home,
+    detached: true,
+    stdio: ['ignore', fd, fd],
+    env: { ...process.env, KOUBO_NO_OPEN: '1' },
+    },
+  );
+  child.unref();
+  fs.closeSync(fd);
+  writeState({
+    pid: child.pid,
+    port,
+    package_ready: true,
+    package: packageSpec,
+    project: useSource ? project : null,
+    log: logPath,
+    started_at: new Date().toISOString(),
+  });
+  const health = await waitHealthy(port);
+  if (!health.ok) {
+    fail(`service did not become healthy within 30s; inspect: cicy-koubo logs --lines 120`);
+  }
+  const url = `http://127.0.0.1:${port}`;
+  process.stdout.write(`started cicy-koubo pid=${child.pid} url=${url}\n`);
+  if (open) electronOpen(url);
+  return runtimeStatus();
+}
+
+async function rebuild({ update = false } = {}) {
+  ensureInstalled();
+  const before = await runtimeStatus();
+  if (!process.env.CICY_KOUBO_PROJECT || !fs.existsSync(path.join(project, 'bin', 'cli.js'))) {
+    if (!update) fail('rebuild requires a developer source checkout set with CICY_KOUBO_PROJECT', 2);
+    if (before.running) await stopManaged(true);
+    const installed = run('npx', npmLaunchArgs(['--install-only']), { cwd: home, inherit: true });
+    writeState({
+      ...readState(),
+      package_ready: true,
+      package: packageSpec,
+      package_updated_at: new Date().toISOString(),
+    });
+    process.stdout.write(`updated ${packageSpec}\n`);
+    if (before.running) await startManaged({ open: true, port: before.port });
+    return installed;
+  }
+  if (before.running) await stopManaged(true);
+  try {
+    if (update) run('git', ['pull', '--ff-only'], { cwd: project, inherit: true });
+    run('npm', ['run', 'build'], { cwd: project, inherit: true });
+  } catch (error) {
+    if (before.running) {
+      process.stderr.write('build/update failed; restoring the previously running service\n');
+      await startManaged({ open: false, port: before.port });
+    }
+    throw error;
+  }
+  process.stdout.write(`${update ? 'updated and rebuilt' : 'rebuilt'} cicy-koubo\n`);
+  if (before.running) await startManaged({ open: true, port: before.port });
+}
+
+function executable(name, args = ['--version']) {
+  const result = spawnSync(name, args, { encoding: 'utf8' });
+  return !result.error && result.status === 0;
+}
+
+function environmentInfo() {
+  const release = os.release();
+  const isWsl = os.platform() === 'linux' &&
+    (Boolean(process.env.WSL_INTEROP || process.env.WSL_DISTRO_NAME) || /microsoft/i.test(release));
+  let nvidia = null;
+  const gpu = spawnSync('nvidia-smi', [
+    '--query-gpu=name,memory.total,memory.free,utilization.gpu',
+    '--format=csv,noheader,nounits',
+  ], { encoding: 'utf8' });
+  if (!gpu.error && gpu.status === 0 && String(gpu.stdout).trim()) {
+    const [name, memoryTotalMb, memoryFreeMb, utilizationPercent] =
+      String(gpu.stdout).trim().split(/\r?\n/)[0].split(',').map((value) => value.trim());
+    nvidia = {
+      name,
+      memory_total_mb: Number(memoryTotalMb) || null,
+      memory_free_mb: Number(memoryFreeMb) || null,
+      utilization_percent: Number(utilizationPercent) || 0,
+    };
+  }
+  let appleGpu = null;
+  if (os.platform() === 'darwin') {
+    const display = spawnSync('system_profiler', ['SPDisplaysDataType', '-json'], {
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    try {
+      const parsed = JSON.parse(display.stdout || '{}');
+      const item = parsed.SPDisplaysDataType?.[0];
+      appleGpu = item?._name || item?.sppci_model || null;
+    } catch {}
+  }
+  return {
+    platform: os.platform(),
+    os: isWsl ? 'wsl' : ({ darwin: 'macos', win32: 'windows', linux: 'linux' }[os.platform()] || os.platform()),
+    release,
+    arch: os.arch(),
+    is_wsl: isWsl,
+    is_macos: os.platform() === 'darwin',
+    is_apple_silicon: os.platform() === 'darwin' && os.arch() === 'arm64',
+    local_gpu_available: Boolean(nvidia || appleGpu),
+    nvidia,
+    apple_gpu: appleGpu,
+  };
+}
+
+async function doctor(json) {
+  const state = readState();
+  const checks = {
+    app_package: Boolean(state.package_ready) || fs.existsSync(path.join(project, 'bin', 'cli.js')),
+    node: executable(process.execPath, ['--version']),
+    npm: executable('npm', ['--version']),
+    npx: executable('npx', ['--version']),
+    python3: executable('python3', ['--version']),
+    python_modules: executable('python3', ['-c', 'import flask, PIL']),
+    ffmpeg: executable('ffmpeg', ['-version']),
+    agent_electron: executable('agent-electron', ['profile', '1', '--json']),
+  };
+  const status = await runtimeStatus();
+  const environment = environmentInfo();
+  const system = status.healthy ? await requestJSON(status.port, '/api/system', 5000) : { ok: false, data: null };
+  const runtime = system.ok ? system.data : null;
+  const execution = {
+    configured_mode: runtime?.gpu_mode || null,
+    is_colab_runtime: Boolean(runtime?.is_colab),
+    using_colab: runtime?.gpu_mode === 'colab_cli' || Boolean(runtime?.is_colab),
+    using_local_nvidia_gpu: runtime?.gpu_mode !== 'colab_cli' && Boolean(runtime?.gpu_name),
+    local_gpu_detected: environment.local_gpu_available,
+    colab_cli_installed: runtime?.colab_cli_installed ?? executable('colab', ['version']),
+  };
+  const ok = Object.values(checks).every(Boolean);
+  if (json) process.stdout.write(`${JSON.stringify({ ok, checks, environment, execution, system: runtime, runtime: status }, null, 2)}\n`);
+  else {
+    for (const [name, value] of Object.entries(checks)) {
+      process.stdout.write(`${value ? 'ok' : 'missing'}  ${name}\n`);
+    }
+    process.stdout.write(`info  os=${environment.os} arch=${environment.arch} wsl=${environment.is_wsl}\n`);
+    process.stdout.write(`info  local_gpu=${environment.local_gpu_available} mode=${execution.configured_mode || 'unknown'} colab=${execution.using_colab}\n`);
+    process.stdout.write(`${status.healthy ? 'ok' : 'down'}  service ${status.url}\n`);
+  }
+  if (!ok) process.exitCode = 1;
+}
+
+function help() {
+  process.stdout.write(`cicy-koubo — manage the spoken-content workspace
+
+Usage:
+  cicy-koubo install
+  cicy-koubo start [--port 8770] [--no-open]
+  cicy-koubo stop
+  cicy-koubo restart [--port 8770] [--no-open]
+  cicy-koubo rebuild
+  cicy-koubo update
+  cicy-koubo status [--json]
+  cicy-koubo open
+  cicy-koubo douyin <url>
+  cicy-koubo logs [--lines 100] [--follow|-f]
+  cicy-koubo doctor [--json]
+`);
+}
+
+async function main() {
+  if (command === 'help' || command === '--help' || command === '-h') return help();
+  if (command === 'install') {
+    const state = readState();
+    if (process.env.CICY_KOUBO_PROJECT && fs.existsSync(path.join(project, 'bin', 'cli.js'))) {
+      process.stdout.write(`developer source is already installed at ${project}\n`);
+      return;
+    }
+    if (state.package_ready && !argv.includes('--force')) {
+      process.stdout.write(`${packageSpec} dependencies are already prepared; use --force to refresh\n`);
+      return;
+    }
+    if (!executable('npm', ['--version']) || !executable('npx', ['--version'])) {
+      fail('Node.js with npm/npx is required');
+    }
+    run('npx', npmLaunchArgs(['--install-only']), { cwd: home, inherit: true });
+    writeState({
+      ...state,
+      package_ready: true,
+      package: packageSpec,
+      package_installed_at: new Date().toISOString(),
+    });
+    process.stdout.write(`installed ${packageSpec} and prepared runtime dependencies\n`);
+    return;
+  }
+  if (command === 'status') {
+    const status = await runtimeStatus();
+    if (argv.includes('--json')) process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+    else {
+      process.stdout.write(`${status.installed ? 'installed' : 'missing'}; ${status.managed ? 'managed' : 'unmanaged'}; ${status.healthy ? 'healthy' : 'not healthy'}\n`);
+      process.stdout.write(`url=${status.url} pid=${status.pid || '-'} version=${status.version || '-'}\n`);
+      process.stdout.write(`project=${status.project}\nlog=${status.log}\n`);
+    }
+    return;
+  }
+  if (command === 'start') return startManaged({ open: !argv.includes('--no-open') });
+  if (command === 'stop') return stopManaged();
+  if (command === 'restart') {
+    await stopManaged(true);
+    return startManaged({ open: !argv.includes('--no-open') });
+  }
+  if (command === 'open') {
+    const status = await runtimeStatus();
+    if (!status.healthy) fail('service is not healthy; run: cicy-koubo start');
+    electronOpen(status.url);
+    return;
+  }
+  if (command === 'douyin') {
+    const url = argv[1] || '';
+    if (!/^https?:\/\/([^/]+\.)?douyin\.com\//i.test(url)) fail('expected a douyin.com URL', 2);
+    electronOpen(url);
+    const status = await runtimeStatus();
+    if (status.healthy) electronOpen(status.url);
+    else process.stdout.write('Douyin opened in Electron profile 1; start the workspace with: cicy-koubo start\n');
+    return;
+  }
+  if (command === 'rebuild') return rebuild();
+  if (command === 'update') return rebuild({ update: true });
+  if (command === 'logs') {
+    const lines = Number(option('--lines', '100'));
+    if (!Number.isInteger(lines) || lines < 1 || lines > 10000) fail('invalid --lines', 2);
+    if (!fs.existsSync(logPath)) fail(`log does not exist: ${logPath}`);
+    const args = ['-n', String(lines)];
+    if (argv.includes('--follow') || argv.includes('-f')) args.push('-f');
+    const child = spawnSync('tail', args.concat(logPath), { stdio: 'inherit' });
+    process.exitCode = child.status || 0;
+    return;
+  }
+  if (command === 'doctor') return doctor(argv.includes('--json'));
+  fail(`unknown command: ${command}; run cicy-koubo --help`, 2);
+}
+
+main().catch((error) => fail(error && error.message ? error.message : String(error)));
