@@ -32,6 +32,11 @@ cicy-koubo open
   Require a healthy service and open its URL via:
   agent-electron tab-open 1 <url>
 
+cicy-koubo open-or-start
+  Look for the workspace URL in Electron profile 1 first. When found, activate
+  its tab and restore, show, and focus the owning window. Otherwise start the
+  managed service when needed, wait for health, and open it in profile 1.
+
 cicy-koubo douyin <douyin-url>
   Validate the URL, open it via agent-electron profile 1, then focus the
   healthy workspace. It does not claim a completed download by itself.

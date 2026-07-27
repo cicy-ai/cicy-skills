@@ -26,6 +26,7 @@ cicy-koubo rebuild
 cicy-koubo update
 cicy-koubo status [--json]
 cicy-koubo open
+cicy-koubo open-or-start
 cicy-koubo douyin <url>
 cicy-koubo logs [--lines 100] [--follow]
 cicy-koubo doctor
@@ -56,6 +57,10 @@ machine, `update` refreshes the npm package and must not use git.
 
 - Open the workspace only through `cicy-koubo open` or
   `agent-electron tab-open 1 http://127.0.0.1:8770`.
+- The cicy-code header button uses `cicy-koubo open-or-start`. It first checks
+  profile 1 for the workspace URL. If found, it activates that tab and restores,
+  shows, and focuses its owning window. If no matching tab exists, it starts the
+  service when needed and then opens the workspace.
 - For every Douyin link, run `cicy-koubo douyin <url>`. This opens or reuses
   the page in Electron account/profile 1 and then focuses the workspace.
 - Do not use `open`, `agent-chrome`, Chrome debug ports, or another Electron

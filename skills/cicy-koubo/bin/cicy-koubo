@@ -131,7 +131,7 @@ function npmLaunchArgs(extra = []) {
   return ['--yes', packageSpec, ...extra];
 }
 
-function electronOpen(url) {
+function electronActivateExisting(url) {
   const probe = spawnSync('agent-electron', ['profile', '1', '--json'], { encoding: 'utf8' });
   if (probe.error || probe.status !== 0) {
     fail('agent-electron profile 1 is unavailable; ensure cicy-desktop is running and connected');
@@ -153,11 +153,16 @@ function electronOpen(url) {
         if (!focused.error && focused.status === 0) {
           const output = String(focused.stdout || '').trim();
           if (output) process.stdout.write(`${output}\n`);
-          return;
+          return true;
         }
       }
     } catch {}
   }
+  return false;
+}
+
+function electronOpen(url) {
+  if (electronActivateExisting(url)) return;
   const opened = spawnSync('agent-electron', ['tab-open', '1', url, '--json'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -167,6 +172,17 @@ function electronOpen(url) {
   }
   const output = String(opened.stdout || '').trim();
   if (output) process.stdout.write(`${output}\n`);
+}
+
+async function openOrStart() {
+  const state = readState();
+  const port = Number(state.port) || 8770;
+  const url = `http://127.0.0.1:${port}`;
+  if (electronActivateExisting(url)) {
+    process.stdout.write(`activated existing cicy-koubo window at ${url}\n`);
+    return;
+  }
+  return startManaged({ open: true, port });
 }
 
 async function waitHealthy(port, attempts = 60) {
@@ -370,6 +386,7 @@ Usage:
   cicy-koubo update
   cicy-koubo status [--json]
   cicy-koubo open
+  cicy-koubo open-or-start
   cicy-koubo douyin <url>
   cicy-koubo logs [--lines 100] [--follow|-f]
   cicy-koubo doctor [--json]
@@ -412,6 +429,7 @@ async function main() {
     return;
   }
   if (command === 'start') return startManaged({ open: !argv.includes('--no-open') });
+  if (command === 'open-or-start') return openOrStart();
   if (command === 'stop') return stopManaged();
   if (command === 'restart') {
     await stopManaged(true);
