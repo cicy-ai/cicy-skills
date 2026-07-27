@@ -74,14 +74,72 @@ The top-right **系统管理** opens tabs for 运行与 Colab, 模型服务, and
 - Action: `#btn-extract` (`1. 提取视频文案`).
 - Profile rule: first open the Douyin page with
   `cicy-koubo douyin <url>` so profile 1 supplies the authenticated session.
-- Success: `#srcText` contains non-empty extracted text.
+- Media discovery and download must follow **Douyin media discovery** below.
+- Success: `#script1` contains non-empty extracted text.
 - Failure handling: keep the Douyin page logged in, verify the URL, inspect the
   visible error/stage text and `cicy-koubo logs --lines 120`. Do not call it
   extracted merely because the page opened.
 
+### Douyin media discovery
+
+Never guess a media URL from a Douyin video ID and never select the first
+network request blindly. Open the resolved video page in `agent-electron`
+profile 1, then inspect its `<video>` elements:
+
+```js
+[...document.querySelectorAll("video")].map((video) => {
+  const rect = video.getBoundingClientRect();
+  return {
+    url: video.currentSrc,
+    duration: video.duration,
+    readyState: video.readyState,
+    visible: rect.width > 0 && rect.height > 0 &&
+      rect.bottom > 0 && rect.top < innerHeight &&
+      getComputedStyle(video).display !== "none" &&
+      getComputedStyle(video).visibility !== "hidden"
+  };
+})
+```
+
+Select media only when all applicable checks pass:
+
+1. `currentSrc` is an `http:` or `https:` URL, not an empty or `blob:` URL.
+2. The player is visible and has non-zero dimensions.
+3. `readyState` indicates that media metadata/data is available.
+4. The page URL resolves to `/video/<video-id>`.
+5. When the media query contains `__vid`, it equals the page video ID.
+
+Observed CDN URLs commonly use a host resembling `v*-dy-*.zjcdn.com`, a
+`/video/tos/...` path, `mime_type=video_mp4`, and `__vid=<video-id>`. These
+features are filters only. The URL contains an expiring signature and must not
+be synthesized, cached as a permanent URL, or reused after expiry.
+
+Download through the same profile-1 Electron session, using the desktop
+`session_download_url` capability for the tab's owning window/session. A
+terminal `curl`, generic HTTP client, or another browser may omit session,
+Referer, proxy, or anti-bot context and stall or fail. Treat the download as
+complete only after Electron reports completion and the file passes media
+probing; a growing file or readable duration alone does not prove the tail is
+complete.
+
+Before downloading, inspect `video.duration`:
+
+- Up to 10 minutes: normal short-video path. Prefer the configured fast STT
+  provider when available.
+- Over 10 minutes: do not send to Groq. Do not automatically retain a full
+  MP4. Ask for confirmation when appropriate, extract/compress audio, then use
+  Colab Whisper when its GPU session is running or the local `whisper.cpp`
+  fallback.
+- A Colab profile existing or a T4 being requested is not availability.
+  Confirm the session is running; on allocation failure use local Whisper or
+  report the concrete blocker.
+
+For long content, retain the compact audio/transcript as the working artifact.
+Do not delete a previously downloaded full MP4 without user intent.
+
 ### Use manual text
 
-- Input or replace `#srcText` directly.
+- Input or replace `#script1` directly.
 - This is valid when there is no Douyin URL or extraction is unavailable.
 - Preserve the user's original wording unless they requested editing.
 
@@ -91,8 +149,8 @@ The top-right **系统管理** opens tabs for 运行与 Colab, 模型服务, and
 - Prompt settings button beside the style field opens the rewrite system
   prompt. Save persists it; 恢复默认 resets it.
 - Action: `#btn-rewrite` (`2. AI 仿写改写`).
-- Success: `#outText` contains the rewritten script.
-- The downstream voice step prefers `#outText`; if empty it uses `#srcText`.
+- Success: `#script2` contains the rewritten script.
+- The downstream voice step prefers `#script2`; if empty it uses `#script1`.
 - Requires a configured and selected model provider in 系统管理 → 模型服务.
 
 ### Generate title/topic/cover copy
@@ -119,7 +177,7 @@ The top-right **系统管理** opens tabs for 运行与 Colab, 模型服务, and
 - Action: `#btn-tts` (`3. 生成配音`).
 - Input text: rewritten script first, otherwise original script.
 - Success:
-  - `#ttsAudio` is visible and playable;
+  - `#ttsPlayer` is visible and playable;
   - `#btn-tts-dl` is enabled;
   - `#ttsInfo` contains result information.
 - Download: `#btn-tts-dl`.
@@ -145,7 +203,7 @@ The top-right **系统管理** opens tabs for 运行与 Colab, 模型服务, and
 - The operation is asynchronous. Polling/job progress in the page must reach a
   successful terminal state.
 - Success:
-  - `#genVideo` is visible and playable;
+  - `#resultPrev` is visible and playable;
   - `#btn-gen-dl` is enabled;
   - `#genInfo` shows the completed result.
 - Download: `#btn-gen-dl`.
@@ -156,13 +214,13 @@ The top-right **系统管理** opens tabs for 运行与 Colab, 模型服务, and
 
 ### Subtitles
 
-- Subtitle editor: `#srtText`.
+- Subtitle editor: `#subText`.
 - `#btn-srt` generates SRT from the current speech audio.
 - Editable SRT produces timed subtitles. Plain text produces a whole-screen
   subtitle. Empty input disables subtitles.
 - Configure subtitle appearance with the visible font, size, color, position,
   outline, or related controls in the same card.
-- Success of generation: `#srtText` contains subtitle text.
+- Success of generation: `#subText` contains subtitle text.
 
 ### BGM and edited video
 

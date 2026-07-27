@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-koubo",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "title": "Cicy Koubo",
   "description": "Install the source-free cicy-koubo npm app and operate its complete spoken-video UI, runtime, GPU/Colab environment, and Electron profile 1 workflow.",
   "category": "agent",
