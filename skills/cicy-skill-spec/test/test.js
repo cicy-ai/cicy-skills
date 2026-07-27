@@ -33,6 +33,10 @@ try {
   assert('SKILL.md created', existsSync(join(base, 'SKILL.md')));
   assert('bin created', existsSync(join(base, 'bin', 'demo-x')));
   assert('references created', existsSync(join(base, 'references', 'help.md')));
+  assert('English help created', existsSync(join(base, 'references', 'help.en.md')));
+  assert('Chinese help created', existsSync(join(base, 'references', 'help.cn.md')));
+  assert('English tools created', existsSync(join(base, 'references', 'tools.en.md')));
+  assert('Chinese tools created', existsSync(join(base, 'references', 'tools.cn.md')));
 
   // frontmatter description must equal manifest description (validator rule)
   const man = JSON.parse(readFileSync(join(base, 'manifest.json'), 'utf8'));

@@ -14,7 +14,8 @@ cicy-skill-spec --help                     Same as `spec`
 
 Generates a complete, valid skill skeleton: `manifest.json`, `SKILL.md`
 (frontmatter description kept equal to the manifest), `README.md`,
-`bin/<name>` (executable), and `references/{help.md,tools.md}`.
+`bin/<name>` (executable), and static bilingual documentation:
+`references/{help.en.md,help.cn.md,tools.en.md,tools.cn.md}`.
 
 Refuses to overwrite an existing directory. The skill name must be
 lowercase letters, digits and hyphens.
