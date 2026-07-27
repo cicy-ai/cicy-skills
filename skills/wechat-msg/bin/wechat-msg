@@ -10,10 +10,11 @@
 // (ret=-2). If sending fails with that, open WeChat and send the bot any
 // message first, then retry.
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { join, extname, basename } from 'node:path';
+import { randomBytes, createHash, createCipheriv } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 
 const DB_DIR = join(homedir(), 'cicy-ai', 'db');
 const CHANNEL_VERSION = '0.2.9';
@@ -24,6 +25,24 @@ if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h' || argv[0] ===
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
   catch { console.log('Usage: wechat-msg send <text...> [--to <ilink_user_id>] [--acc N] | status'); }
   process.exit(0);
+}
+
+// Node's fetch honors HTTP(S)_PROXY only when NODE_USE_ENV_PROXY=1, and that is
+// read at runtime boot — so if the shell has a proxy set (the WeChat CDN host
+// novac2c.cdn.weixin.qq.com is only reachable through it here, like every other
+// CN-bound tool: curl and cicy-code's Go client both use the env proxy), we
+// must re-exec ourselves once with the flag on. Without this, image upload
+// dials the CDN directly and times out. Skipped for --help (handled above).
+{
+  const hasProxy = process.env.HTTPS_PROXY || process.env.https_proxy
+    || process.env.ALL_PROXY || process.env.all_proxy
+    || process.env.HTTP_PROXY || process.env.http_proxy;
+  if (hasProxy && process.env.NODE_USE_ENV_PROXY !== '1') {
+    const r = spawnSync(process.execPath, [process.argv[1], ...process.argv.slice(2)], {
+      stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' },
+    });
+    process.exit(r.status ?? 1);
+  }
 }
 
 function bail(msg, code = 1) { process.stderr.write(`wechat-msg: ${msg}\n`); process.exit(code); }
@@ -76,6 +95,75 @@ async function ilinkPost(state, path, payload) {
   try { return JSON.parse(text); } catch { return {}; }
 }
 
+// ── media upload (send images) ─────────────────────────────────────────────
+// ilink CDN flow, the send-side mirror of cicy-code's receive path:
+//   1. getuploadurl → an upload_param (a presigned CDN query string)
+//   2. encrypt the file AES-128-ECB + PKCS7 with a random 16-byte key
+//   3. POST the ciphertext to novac2c.cdn.weixin.qq.com/c2c/upload
+//      → the response's x-encrypted-param header is the DOWNLOAD param
+//   4. sendmessage with image_item.media {encrypt_query_param, aes_key}
+// All media on the WeChat CDN is AES-128-ECB encrypted; the recipient's client
+// decrypts with the aes_key we relay. media_type: 1=image 2=video 3=file 4=voice.
+const CDN_UPLOAD = 'https://novac2c.cdn.weixin.qq.com/c2c/upload';
+const IMAGE_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
+
+async function uploadMedia(state, toUser, buf, mediaType) {
+  const key = randomBytes(16);
+  const rawMd5 = createHash('md5').update(buf).digest('hex');
+  const cipher = createCipheriv('aes-128-ecb', key, null);
+  cipher.setAutoPadding(true); // PKCS7
+  const enc = Buffer.concat([cipher.update(buf), cipher.final()]);
+  const filekey = randomBytes(16).toString('hex');
+
+  const up = await ilinkPost(state, 'ilink/bot/getuploadurl', {
+    filekey,
+    media_type: mediaType,
+    to_user_id: toUser,
+    rawsize: buf.length,
+    rawfilemd5: rawMd5,
+    filesize: enc.length,
+    aeskey: key.toString('hex'),
+    no_need_thumb: true,
+  });
+  const uploadParam = up.upload_param || up.uploadParam || up.upload_url;
+  if (up.ret && up.ret !== 0) bail(`getuploadurl ret=${up.ret} msg=${up.errmsg || ''}`, 3);
+  if (!uploadParam) bail(`getuploadurl: no upload_param in response: ${JSON.stringify(up).slice(0, 240)}`, 3);
+
+  const cdnUrl = `${CDN_UPLOAD}?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(filekey)}`;
+  const res = await fetch(cdnUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: enc,
+    signal: AbortSignal.timeout(30000),
+  });
+  if (res.status >= 400) bail(`CDN upload → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`, 3);
+  const downloadParam = res.headers.get('x-encrypted-param') || res.headers.get('X-Encrypted-Param');
+  if (!downloadParam) bail('CDN upload: no x-encrypted-param header (upload rejected)', 3);
+
+  return { downloadParam, key };
+}
+
+async function sendImage(state, to, imagePath) {
+  if (!existsSync(imagePath)) bail(`image not found: ${imagePath}`, 2);
+  const mime = IMAGE_MIME[extname(imagePath).toLowerCase()];
+  if (!mime) bail(`unsupported image type: ${extname(imagePath)} (png/jpg/webp/gif/bmp)`, 2);
+  const buf = readFileSync(imagePath);
+  const { downloadParam, key } = await uploadMedia(state, to, buf, 1);
+  // aes_key: both encodings the receive path accepts — base64(raw16) on the
+  // media, and the 32-char hex on image_item.aeskey — so whichever the client
+  // reads, it gets the same key.
+  const media = { encrypt_query_param: downloadParam, aes_key: key.toString('base64'), encrypt_type: 1 };
+  const msg = {
+    message_type: 2, message_state: 2, from_user_id: '', to_user_id: to,
+    client_id: 'cicy-wechat-' + randomBytes(4).toString('hex'), context_token: '',
+    item_list: [{ type: 2, image_item: { media, aeskey: key.toString('hex') } }],
+  };
+  const resp = await ilinkPost(state, 'ilink/bot/sendmessage', { msg });
+  if (resp.ret === -2) bail('ilink refused (ret=-2): outside the user\'s active session window — open WeChat, message the bot, then retry.', 4);
+  if (resp.ret && resp.ret !== 0) bail(`ilink ret=${resp.ret} msg=${resp.errmsg || ''}`, 3);
+  return true;
+}
+
 async function sendText(state, to, text) {
   const msg = {
     message_type: 2,      // bot
@@ -96,17 +184,18 @@ async function sendText(state, to, text) {
 
 // ── commands ──────────────────────────────────────────────────────────────
 function parseFlags(args) {
-  const pos = []; let to = ''; let acc = null;
+  const pos = []; let to = ''; let acc = null; let image = '';
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--to') { to = args[++i] || ''; continue; }
     if (args[i] === '--acc') { acc = args[++i]; continue; }
+    if (args[i] === '--image') { image = args[++i] || ''; continue; }
     pos.push(args[i]);
   }
-  return { pos, to, acc };
+  return { pos, to, acc, image };
 }
 
 const cmd = argv[0];
-const { pos, to, acc } = parseFlags(argv.slice(1));
+const { pos, to, acc, image } = parseFlags(argv.slice(1));
 
 if (cmd === 'status') {
   const st = loadState(acc);
@@ -119,12 +208,18 @@ if (cmd === 'status') {
 
 if (cmd === 'send') {
   const text = pos.join(' ').trim();
-  if (!text) bail('Usage: wechat-msg send <text...> [--to <ilink_user_id>] [--acc N]', 2);
+  if (!text && !image) bail('Usage: wechat-msg send <text...> | send --image <path> [--to <id>] [--acc N]', 2);
   const st = loadState(acc);
   const target = (to || st.ilink_user_id || '').trim();
   if (!target) bail('no recipient: state has no ilink_user_id and no --to given');
-  await sendText(st, target, text);
-  console.log(`sent → ${target}`);
+  if (image) {
+    await sendImage(st, target, image);
+    console.log(`sent image (${basename(image)}) → ${target}`);
+  }
+  if (text) {
+    await sendText(st, target, text);
+    console.log(`sent → ${target}`);
+  }
   process.exit(0);
 }
 

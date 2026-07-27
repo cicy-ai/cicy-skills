@@ -1,6 +1,6 @@
 ---
 name: wechat-msg
-description: Send a text message to the bound WeChat user through the ilink bot channel, reusing cicy-code's persisted login (~/cicy-ai/db/im-wechat-N.json). Subcommands: send / status.
+description: Send text or images to your WeChat through the ilink bot channel, reusing cicy-code persisted login (~/cicy-ai/db/im-wechat-N.json). send 支持 --image 发送图片(ilink CDN 加密上传)。Subcommands: send / status.
 ---
 
 # WeChat Msg
