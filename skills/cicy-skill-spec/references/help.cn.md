@@ -12,7 +12,7 @@ cicy-skill-spec --help                     等同于 `spec`
 
 ## scaffold
 
-生成完整且有效的技能骨架：`manifest.json`、`SKILL.md`（frontmatter 描述与 manifest 保持一致）、`README.md`、`bin/<name>`（可执行文件）以及 `references/{help.md, tools.md}`。
+生成完整且有效的技能骨架：`manifest.json`、`SKILL.md`（frontmatter 描述与 manifest 保持一致）、`README.md`、`bin/<name>`（可执行文件），以及静态双语文档 `references/{help.en.md, help.cn.md, tools.en.md, tools.cn.md}`。
 
 拒绝覆盖已存在的目录。技能名称必须为小写字母、数字和连字符的组合。
 

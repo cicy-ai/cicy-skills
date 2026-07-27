@@ -62,8 +62,15 @@ Skeleton (same shape as any cicy skill):
 ├── SKILL.md          # frontmatter description MUST equal manifest.description exactly
 ├── README.md
 ├── bin/<name>        # #!/usr/bin/env node, chmod +x, zero deps preferred
-└── references/{help.md,tools.md}
+└── references/
+    ├── help.en.md / help.cn.md
+    └── tools.en.md / tools.cn.md
 ```
+
+Marketplace documentation is static and bilingual. English UI reads
+`help.en.md` / `tools.en.md`; Chinese UI reads `help.cn.md` / `tools.cn.md`.
+Do not rely on runtime machine translation. Keep `help.md` / `tools.md` only as
+legacy fallbacks while migrating an existing skill.
 
 To share it with teammates, host a private registry on your machine and publish
 into it:

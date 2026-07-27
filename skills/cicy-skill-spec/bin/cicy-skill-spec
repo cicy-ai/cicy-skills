@@ -95,7 +95,11 @@ function cmdScaffold() {
     entry: `bin/${name}`,
     permissions: [],
     compatible_agents: ['*'],
-    files: { skill_md: 'SKILL.md', help_md: 'references/help.md', tools_md: 'references/tools.md', readme: 'README.md' },
+    files: {
+      skill_md: 'SKILL.md', help_md: 'references/help.md', tools_md: 'references/tools.md', readme: 'README.md',
+      help_en_md: 'references/help.en.md', help_cn_md: 'references/help.cn.md',
+      tools_en_md: 'references/tools.en.md', tools_cn_md: 'references/tools.cn.md',
+    },
   };
 
   const skillMd = `---\nname: ${name}\ndescription: ${desc}\n---\n\n# ${title}\n\nDescribe what this skill does and when an agent should invoke it.\n\n## Scope\n\nUse this skill when:\n\n- (replace with concrete triggers)\n\n## Quick start\n\n\`\`\`sh\n${name} --help\n\`\`\`\n\n## References\n\n- [help.md](./references/help.md)\n- [tools.md](./references/tools.md)\n`;
@@ -103,6 +107,8 @@ function cmdScaffold() {
   const bin = `#!/usr/bin/env node\n// ${name} — replace with your logic. Zero deps, pure ESM, Node 18+.\nconst argv = process.argv.slice(2);\nif (argv[0] === '--help' || argv[0] === '-h' || !argv[0]) {\n  process.stdout.write('${name} — usage: ${name} <command>\\n');\n  process.exit(0);\n}\nprocess.stdout.write(JSON.stringify({ ok: true, cmd: argv[0] }) + '\\n');\n`;
   const helpMd = `# ${name} — command reference\n\n\`\`\`\n${name} --help\n\`\`\`\n`;
   const toolsMd = `# ${name} — endpoints / env / exit codes\n\n- config: (none yet)\n`;
+  const helpCnMd = `# ${name} — 命令参考\n\n\`\`\`\n${name} --help\n\`\`\`\n`;
+  const toolsCnMd = `# ${name} — 接口 / 环境变量 / 退出码\n\n- 配置：（暂无）\n`;
 
   mkdirSync(join(target, 'bin'), { recursive: true });
   mkdirSync(join(target, 'references'), { recursive: true });
@@ -113,6 +119,10 @@ function cmdScaffold() {
   chmodSync(join(target, 'bin', name), 0o755);
   writeFileSync(join(target, 'references', 'help.md'), helpMd);
   writeFileSync(join(target, 'references', 'tools.md'), toolsMd);
+  writeFileSync(join(target, 'references', 'help.en.md'), helpMd);
+  writeFileSync(join(target, 'references', 'help.cn.md'), helpCnMd);
+  writeFileSync(join(target, 'references', 'tools.en.md'), toolsMd);
+  writeFileSync(join(target, 'references', 'tools.cn.md'), toolsCnMd);
 
   process.stdout.write(`✓ scaffolded ${mode} skill → ${target}\n\n`);
   if (mode === 'private' || mode.startsWith('team/')) {
