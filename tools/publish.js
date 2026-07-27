@@ -172,10 +172,15 @@ const fileMap = {
   help_md: manifest.files?.help_md || 'help.md',
   tools_md: manifest.files?.tools_md || 'tools.md',
   readme: manifest.files?.readme || 'README.md',
+  help_en_md: manifest.files?.help_en_md,
+  help_cn_md: manifest.files?.help_cn_md,
+  tools_en_md: manifest.files?.tools_en_md,
+  tools_cn_md: manifest.files?.tools_cn_md,
 };
 
 const files = {};
 for (const [key, rel] of Object.entries(fileMap)) {
+  if (!rel) continue;
   const path = join(SKILL_DIR, rel);
   if (existsSync(path)) {
     files[key] = readFileSync(path, 'utf8');

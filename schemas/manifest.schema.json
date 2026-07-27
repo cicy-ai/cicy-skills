@@ -198,6 +198,18 @@
         "tools_md": {
           "type": "string"
         },
+        "help_en_md": {
+          "type": "string"
+        },
+        "help_cn_md": {
+          "type": "string"
+        },
+        "tools_en_md": {
+          "type": "string"
+        },
+        "tools_cn_md": {
+          "type": "string"
+        },
         "readme": {
           "type": "string"
         }

@@ -1,6 +1,6 @@
 ---
 name: douyin-dl
-description: Download audio or video from a Douyin share link (yt-dlp via proxy to bypass anti-scraping); optionally transcribe via Groq whisper-large-v3-turbo (default), cicy gateway STT, or local Whisper; auto-falls back to CDP sniffing through a local agent-chrome profile when Douyin blocks yt-dlp.
+description: Download audio or video from a Douyin share link (yt-dlp via proxy to bypass anti-scraping); optionally transcribe to text via the cicy gateway STT or local Whisper.
 ---
 
 # Douyin 下载 / 转写

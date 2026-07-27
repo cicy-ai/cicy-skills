@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-audit-policy",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "title": "Audit Policy Admin",
   "description": "Configure the cicy AI-traffic audit policy and analyse its log via /api/audit/*: inspect, tighten, loosen or roll back rules, tune false positives, read events, snapshots, stats to adjudicate hits.",
   "category": "ai",
@@ -38,7 +38,11 @@
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
-    "readme": "README.md"
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
   },
   "i18n": {
     "zh-CN": {

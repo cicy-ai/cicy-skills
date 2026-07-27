@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-ssh",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "title": "CiCy SSH",
   "description": "Inspect and manage ~/.ssh/config Host entries on this host. Trigger when the task mentions ssh aliases, jump hosts, or adding/listing/using SSH nodes. For real connections use ssh directly.",
   "category": "network",
@@ -33,7 +33,11 @@
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
-    "readme": "README.md"
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
   },
   "i18n": {
     "zh-CN": {
