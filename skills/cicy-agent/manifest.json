@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "title": "Cicy Agent",
   "description": "Operate tmux panes/windows on this host (list, capture, send-keys, msg, create, restart). `msg --notify` wakes the SENDER when the dispatched agent finishes — the multi-agent coordination primitive.",
   "category": "dev",
@@ -37,7 +37,11 @@
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
-    "readme": "README.md"
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
   },
   "i18n": {
     "zh-CN": {

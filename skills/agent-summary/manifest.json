@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-summary",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "title": "Agent Summary",
   "description": "Dump the raw conversation (text + thinking + compact tool traces) of an agent session from its request/reply snapshots, for forking or restoring a conversation.",
   "category": "dev",
@@ -31,7 +31,9 @@
   ],
   "files": {
     "skill_md": "SKILL.md",
-    "help_md": "references/help.md"
+    "help_md": "references/help.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md"
   },
   "i18n": {
     "zh-CN": {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-desktop",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "title": "Agent Desktop",
   "description": "Control a connected cicy-desktop (Electron) client on this host. Exec shell, system info, live tool discovery, raw electronRPC via desktop_event over WebSocket.",
   "category": "dev",
@@ -38,7 +38,11 @@
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
-    "readme": "README.md"
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
   },
   "i18n": {
     "zh-CN": {

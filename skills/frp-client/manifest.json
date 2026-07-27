@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "frp-client",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "title": "FRP Client",
   "description": "Manage a local frpc process on this host with background start, status, proxy connections, hot reload, and stop/start controls. Remote machines via ssh.",
   "category": "network",
@@ -36,7 +36,11 @@
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
     "tools_md": "references/tools.md",
-    "readme": "README.md"
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
   },
   "i18n": {
     "zh-CN": {

@@ -1,6 +1,6 @@
 ---
 name: proxy_ssh
-description: Use the local proxy_ssh wrapper to manage autossh-based SOCKS5 proxy profiles on this host (list/show/create/delete, start/stop/restart, connectivity test). Each profile pins a local SOCKS port to an SSH target.
+description: Manage autossh-based SOCKS5 proxy profiles on this host. list/show/create/delete, start/stop/restart, connectivity test. Each profile pins a local SOCKS port to an SSH target.
 ---
 
 # Proxy SSH
