@@ -122,6 +122,12 @@ complete only after Electron reports completion and the file passes media
 probing; a growing file or readable duration alone does not prove the tail is
 complete.
 
+After the media download reports `completed` and the downloaded file passes
+probing, close that exact Douyin tab with
+`agent-electron tab-close <webContentsId>`. Keep the cicy-koubo workspace tab
+open and active. Do not close the Douyin tab before completion, because its
+profile session owns the authenticated download.
+
 Before downloading, inspect `video.duration`:
 
 - Up to 10 minutes: normal short-video path. Prefer the configured fast STT
