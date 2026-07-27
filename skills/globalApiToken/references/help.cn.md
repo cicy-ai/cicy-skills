@@ -1,5 +1,3 @@
-# globalApiToken — 帮助说明
-
 ## 语法概览
 
 ```
