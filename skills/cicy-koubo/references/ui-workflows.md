@@ -63,8 +63,8 @@ The top workflow contains four cards:
 4. **剪辑 · 封面** — SRT, style, font, BGM, edited video, and cover.
 
 Below it is **素材库**, with tabs for 音色, 底板, BGM, 文案, and 成品.
-The top-right **系统管理** opens tabs for 运行与 Colab, 模型服务, and
-生成引擎. **日志** opens the combined process log.
+The top-right **系统管理** opens tabs for 运行与 Colab and 生成引擎.
+**日志** opens the combined process log.
 
 ## 1. 文案
 
@@ -157,14 +157,15 @@ Do not delete a previously downloaded full MP4 without user intent.
 - Action: `#btn-rewrite` (`2. AI 仿写改写`).
 - Success: `#script2` contains the rewritten script.
 - The downstream voice step prefers `#script2`; if empty it uses `#script1`.
-- Requires a configured and selected model provider in 系统管理 → 模型服务.
+- Uses the configured OpenAI-compatible provider from `~/cicy-ai/global.json`.
+  The cicy-koubo UI does not configure or store LLM providers.
 
 ### Generate title/topic/cover copy
 
 - Action: `#btn-title`.
 - Success: the title result area below the button contains generated title,
   topic tags, and cover copy.
-- Requires a working model provider.
+- Requires a working OpenAI-compatible provider in `~/cicy-ai/global.json`.
 
 ## 2. 配音
 
@@ -283,12 +284,14 @@ Open the top-right 系统管理 button.
 - Report current account tier, GPU/runtime allocation, consumption, and session
   elapsed time only when the UI/API actually returns those values.
 
-### 模型服务
+### Global model configuration
 
-- Configure provider API key, endpoint URL, and model name.
-- Save the provider, then select it as active.
-- Mask secrets in all reports. A saved key is not proof of connectivity; run a
-  rewrite/title operation to validate it.
+- There is no model-provider settings panel in cicy-koubo.
+- Chat and Groq STT credentials come only from `~/cicy-ai/global.json`.
+- Never create or read `~/cicy-ai/db/koubo.json`.
+- Do not duplicate, edit, or migrate provider secrets inside the workspace UI.
+- Validate chat configuration with rewrite/title and STT configuration with an
+  actual short transcription. Never print complete credentials.
 
 ### 生成引擎
 
