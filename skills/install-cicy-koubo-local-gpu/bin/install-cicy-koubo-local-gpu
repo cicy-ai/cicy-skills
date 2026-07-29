@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+// Windows WSL2 installer/launcher for the local CiCy Koubo GPU API.
+import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+
+const DISTRO = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
+const IMAGE = process.env.CICY_KOUBO_GPU_IMAGE || "cicy-koubo-gpu:2026.07.29-api";
+const CONTAINER = "cicy-koubo-gpu";
+const PORT = 8771;
+const args = process.argv.slice(2);
+const command = ["--help", "-h"].includes(args[0]) ? "help" : (args[0] || "help");
+
+function fail(message) {
+  process.stderr.write(`❌ ${message}\n`);
+  process.exit(1);
+}
+
+function ps(script) {
+  return execFileSync("powershell", [
+    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script,
+  ], { encoding: "utf8", windowsHide: true }).trim();
+}
+
+function shQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function wsl(commandText, { quiet = false } = {}) {
+  return execFileSync("wsl", [
+    "-d", DISTRO, "-u", "root", "--", "bash", "-lc", commandText,
+  ], { encoding: "utf8", windowsHide: true, stdio: quiet ? "pipe" : "inherit" });
+}
+
+function largestDrive() {
+  const drive = ps(
+    "Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' " +
+    "| Where-Object {$_.FreeSpace -gt 0} | Sort-Object FreeSpace -Descending " +
+    "| Select-Object -First 1 -ExpandProperty DeviceID"
+  ).toUpperCase();
+  if (!/^[A-Z]:$/.test(drive)) fail("没有找到可写的 Windows 固定磁盘");
+  return drive;
+}
+
+function selectedRoot() {
+  const explicit = args.find((x) => x.startsWith("--dir="));
+  if (explicit) return path.win32.resolve(explicit.slice(6));
+  return path.win32.join(`${largestDrive()}\\`, "CiCy", "koubo-local");
+}
+
+function configPath(root) {
+  return path.win32.join(root, "config.json");
+}
+
+function readConfig() {
+  const candidates = [];
+  if (process.env.CICY_KOUBO_LOCAL_DIR) candidates.push(process.env.CICY_KOUBO_LOCAL_DIR);
+  for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
+    candidates.push(`${letter}:\\CiCy\\koubo-local`);
+  }
+  for (const root of candidates) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath(root), "utf8"));
+      if (config.root === root) return config;
+    } catch {}
+  }
+  return null;
+}
+
+function toWslPath(windowsPath) {
+  const normalized = path.win32.resolve(windowsPath);
+  const match = normalized.match(/^([A-Za-z]):\\(.*)$/);
+  if (!match) fail(`无法转换为 WSL 路径：${windowsPath}`);
+  return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, "/")}`;
+}
+
+function ensureWindows() {
+  if (process.platform !== "win32") fail("此安装器只用于 Windows + WSL2");
+  try {
+    const names = execFileSync("wsl", ["-l", "-q"], { encoding: "utf16le", windowsHide: true });
+    if (!names.split(/\r?\n/).map((x) => x.trim()).includes(DISTRO)) {
+      fail(`未找到 ${DISTRO}；请先在 CiCy Desktop 安装 Docker 运行环境`);
+    }
+  } catch (error) {
+    fail(`WSL 不可用：${error.message}`);
+  }
+}
+
+function install() {
+  ensureWindows();
+  const root = selectedRoot();
+  fs.mkdirSync(path.win32.join(root, "state"), { recursive: true });
+  const config = {
+    root,
+    distro: DISTRO,
+    image: IMAGE,
+    port: PORT,
+    token: crypto.randomBytes(32).toString("base64url"),
+    installed_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(configPath(root), JSON.stringify(config, null, 2), { mode: 0o600 });
+  process.stdout.write(`安装盘：${root}\n`);
+  try {
+    wsl(`docker image inspect ${shQuote(IMAGE)} >/dev/null 2>&1 || docker pull ${shQuote(IMAGE)}`);
+  } catch {
+    fail(`GPU 镜像不可用：${IMAGE}。可用 CICY_KOUBO_GPU_IMAGE 指定镜像`);
+  }
+  process.stdout.write("✅ 本地 GPU 运行环境已安装；执行 start 启动\n");
+}
+
+function start() {
+  ensureWindows();
+  const config = readConfig();
+  if (!config) fail("尚未安装；先执行 install");
+  const state = toWslPath(path.win32.join(config.root, "state"));
+  try {
+    wsl(
+      `docker run --rm --gpus all --entrypoint sh ${shQuote(config.image)} -lc ` +
+      shQuote("if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi -L >/dev/null; else test -c /dev/nvidiactl; fi")
+    );
+  } catch {
+    fail("NVIDIA GPU、WSL 驱动或 NVIDIA Container Runtime 不可用");
+  }
+  wsl(`docker rm -f ${CONTAINER} >/dev/null 2>&1 || true`);
+  wsl(
+    `docker run -d --name ${CONTAINER} --restart unless-stopped --gpus all ` +
+    `-p 127.0.0.1:${PORT}:${PORT} ` +
+    `-e KOUBO_API_PORT=${PORT} -e CICY_KOUBO_ACCESS_TOKEN=${shQuote(config.token)} ` +
+    `-v ${shQuote(state)}:/var/lib/cicy-koubo-api ${shQuote(config.image)}`
+  );
+  for (let i = 0; i < 30; i += 1) {
+    try {
+      wsl(`curl -fsS http://127.0.0.1:${PORT}/live >/dev/null`, { quiet: true });
+      process.stdout.write(`✅ GPU API 已启动：http://127.0.0.1:${PORT}\n`);
+      return;
+    } catch {
+      execFileSync("powershell", ["-NoProfile", "-Command", "Start-Sleep -Seconds 1"]);
+    }
+  }
+  fail(`GPU API 启动超时；运行 status 查看容器日志`);
+}
+
+function stop() {
+  ensureWindows();
+  wsl(`docker stop ${CONTAINER} >/dev/null 2>&1 || true`);
+  process.stdout.write("✅ 本地 GPU API 已停止\n");
+}
+
+function status() {
+  ensureWindows();
+  const config = readConfig();
+  if (!config) fail("尚未安装");
+  let running = "";
+  try {
+    running = wsl(`docker inspect -f '{{.State.Status}}' ${CONTAINER}`, { quiet: true }).trim();
+  } catch {}
+  process.stdout.write(JSON.stringify({
+    installed: true,
+    running: running === "running",
+    status: running || "stopped",
+    endpoint: `http://127.0.0.1:${PORT}`,
+    root: config.root,
+    image: config.image,
+  }, null, 2) + "\n");
+  if (running !== "running") {
+    try { wsl(`docker logs --tail 30 ${CONTAINER}`, { quiet: false }); } catch {}
+  }
+}
+
+function help() {
+  process.stdout.write(`CiCy Koubo 本地 GPU 安装器
+
+用法:
+  install-cicy-koubo-local-gpu install [--dir=D:\\CiCy\\koubo-local]
+  install-cicy-koubo-local-gpu start
+  install-cicy-koubo-local-gpu stop
+  install-cicy-koubo-local-gpu status
+
+install 默认选择剩余空间最大的 Windows 固定磁盘。
+口播 UI 使用 8770；本地 GPU API 使用 8771；本地模式不上传 OSS。
+`);
+}
+
+const handler = ({ install, start, stop, status, help })[command];
+if (!handler) fail(`未知命令：${command}`);
+handler();

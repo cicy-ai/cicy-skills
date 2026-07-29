@@ -1,0 +1,27 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "install-cicy-koubo-local-gpu",
+  "version": "0.1.0",
+  "title": "安装 CiCy Koubo 本地 GPU",
+  "description": "在 Windows WSL2 中安装、启动和诊断 CiCy Koubo 本地 NVIDIA GPU Docker；自动选择剩余空间最大的固定磁盘，使用 8771 API 且本地素材不经过 OSS。",
+  "category": "system",
+  "tags": ["windows", "wsl2", "docker", "nvidia", "koubo"],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": ["windows", "wsl2", "nvidia_gpu"],
+  "npm_dependencies": false,
+  "entry": "bin/install-cicy-koubo-local-gpu",
+  "permissions": ["process:spawn", "system:exec", "filesystem:home"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  }
+}
