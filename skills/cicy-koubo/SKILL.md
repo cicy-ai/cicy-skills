@@ -1,6 +1,6 @@
 ---
 name: cicy-koubo
-description: Install the source-free cicy-koubo npm app and operate its complete spoken-video UI, runtime, GPU/Colab environment, and Electron profile 1 workflow.
+description: Install and operate the source-free cicy-koubo spoken-video app, defaulting to temporary Cicy Cloud GPUs while supporting optional local NVIDIA WSL2 and Colab workflows.
 ---
 
 # Cicy Koubo
@@ -18,6 +18,8 @@ prerequisites, success conditions, artifacts, and recovery steps.
 ## Commands
 
 ```sh
+cicy-koubo setup [--region cn-hangzhou] [--no-open]
+cicy-koubo gpu cicy|local|colab [--region REGION]
 cicy-koubo install
 cicy-koubo start [--port 8770] [--no-open]
 cicy-koubo stop
@@ -39,19 +41,38 @@ machine, `update` refreshes the npm package and must not use git.
 
 ## Required workflow
 
-1. Run `cicy-koubo status --json`.
-2. If missing, run `cicy-koubo install`. This must provision the npm package
-   and runtime dependencies without cloning source.
-3. Run `cicy-koubo doctor --json` and use its `environment`, `execution`, and
+1. For the normal zero-GPU-install path, run
+   `cicy-koubo setup --region cn-hangzhou`. It installs the local UI, verifies
+   that `~/cicy-ai/global.json` contains a Cicy Gateway key, selects
+   `cicy_gpu`, and starts the workspace.
+2. Run `cicy-koubo status --json`.
+3. If setup was not used and the app is missing, run `cicy-koubo install`.
+   This must provision the npm package and runtime dependencies without
+   cloning source.
+4. Run `cicy-koubo doctor --json` and use its `environment`, `execution`, and
    `system` fields to identify macOS/Linux/Windows/WSL, local GPU availability,
    configured execution mode, and whether Colab is actually in use.
-4. Start with `cicy-koubo start`. It waits for HTTP readiness, records the
+5. Start with `cicy-koubo start`. It waits for HTTP readiness, records the
    managed PID, and opens `http://127.0.0.1:8770` with
    `agent-electron tab-open 1 ...`.
-5. For a failed start, read `cicy-koubo logs --lines 120` and run
+6. For a failed start, read `cicy-koubo logs --lines 120` and run
    `cicy-koubo doctor`. Report the concrete failed dependency or process.
-6. Never report a queued/start attempt as healthy; `status.healthy` must be
+7. Never report a queued/start attempt as healthy; `status.healthy` must be
    true.
+
+## GPU selection
+
+- Default to `cicy-koubo gpu cicy --region cn-hangzhou`. The local UI uses the
+  Cicy Gateway key from `global.json`; Cloud checks the minimum USD balance,
+  creates a temporary GPU, returns a short-lived endpoint/token, bills actual
+  runtime, and releases the instance after the result is downloaded.
+- Never download the 52 GB GPU image for a user who chooses Cicy GPU.
+- Use `cicy-koubo gpu local` only when the user explicitly wants their own
+  NVIDIA GPU. On WSL2, require a Windows NVIDIA WSL driver, Docker Desktop WSL
+  integration, at least 80 GB free disk, and a successful
+  `docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi`.
+  Do not install a Linux NVIDIA kernel driver inside WSL.
+- Use `cicy-koubo gpu colab` only when the user explicitly chooses Colab.
 
 ## Electron profile 1 is mandatory
 

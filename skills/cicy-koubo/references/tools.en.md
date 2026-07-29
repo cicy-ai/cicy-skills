@@ -6,6 +6,7 @@
 |---|---|
 | Application package | `npx cicy-koubo@latest` |
 | Runtime state | `~/cicy-ai/db/cicy-koubo-runtime.json` |
+| Cicy Gateway and GPU provider config | `~/cicy-ai/global.json` |
 | Combined stdout/stderr | `~/logs/cicy-koubo.log` |
 | Application data | `~/projects/digital-human` |
 | Default URL | `http://127.0.0.1:8770` |
@@ -31,3 +32,8 @@ The skill manages but does not vendor the npm application. `install` invokes
 the package's dependency-only mode. The application owns Python/Flask/Pillow,
 ffmpeg, engine, and Colab configuration. `doctor --json` exposes OS/WSL, local
 GPU, configured execution mode, live `/api/system` data, and prerequisites.
+
+The default `setup` installs only the local UI and selects `cicy_gpu`; models
+and inference stay on an ephemeral cloud GPU. WSL2, Docker Desktop, the
+Windows NVIDIA WSL driver, and at least 80 GB free disk are required only when
+the user explicitly selects `gpu local`.

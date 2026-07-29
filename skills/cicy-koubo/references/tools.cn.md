@@ -6,6 +6,7 @@
 |---|---|
 | 应用程序包 | `npx cicy-koubo@latest` |
 | 运行时状态 | `~/cicy-ai/db/cicy-koubo-runtime.json` |
+| Cicy Gateway 与 GPU provider 配置 | `~/cicy-ai/global.json` |
 | 合并的标准输出/标准错误 | `~/logs/cicy-koubo.log` |
 | 应用程序数据 | `~/projects/digital-human` |
 | 默认 URL | `http://127.0.0.1:8770` |
@@ -25,3 +26,5 @@
 ## 依赖边界
 
 该技能管理但不包含 npm 应用程序。`install` 会调用该包的仅依赖项模式。应用程序拥有 Python/Flask/Pillow、ffmpeg、引擎和 Colab 配置。`doctor --json` 会暴露操作系统/WSL、本地 GPU、配置的执行模式、实时的 `/api系统` 数据以及先决条件。
+
+默认 `setup` 只安装本地 UI，并将 provider 设为 `cicy_gpu`。模型和推理环境位于临时云 GPU，不下载到用户电脑。只有明确选择 `gpu local` 时才要求 WSL2、Docker Desktop、Windows NVIDIA WSL 驱动和至少 80 GB 可用磁盘。
