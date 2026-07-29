@@ -1,0 +1,249 @@
+#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const argv = process.argv.slice(2);
+if (!argv[0] || ['help', '--help', '-h'].includes(argv[0])) {
+  printHelp();
+  process.exit(0);
+}
+
+let json = false;
+const command = argv[0];
+const flags = parseFlags(argv.slice(1));
+json = Boolean(flags.json);
+const prefix = textFlag('prefix');
+const apply = Boolean(flags.apply);
+const accountFilter = flags.account == null ? null : Number(flags.account);
+const dbPath = process.env.CICY_DB_PATH || join(homedir(), 'cicy-ai', 'db', 'data.db');
+const managedMarker = '由 cicy-code 为 Agent 自动创建';
+
+if (!['list', 'plan', 'sync', 'cleanup'].includes(command)) fail(`unknown command: ${command}`, 2);
+if (!prefix) fail('--prefix is required', 2);
+if (prefix.length < 2 && !flags['allow-short-prefix']) {
+  fail('prefix must contain at least 2 characters (or pass --allow-short-prefix)', 2);
+}
+if (!existsSync(dbPath)) fail(`cicy-code database not found: ${dbPath}`, 3);
+if (accountFilter != null && (!Number.isInteger(accountFilter) || accountFilter <= 0)) {
+  fail('--account must be a positive integer', 2);
+}
+if (command === 'cleanup' && apply && textFlag('confirm-prefix') !== prefix) {
+  fail('--confirm-prefix must exactly match --prefix when cleanup uses --apply', 2);
+}
+
+try {
+  const accounts = loadAccounts();
+  const bindings = loadBindings();
+  const bindingByKey = new Map(bindings.map((b) => [`${b.account_id}|${b.chat_id}`, b]));
+  const rows = [];
+  const errors = [];
+
+  for (const account of accounts) {
+    try {
+      const token = await tenantToken(account);
+      const chats = await listChats(token);
+      for (const chat of chats) {
+        if (!String(chat.name || '').startsWith(prefix)) continue;
+        const binding = bindingByKey.get(`${account.id}|${chat.chat_id}`) || null;
+        const managed = String(chat.description || '').includes(managedMarker);
+        const kind = binding
+          ? (binding.binding_type === 'group' ? 'bound' : 'direct')
+          : (managed ? 'orphan' : 'user_chat');
+        rows.push({
+          account_id: account.id,
+          account_name: account.name,
+          chat_id: chat.chat_id,
+          name: chat.name || '',
+          description: chat.description || '',
+          kind,
+          pane_id: binding?.pane_id || '',
+          agent_title: binding?.agent_title || '',
+          desired_name: binding?.binding_type === 'group'
+            ? `${binding.agent_title || shortPane(binding.pane_id)} · ${shortPane(binding.pane_id)}`
+            : '',
+          token,
+        });
+      }
+    } catch (error) {
+      errors.push({ account_id: account.id, account_name: account.name, error: error.message });
+    }
+  }
+
+  if (command === 'sync') {
+    const candidates = rows.filter((row) => row.kind === 'bound' && row.desired_name && row.name !== row.desired_name);
+    for (const row of candidates) {
+      row.action = apply ? 'updated' : 'would_update';
+      if (apply) {
+        await updateChatName(row.token, row.chat_id, row.desired_name);
+        updateBindingName(row.account_id, row.chat_id, row.desired_name);
+        row.name = row.desired_name;
+      }
+    }
+  }
+
+  if (command === 'cleanup') {
+    for (const row of rows.filter((item) => item.kind === 'orphan')) {
+      row.action = apply ? 'deleted' : 'would_delete';
+      if (apply) await deleteChat(row.token, row.chat_id);
+    }
+  }
+
+  const chats = rows.map(({ token, ...row }) => row);
+  const result = {
+    ok: errors.length === 0,
+    command,
+    dry_run: !apply,
+    prefix,
+    counts: {
+      matched: chats.length,
+      bound: chats.filter((r) => r.kind === 'bound').length,
+      orphan: chats.filter((r) => r.kind === 'orphan').length,
+      user_chat: chats.filter((r) => r.kind === 'user_chat').length,
+      direct: chats.filter((r) => r.kind === 'direct').length,
+      errors: errors.length,
+    },
+    chats,
+    errors,
+  };
+  output(result);
+  if (errors.length) process.exitCode = 4;
+} catch (error) {
+  fail(error.message, error.exitCode || 1);
+}
+
+function parseFlags(args) {
+  const out = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith('--')) fail(`unexpected argument: ${arg}`, 2);
+    const key = arg.slice(2);
+    if (['apply', 'json', 'allow-short-prefix'].includes(key)) out[key] = true;
+    else {
+      const value = args[++i];
+      if (value == null || value.startsWith('--')) fail(`--${key} requires a value`, 2);
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function textFlag(name) {
+  return typeof flags[name] === 'string' ? flags[name].trim() : '';
+}
+
+function sqlite(query) {
+  const run = spawnSync('sqlite3', ['-json', dbPath, query], { encoding: 'utf8' });
+  if (run.error?.code === 'ENOENT') throw Object.assign(new Error('sqlite3 is required'), { exitCode: 3 });
+  if (run.status !== 0) throw new Error(`sqlite3: ${(run.stderr || '').trim()}`);
+  const text = (run.stdout || '').trim();
+  return text ? JSON.parse(text) : [];
+}
+
+function loadAccounts() {
+  return sqlite(`SELECT id,COALESCE(name,'') AS name,COALESCE(secret,'') AS secret,
+    json_extract(config,'$.app_id') AS app_id
+    FROM im_accounts WHERE platform='feishu' AND COALESCE(enabled,1)=1 ORDER BY id`)
+    .filter((account) => accountFilter == null || account.id === accountFilter);
+}
+
+function loadBindings() {
+  return sqlite(`SELECT b.account_id,b.chat_id,COALESCE(b.binding_type,'') AS binding_type,
+    b.pane_id,COALESCE(c.title,'') AS agent_title
+    FROM im_chat_bindings b LEFT JOIN agent_config c ON c.pane_id=b.pane_id`);
+}
+
+async function tenantToken(account) {
+  if (!account.app_id || !account.secret) throw new Error('missing app_id/app_secret');
+  const response = await request('/open-apis/auth/v3/tenant_access_token/internal', {
+    method: 'POST',
+    body: { app_id: account.app_id, app_secret: account.secret },
+  });
+  if (!response.tenant_access_token) throw new Error(response.msg || 'tenant token unavailable');
+  return response.tenant_access_token;
+}
+
+async function listChats(token) {
+  const chats = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ page_size: '100', user_id_type: 'open_id' });
+    if (pageToken) query.set('page_token', pageToken);
+    const response = await request(`/open-apis/im/v1/chats?${query}`, { token });
+    chats.push(...(response.data?.items || []));
+    pageToken = response.data?.has_more ? (response.data?.page_token || '') : '';
+  } while (pageToken);
+  return chats;
+}
+
+async function updateChatName(token, chatID, name) {
+  await request(`/open-apis/im/v1/chats/${encodeURIComponent(chatID)}`, {
+    method: 'PUT', token, body: { name },
+  });
+}
+
+async function deleteChat(token, chatID) {
+  await request(`/open-apis/im/v1/chats/${encodeURIComponent(chatID)}`, {
+    method: 'DELETE', token,
+  });
+}
+
+async function request(path, options = {}) {
+  const base = process.env.FEISHU_BASE_URL || 'https://open.feishu.cn';
+  const headers = {};
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json; charset=utf-8';
+  const response = await fetch(base + path, {
+    method: options.method || 'GET',
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: AbortSignal.timeout(Number(process.env.FEISHU_TIMEOUT_MS || 20000)),
+  });
+  const text = await response.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch { throw new Error(`Feishu HTTP ${response.status}: ${text.slice(0, 200)}`); }
+  if (!response.ok || (data.code != null && data.code !== 0)) {
+    throw new Error(`Feishu code=${data.code ?? response.status}: ${data.msg || data.message || 'request failed'}`);
+  }
+  return data;
+}
+
+function updateBindingName(accountID, chatID, name) {
+  const escaped = (value) => `'${String(value).replaceAll("'", "''")}'`;
+  sqlite(`UPDATE im_chat_bindings SET chat_name=${escaped(name)},updated_at=datetime('now')
+    WHERE account_id=${Number(accountID)} AND chat_id=${escaped(chatID)}`);
+}
+
+function shortPane(paneID) {
+  return String(paneID || '').replace(/:.*$/, '');
+}
+
+function output(result) {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(`prefix=${result.prefix} dry_run=${result.dry_run} matched=${result.counts.matched} bound=${result.counts.bound} orphan=${result.counts.orphan} user_chat=${result.counts.user_chat}\n`);
+  for (const row of result.chats) {
+    process.stdout.write(`${row.kind.padEnd(10)} account=${row.account_id} chat=${row.chat_id} name=${JSON.stringify(row.name)}${row.action ? ` action=${row.action}` : ''}${row.pane_id ? ` pane=${row.pane_id}` : ''}\n`);
+  }
+  for (const error of result.errors) {
+    process.stderr.write(`account=${error.account_id} ${error.account_name}: ${error.error}\n`);
+  }
+}
+
+function printHelp() {
+  try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
+  catch { process.stdout.write('Usage: feishu-organize-chats <list|plan|sync|cleanup> --prefix <text> [--apply] [--json]\\n'); }
+}
+
+function fail(message, code = 1) {
+  if (typeof json !== 'undefined' && json) {
+    process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } })}\n`);
+  } else {
+    process.stderr.write(`feishu-organize-chats: ${message}\n`);
+  }
+  process.exit(code);
+}

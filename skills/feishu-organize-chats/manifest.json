@@ -1,0 +1,48 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "feishu-organize-chats",
+  "version": "0.1.0",
+  "title": "Feishu Organize Chats",
+  "description": "Audit, rename, and safely clean Feishu groups whose names start with a user-supplied prefix, preserving user chats and active cicy-code Agent bindings.",
+  "category": "productivity",
+  "tags": ["feishu", "lark", "chat", "cleanup", "agent"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/feishu-organize-chats",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=22"
+  },
+  "system_requirements": ["sqlite3", "cicy-code"],
+  "npm_dependencies": false,
+  "entry": "bin/feishu-organize-chats",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/db/data.db",
+    "secret_fields": ["im_accounts.secret"]
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "飞书会话整理",
+      "description": "按用户指定的名称前缀盘点、重命名并安全清理飞书群，保留用户会话和有效的 cicy-code Agent 绑定。"
+    }
+  },
+  "tools": [
+    {"name": "list", "example": "feishu-organize-chats list --prefix Alice", "description": "列出名称以指定前缀开头的飞书群及本地绑定状态"},
+    {"name": "plan", "example": "feishu-organize-chats plan --prefix Alice --json", "description": "生成保留、同步和孤儿清理计划，不修改飞书"},
+    {"name": "sync", "example": "feishu-organize-chats sync --prefix Alice --apply", "description": "把有效绑定群同步为 Agent Title · w-xxxxx；默认仅预览"},
+    {"name": "cleanup", "example": "feishu-organize-chats cleanup --prefix Alice --apply --confirm-prefix Alice", "description": "删除匹配前缀且由 cicy-code 创建的无绑定孤儿群；需要双重确认"}
+  ]
+}
