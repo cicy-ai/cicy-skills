@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "install-cicy-koubo-local-gpu",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "title": "安装 CiCy Koubo 本地 GPU",
   "description": "在 Windows WSL2 中安装、启动和诊断 CiCy Koubo 本地 NVIDIA GPU Docker；自动选择剩余空间最大的固定磁盘，使用 8771 API 且本地素材不经过 OSS。",
   "category": "system",
