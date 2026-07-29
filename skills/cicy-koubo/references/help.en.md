@@ -1,6 +1,15 @@
 # Command reference
 
 ```text
+cicy-koubo setup [--region cn-hangzhou] [--no-open]
+  Prepare the local UI, verify the Cicy Gateway key in global.json, select an
+  on-demand Cicy GPU, save the region, and start the workspace. This does not
+  download the 52 GB GPU image.
+
+cicy-koubo gpu cicy|local|colab [--region REGION]
+  Select temporary Cicy Cloud GPU, the user's local NVIDIA GPU, or the user's
+  Colab session. Restart a running workspace after changing provider.
+
 cicy-koubo install [--force]
   Run npx --yes cicy-koubo@latest --install-only. This downloads/caches the
   npm application and prepares Python/runtime dependencies without source.
@@ -55,3 +64,4 @@ Environment overrides for tests or non-default installations:
 - `CICY_KOUBO_STATE`
 - `CICY_KOUBO_LOG`
 - `CICY_KOUBO_PACKAGE`
+- `CICY_KOUBO_GLOBAL_CONFIG`

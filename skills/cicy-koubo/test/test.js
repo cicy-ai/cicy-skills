@@ -13,10 +13,14 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cicy-koubo-skill-'));
 const project = path.join(temp, 'project');
 const state = path.join(temp, 'runtime.json');
 const log = path.join(temp, 'runtime.log');
+const globalConfig = path.join(temp, 'global.json');
 fs.mkdirSync(path.join(project, 'bin'), { recursive: true });
 fs.writeFileSync(path.join(project, 'bin', 'cli.js'), '#!/usr/bin/env node\n');
 fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ version: '9.8.7' }));
 fs.writeFileSync(state, JSON.stringify({ port: 49155 }));
+fs.writeFileSync(globalConfig, JSON.stringify({
+  providers: { items: [{ url: 'https://gateway.cicy-ai.com', apiKey: 'sk-cicy-test' }] },
+}));
 
 function call(args) {
   return spawnSync(process.execPath, [bin, ...args], {
@@ -26,6 +30,7 @@ function call(args) {
       CICY_KOUBO_PROJECT: project,
       CICY_KOUBO_STATE: state,
       CICY_KOUBO_LOG: log,
+      CICY_KOUBO_GLOBAL_CONFIG: globalConfig,
     },
   });
 }
@@ -34,6 +39,16 @@ const help = call(['--help']);
 assert.equal(help.status, 0);
 assert.match(help.stdout, /cicy-koubo start/);
 assert.match(help.stdout, /cicy-koubo douyin/);
+assert.match(help.stdout, /cicy-koubo setup/);
+
+const gpu = call(['gpu', 'cicy', '--region', 'cn-hangzhou']);
+assert.equal(gpu.status, 0);
+const configured = JSON.parse(fs.readFileSync(globalConfig, 'utf8'));
+assert.equal(configured.koubo.gpu.provider, 'cicy_gpu');
+assert.equal(configured.koubo.gpu.region_id, 'cn-hangzhou');
+
+const badGpu = call(['gpu', 'unknown']);
+assert.equal(badGpu.status, 2);
 
 const installed = call(['install']);
 assert.equal(installed.status, 0);

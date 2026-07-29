@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-koubo",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "title": "Cicy Koubo",
-  "description": "Install the source-free cicy-koubo npm app and operate its complete spoken-video UI, runtime, GPU/Colab environment, and Electron profile 1 workflow.",
+  "description": "Install and operate the source-free cicy-koubo spoken-video app, defaulting to temporary Cicy Cloud GPUs while supporting optional local NVIDIA WSL2 and Colab workflows.",
   "category": "agent",
   "tags": [
     "koubo",
@@ -12,6 +12,8 @@
     "digital-human",
     "electron",
     "colab"
+    ,"cicy-gpu"
+    ,"wsl2"
   ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/cicy-koubo",
@@ -52,10 +54,20 @@
   "i18n": {
     "zh-CN": {
       "title": "口播工作台",
-      "description": "无源码安装并操作 cicy-koubo 完整口播工作流，识别 Mac、WSL、本机 GPU 与 Colab，固定使用 Electron profile 1。"
+      "description": "无源码安装并操作 cicy-koubo 口播工作流，默认使用按需创建和释放的 Cicy Cloud GPU，也支持 WSL2 本机 NVIDIA GPU 与 Colab。"
     }
   },
   "tools": [
+    {
+      "name": "setup",
+      "example": "cicy-koubo setup --region cn-hangzhou",
+      "description": "Install the local UI, select temporary Cicy Cloud GPU, and start the workspace"
+    },
+    {
+      "name": "gpu",
+      "example": "cicy-koubo gpu cicy --region cn-hangzhou",
+      "description": "Select Cicy Cloud, local NVIDIA, or Colab as the GPU provider"
+    },
     {
       "name": "install",
       "example": "cicy-koubo install",

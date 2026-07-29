@@ -1,6 +1,14 @@
 # 命令参考
 
 ```text
+cicy-koubo setup [--region cn-hangzhou] [--no-open]
+  最省事的首次安装：准备本地 UI，检查 global.json 中的 Cicy Gateway Key，
+  默认选择按需 Cicy GPU，保存地区并启动工作台。不会下载 52 GB GPU 镜像。
+
+cicy-koubo gpu cicy|local|colab [--region REGION]
+  选择 GPU provider。cicy 使用临时云 GPU；local 用用户自己的 NVIDIA GPU；
+  colab 使用用户自己的 Colab 会话。运行中的工作台需重启后应用新配置。
+
 cicy-koubo install [--force]
   运行 npx --yes cicy-koubo@latest --install-only。这将下载/缓存 npm 应用程序并准备 Python/运行时依赖项，但不包含源代码。
 
@@ -47,3 +55,4 @@ cicy-koubo doctor [--json]
 - `CICY_KOUBO_STATE`
 - `CICY_KOUBO_LOG`
 - `CICY_KOUBO_PACKAGE`
+- `CICY_KOUBO_GLOBAL_CONFIG`
