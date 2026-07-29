@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+// desktop-notify — send an OS desktop notification (mac Notification Center /
+// Windows toast) on a connected cicy-desktop, via agent-desktop's RPC channel.
+// Zero deps, Node 18+. Transport: shells out to the `agent-desktop` CLI.
+import { spawnSync } from 'node:child_process';
+
+const argv = process.argv.slice(2);
+
+function die(msg, code = 1) {
+  process.stderr.write(`desktop-notify: ${msg}\n`);
+  process.exit(code);
+}
+
+function runAD(args) {
+  const r = spawnSync('agent-desktop', args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  if (r.error) die(`agent-desktop CLI 不可用(需要已安装 agent-desktop skill): ${r.error.message}`);
+  return { code: r.status ?? 1, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
+}
+
+function parseFlags(args) {
+  const flags = {};
+  const pos = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json') flags.json = true;
+    else if (a === '--silent') flags.silent = true;
+    else if (a === '--no-focus') flags.noFocus = true;
+    else if (a === '--body') flags.body = args[++i];
+    else if (a === '--subtitle') flags.subtitle = args[++i];
+    else if (a === '--url') flags.url = args[++i];
+    else if (a === '--client') flags.client = args[++i];
+    else if (a.startsWith('--')) die(`未知参数 ${a}(见 desktop-notify help)`);
+    else pos.push(a);
+  }
+  return { flags, pos };
+}
+
+const HELP = `desktop-notify — 在连接的 cicy-desktop 上发系统桌面通知(mac 通知中心 / Windows toast)
+
+用法:
+  desktop-notify send <title> [--body <text>] [--subtitle <text>] [--url <url>]
+                      [--silent] [--no-focus] [--client <ID>] [--json]
+  desktop-notify status [--client <ID>] [--json]   # 桌面是否在线、notify 工具是否可用
+  desktop-notify help
+
+说明:
+  - 点击通知默认聚焦 CiCy Desktop 主窗口(--no-focus 关闭);--url 额外用系统浏览器打开。
+  - --subtitle 仅 macOS 显示;Windows toast 显示 title+body。
+  - 多台桌面时用 agent-desktop clients 拿 client_id,--client 指定;默认发给唯一/默认客户端。
+  - 旧版桌面(无 notify RPC)自动回退 exec_js 网页 Notification(能弹通知,但无点击聚焦)。
+`;
+
+const cmd = pos0();
+function pos0() { return argv[0]; }
+
+if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
+  process.stdout.write(HELP);
+  process.exit(0);
+}
+
+const { flags, pos } = parseFlags(argv.slice(1));
+const clientArgs = flags.client ? ['--client', flags.client] : [];
+
+if (cmd === 'status') {
+  const tools = runAD(['tools', '--names', ...clientArgs]);
+  if (tools.code !== 0) {
+    if (flags.json) process.stdout.write(JSON.stringify({ ok: false, reason: 'desktop unreachable', detail: tools.err || tools.out }) + '\n');
+    else process.stdout.write(`❌ 桌面不可达:${tools.err || tools.out}\n`);
+    process.exit(1);
+  }
+  const hasNotify = /\bnotify\b/.test(tools.out);
+  if (flags.json) process.stdout.write(JSON.stringify({ ok: true, notify_rpc: hasNotify, fallback: hasNotify ? null : 'exec_js web Notification' }) + '\n');
+  else process.stdout.write(hasNotify ? '✅ 桌面在线,notify RPC 可用\n' : '⚠️ 桌面在线,但无 notify RPC(将回退 exec_js 网页通知)\n');
+  process.exit(0);
+}
+
+if (cmd !== 'send') die(`未知命令 ${cmd}(见 desktop-notify help)`);
+
+const title = pos[0];
+if (!title) die('send 需要 <title>(见 desktop-notify help)');
+
+const payload = { title };
+if (flags.body) payload.body = flags.body;
+if (flags.subtitle) payload.subtitle = flags.subtitle;
+if (flags.url) payload.url = flags.url;
+if (flags.silent) payload.silent = true;
+if (flags.noFocus) payload.focus = false;
+
+const r = runAD(['rpc', 'notify', JSON.stringify(payload), ...clientArgs]);
+const combined = `${r.out}\n${r.err}`;
+
+if (r.code === 0 && !/not found|isError|Error:/i.test(combined)) {
+  if (flags.json) process.stdout.write((r.out || JSON.stringify({ ok: true })) + '\n');
+  else process.stdout.write(`✅ 已发送通知:${title}\n`);
+  process.exit(0);
+}
+
+// Fallback: older desktop without the notify tool — web Notification via exec_js.
+if (/not found/i.test(combined)) {
+  const code = `new Notification(${JSON.stringify(title)}, { body: ${JSON.stringify(flags.body || '')}, silent: ${!!flags.silent} }); return 'web-notify-shown'`;
+  const fb = runAD(['rpc', 'exec_js', JSON.stringify({ code }), ...clientArgs]);
+  if (fb.code === 0 && /web-notify-shown/.test(fb.out)) {
+    if (flags.json) process.stdout.write(JSON.stringify({ ok: true, via: 'exec_js-fallback', note: 'no click-to-focus' }) + '\n');
+    else process.stdout.write(`✅ 已发送通知(旧版桌面回退,无点击聚焦):${title}\n`);
+    process.exit(0);
+  }
+  die(`回退也失败了:${fb.err || fb.out}`);
+}
+
+die(`发送失败:${r.err || r.out}`);
