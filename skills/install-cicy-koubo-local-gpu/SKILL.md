@@ -19,6 +19,7 @@ description: 在 Windows WSL2 中安装、启动和诊断 CiCy Koubo 本地 NVID
 
 - 只支持 Windows、CiCy 专用 WSL 发行版 `cicy-code-wsl` 和 NVIDIA GPU。
 - 口播 UI 使用 8770；GPU API 使用 8771。
+- 安装器把 `cicy-code` 与 GPU 容器接入 `cicy-koubo-local` 网络；口播后端通过 `http://cicy-koubo-gpu:8771` 调用。
 - 本地任务用 multipart 直接传给本地 API，禁止申请 OSS 签名或上传 OSS。
 - 不自动删除镜像、状态目录或其他 Docker 容器。
 - 不输出或记录 `config.json` 中的访问 Token。

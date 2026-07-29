@@ -124,7 +124,19 @@ function start() {
   }
   wsl(`docker rm -f ${CONTAINER} >/dev/null 2>&1 || true`);
   wsl(
+    "docker network inspect cicy-koubo-local >/dev/null 2>&1 || " +
+    "docker network create cicy-koubo-local >/dev/null"
+  );
+  // Join the UI/backend container and GPU API to a private Docker network.
+  wsl(
+    "cicy_container=$(docker ps --format '{{.Names}}' | " +
+    "grep '^cicy-code-docker-' | head -1); " +
+    "test -z \"$cicy_container\" || docker network connect cicy-koubo-local " +
+    "\"$cicy_container\" >/dev/null 2>&1 || true"
+  );
+  wsl(
     `docker run -d --name ${CONTAINER} --restart unless-stopped --gpus all ` +
+    `--network cicy-koubo-local ` +
     `-p 127.0.0.1:${PORT}:${PORT} ` +
     `-e KOUBO_API_PORT=${PORT} -e CICY_KOUBO_ACCESS_TOKEN=${shQuote(config.token)} ` +
     `-v ${shQuote(state)}:/var/lib/cicy-koubo-api ${shQuote(config.image)}`
