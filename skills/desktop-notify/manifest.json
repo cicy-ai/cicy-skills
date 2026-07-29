@@ -1,0 +1,60 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "desktop-notify",
+  "version": "0.1.0",
+  "title": "Desktop Notify",
+  "description": "Send native macOS and Windows desktop notifications through a connected CiCy Desktop, with click-to-focus and optional URL opening.",
+  "category": "system",
+  "tags": [
+    "notify",
+    "desktop",
+    "electron",
+    "mac",
+    "windows"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/desktop-notify",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "agent-desktop"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/desktop-notify",
+  "permissions": [
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "桌面通知",
+      "description": "通过已连接的 CiCy Desktop 发送 macOS 和 Windows 原生桌面通知，支持点击聚焦窗口和打开 URL。"
+    }
+  },
+  "tools": [
+    {
+      "name": "send",
+      "example": "desktop-notify send \"Build complete\" --body \"Version 2.3.316 is ready\"",
+      "description": "Send a native desktop notification to the default or selected desktop client"
+    },
+    {
+      "name": "status",
+      "example": "desktop-notify status --json",
+      "description": "Check desktop connectivity and native notification RPC availability"
+    }
+  ]
+}
