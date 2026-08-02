@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+import { main } from '../lib/cli.mjs';
+main({ command: 'cicy-cosyvoice', engine: 'cosyvoice', envPrefix: 'CICY_COSYVOICE', version: 'CosyVoice2-0.5B', minGpuMb: 8000, minDiskGiB: 15, gpuOptional: false, pathOptions: ['--ref'], forbiddenOptions: ['--out'], criticalFiles: [{ path: 'COSY_READY' }, { path: 'CosyVoice/pretrained_models/CosyVoice2-0.5B/llm.pt', minBytes: 1000000 }], hashFiles: ['COSY_READY'], summary: 'Install and run voice-cloning TTS on a Colab or Linux GPU worker' }, import.meta.url);

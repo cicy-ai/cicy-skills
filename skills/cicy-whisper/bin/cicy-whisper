@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+import { main } from '../lib/cli.mjs';
+main({ command: 'cicy-whisper', engine: 'whisper', envPrefix: 'CICY_WHISPER', version: 'faster-whisper-1.1.1', minGpuMb: 0, minDiskGiB: 8, gpuOptional: true, positionalInputCount: 1, maxPositionals: 1, forbiddenOptions: ['--out', '--out-dir'], criticalFiles: [{ path: 'WHISPER_READY' }, { path: 'transcribe.py' }], hashFiles: ['WHISPER_READY', 'transcribe.py'], summary: 'Install and run speech transcription with optional GPU acceleration' }, import.meta.url);
