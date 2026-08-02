@@ -1,0 +1,135 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const args = process.argv.slice(2);
+
+function fail(message, code = 1) {
+  process.stderr.write(`cicy-agent-role: ${message}\n`);
+  process.exit(code);
+}
+
+function help() {
+  process.stdout.write(`cicy-agent-role — create and validate CiCy Agent role templates
+
+Usage:
+  cicy-agent-role create <slug> --spec <role.json> [--root <dir>] [--force]
+  cicy-agent-role validate <slug-or-dir> [--root <dir>]
+  cicy-agent-role list [--root <dir>]
+
+Default root:
+  ~/cicy-ai/memory/agents
+
+Spec JSON fields:
+  name, name_zh, tools[], greeting, greeting_zh, role, role_zh, system
+`);
+}
+
+function expandHome(value) {
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+  return path.resolve(value);
+}
+
+function option(name, fallback = '') {
+  const index = args.indexOf(name);
+  return index >= 0 ? (args[index + 1] || fail(`${name} requires a value`, 2)) : fallback;
+}
+
+function rootDir() {
+  return expandHome(option('--root', process.env.CICY_AGENT_ROLE_ROOT || '~/cicy-ai/memory/agents'));
+}
+
+function cleanSlug(value) {
+  const slug = String(value || '').trim();
+  if (!slug || !/^[A-Za-z0-9._\u3400-\u9fff-]+$/u.test(slug) || slug === '.' || slug === '..') {
+    fail('slug must contain only letters, digits, Chinese characters, dot, underscore, or hyphen', 2);
+  }
+  return slug;
+}
+
+function yamlBlock(value, indent = '  ') {
+  const text = String(value || '').trim();
+  return `|\n${text.split('\n').map(line => indent + line).join('\n')}`;
+}
+
+function yamlScalar(value) {
+  return JSON.stringify(String(value || '').trim());
+}
+
+function templateDir(target) {
+  if (target.includes('/') || target.startsWith('.')) return path.resolve(target);
+  return path.join(rootDir(), cleanSlug(target));
+}
+
+function readRequired(file) {
+  try { return fs.readFileSync(file, 'utf8'); }
+  catch { fail(`missing required file: ${file}`); }
+}
+
+function validate(dir, quiet = false) {
+  const required = ['meta.yaml', 'role.md', 'role.zh.md', 'system.md'];
+  const contents = Object.fromEntries(required.map(file => [file, readRequired(path.join(dir, file))]));
+  const errors = [];
+  for (const key of ['profile:', 'tools:', 'name:', 'name_zh:', 'greeting:', 'greeting_zh:']) {
+    if (!contents['meta.yaml'].includes(key)) errors.push(`meta.yaml missing ${key.slice(0, -1)}`);
+  }
+  if (!/^profile:\s*assistant\s*$/m.test(contents['meta.yaml'])) errors.push('meta.yaml profile must be assistant');
+  if (!/^tools:\s*\[[^\]]+\]\s*$/m.test(contents['meta.yaml'])) errors.push('meta.yaml tools must be a non-empty inline list');
+  for (const file of ['role.md', 'role.zh.md', 'system.md']) {
+    if (contents[file].trim().length < 40) errors.push(`${file} is too short`);
+    if (/\bTODO\b|待填写|replace me/i.test(contents[file])) errors.push(`${file} contains a placeholder`);
+  }
+  if (errors.length) fail(`invalid template ${dir}:\n- ${errors.join('\n- ')}`);
+  if (!quiet) process.stdout.write(`valid ${dir}\n`);
+  return true;
+}
+
+function create() {
+  const slug = cleanSlug(args[1]);
+  const specPath = option('--spec');
+  if (!specPath) fail('create requires --spec <role.json>', 2);
+  let spec;
+  try { spec = JSON.parse(fs.readFileSync(expandHome(specPath), 'utf8')); }
+  catch (error) { fail(`cannot read spec: ${error.message}`, 2); }
+  const required = ['name', 'name_zh', 'greeting', 'greeting_zh', 'role', 'role_zh', 'system'];
+  const missing = required.filter(key => !String(spec[key] || '').trim());
+  if (missing.length) fail(`spec missing: ${missing.join(', ')}`, 2);
+  if (!Array.isArray(spec.tools) || !spec.tools.length || spec.tools.some(x => !/^[a-z0-9_-]+$/i.test(String(x)))) {
+    fail('spec tools must be a non-empty array of tool/profile identifiers', 2);
+  }
+  const dir = path.join(rootDir(), slug);
+  if (fs.existsSync(dir) && !args.includes('--force')) fail(`template exists: ${dir} (use --force to overwrite)`, 3);
+  fs.mkdirSync(dir, { recursive: true });
+  const meta = [
+    'profile: assistant',
+    `tools: [${spec.tools.join(', ')}]`,
+    `name: ${yamlScalar(spec.name)}`,
+    `name_zh: ${yamlScalar(spec.name_zh)}`,
+    `greeting: ${yamlBlock(spec.greeting)}`,
+    `greeting_zh: ${yamlBlock(spec.greeting_zh)}`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(dir, 'meta.yaml'), meta, 'utf8');
+  fs.writeFileSync(path.join(dir, 'role.md'), String(spec.role).trim() + '\n', 'utf8');
+  fs.writeFileSync(path.join(dir, 'role.zh.md'), String(spec.role_zh).trim() + '\n', 'utf8');
+  fs.writeFileSync(path.join(dir, 'system.md'), String(spec.system).trim() + '\n', 'utf8');
+  validate(dir, true);
+  process.stdout.write(JSON.stringify({ ok: true, slug, dir, files: ['meta.yaml', 'role.md', 'role.zh.md', 'system.md'] }) + '\n');
+}
+
+function list() {
+  const root = rootDir();
+  if (!fs.existsSync(root)) return;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (entry.isDirectory() && fs.existsSync(path.join(root, entry.name, 'role.md'))) process.stdout.write(entry.name + '\n');
+  }
+}
+
+const command = args[0];
+if (!command || command === '--help' || command === '-h' || command === 'help') help();
+else if (command === 'create') create();
+else if (command === 'validate') validate(templateDir(args[1] || fail('validate requires <slug-or-dir>', 2)));
+else if (command === 'list') list();
+else fail(`unknown command: ${command}`, 2);
