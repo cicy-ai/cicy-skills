@@ -1,0 +1,16 @@
+# Paths and files
+
+Default template root:
+
+```text
+~/cicy-ai/memory/agents
+```
+
+Each role contains exactly these required files:
+
+- `meta.yaml`: profile, tools, display names, and greetings.
+- `role.md`: English persona, duties, boundaries, and behavior.
+- `role.zh.md`: Chinese equivalent of `role.md`.
+- `system.md`: shared operating base for the role.
+
+Override the root with `--root` or `CICY_AGENT_ROLE_ROOT`. `create` refuses to overwrite by default; use `--force` only after inspecting the existing role.
