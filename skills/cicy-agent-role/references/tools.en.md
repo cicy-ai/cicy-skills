@@ -14,3 +14,5 @@ Each role contains exactly these required files:
 - `system.md`: shared operating base for the role.
 
 Override the root with `--root` or `CICY_AGENT_ROLE_ROOT`. `create` refuses to overwrite by default; use `--force` only after inspecting the existing role.
+
+Market-managed roles also contain `.cicy-role.json` and `.cicy-role/base/<version>/` for provenance, hashes, and safe update conflict detection. These internal files are not part of the four-file role contract consumed by CiCy.

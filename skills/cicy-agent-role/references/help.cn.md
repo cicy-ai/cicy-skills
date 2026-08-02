@@ -32,3 +32,18 @@ cicy-agent-role validate <slug或目录> [--root <目录>]
 ```sh
 cicy-agent-role list [--root <目录>]
 ```
+
+## 公共角色市场
+
+```sh
+cicy-agent-role market [关键词]
+cicy-agent-role search <关键词>
+cicy-agent-role info <slug>
+cicy-agent-role install <slug>
+cicy-agent-role diff <slug>
+cicy-agent-role update <slug>
+```
+
+默认市场是公共 GitHub 仓库 `cicy-ai/cicy-agent-roles`。测试或私有兼容市场可通过 `CICY_AGENT_ROLE_REGISTRY` 更换。
+
+如果本地和上游同时修改同一文件，更新不会覆盖本地内容；它会写入 `<文件>.upstream`、记录冲突并以退出码 4 结束。

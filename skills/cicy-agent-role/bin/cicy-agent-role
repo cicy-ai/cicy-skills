@@ -1,9 +1,13 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
+const STANDARD_FILES = ['meta.yaml', 'role.md', 'role.zh.md', 'system.md'];
+const DEFAULT_REGISTRY = 'https://raw.githubusercontent.com/cicy-ai/cicy-agent-roles/main/registry.json';
 
 function fail(message, code = 1) {
   process.stderr.write(`cicy-agent-role: ${message}\n`);
@@ -11,18 +15,23 @@ function fail(message, code = 1) {
 }
 
 function help() {
-  process.stdout.write(`cicy-agent-role — create and validate CiCy Agent role templates
+  process.stdout.write(`cicy-agent-role — create, validate, and install CiCy Agent roles
 
-Usage:
+Local templates:
   cicy-agent-role create <slug> --spec <role.json> [--root <dir>] [--force]
   cicy-agent-role validate <slug-or-dir> [--root <dir>]
   cicy-agent-role list [--root <dir>]
 
-Default root:
-  ~/cicy-ai/memory/agents
+Role Market:
+  cicy-agent-role market [query]
+  cicy-agent-role search <query>
+  cicy-agent-role info <slug>
+  cicy-agent-role install <slug> [--force]
+  cicy-agent-role update <slug>
+  cicy-agent-role diff <slug>
 
-Spec JSON fields:
-  name, name_zh, tools[], greeting, greeting_zh, role, role_zh, system
+Default role root: ~/cicy-ai/memory/agents
+Registry override: CICY_AGENT_ROLE_REGISTRY
 `);
 }
 
@@ -44,7 +53,7 @@ function rootDir() {
 function cleanSlug(value) {
   const slug = String(value || '').trim();
   if (!slug || !/^[A-Za-z0-9._\u3400-\u9fff-]+$/u.test(slug) || slug === '.' || slug === '..') {
-    fail('slug must contain only letters, digits, Chinese characters, dot, underscore, or hyphen', 2);
+    fail('invalid role slug', 2);
   }
   return slug;
 }
@@ -59,7 +68,7 @@ function yamlScalar(value) {
 }
 
 function templateDir(target) {
-  if (target.includes('/') || target.startsWith('.')) return path.resolve(target);
+  if (String(target).includes('/') || String(target).startsWith('.')) return path.resolve(target);
   return path.join(rootDir(), cleanSlug(target));
 }
 
@@ -68,9 +77,12 @@ function readRequired(file) {
   catch { fail(`missing required file: ${file}`); }
 }
 
+function shaFile(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
 function validate(dir, quiet = false) {
-  const required = ['meta.yaml', 'role.md', 'role.zh.md', 'system.md'];
-  const contents = Object.fromEntries(required.map(file => [file, readRequired(path.join(dir, file))]));
+  const contents = Object.fromEntries(STANDARD_FILES.map(file => [file, readRequired(path.join(dir, file))]));
   const errors = [];
   for (const key of ['profile:', 'tools:', 'name:', 'name_zh:', 'greeting:', 'greeting_zh:']) {
     if (!contents['meta.yaml'].includes(key)) errors.push(`meta.yaml missing ${key.slice(0, -1)}`);
@@ -103,20 +115,16 @@ function create() {
   if (fs.existsSync(dir) && !args.includes('--force')) fail(`template exists: ${dir} (use --force to overwrite)`, 3);
   fs.mkdirSync(dir, { recursive: true });
   const meta = [
-    'profile: assistant',
-    `tools: [${spec.tools.join(', ')}]`,
-    `name: ${yamlScalar(spec.name)}`,
-    `name_zh: ${yamlScalar(spec.name_zh)}`,
-    `greeting: ${yamlBlock(spec.greeting)}`,
-    `greeting_zh: ${yamlBlock(spec.greeting_zh)}`,
-    '',
+    'profile: assistant', `tools: [${spec.tools.join(', ')}]`,
+    `name: ${yamlScalar(spec.name)}`, `name_zh: ${yamlScalar(spec.name_zh)}`,
+    `greeting: ${yamlBlock(spec.greeting)}`, `greeting_zh: ${yamlBlock(spec.greeting_zh)}`, '',
   ].join('\n');
-  fs.writeFileSync(path.join(dir, 'meta.yaml'), meta, 'utf8');
-  fs.writeFileSync(path.join(dir, 'role.md'), String(spec.role).trim() + '\n', 'utf8');
-  fs.writeFileSync(path.join(dir, 'role.zh.md'), String(spec.role_zh).trim() + '\n', 'utf8');
-  fs.writeFileSync(path.join(dir, 'system.md'), String(spec.system).trim() + '\n', 'utf8');
+  fs.writeFileSync(path.join(dir, 'meta.yaml'), meta);
+  fs.writeFileSync(path.join(dir, 'role.md'), String(spec.role).trim() + '\n');
+  fs.writeFileSync(path.join(dir, 'role.zh.md'), String(spec.role_zh).trim() + '\n');
+  fs.writeFileSync(path.join(dir, 'system.md'), String(spec.system).trim() + '\n');
   validate(dir, true);
-  process.stdout.write(JSON.stringify({ ok: true, slug, dir, files: ['meta.yaml', 'role.md', 'role.zh.md', 'system.md'] }) + '\n');
+  process.stdout.write(JSON.stringify({ ok: true, slug, dir, files: STANDARD_FILES }) + '\n');
 }
 
 function list() {
@@ -127,9 +135,183 @@ function list() {
   }
 }
 
+async function fetchWithRetry(url, options = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, { ...options, signal: AbortSignal.timeout(15000) });
+      if (response.ok || response.status < 500) return response;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) { lastError = error; }
+    if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 500));
+  }
+  throw lastError;
+}
+
+function curlBuffer(url) {
+  const result = spawnSync('curl', ['-fsSL', '--retry', '3', '--connect-timeout', '15', url], {
+    encoding: null, maxBuffer: 20 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(Buffer.from(result.stderr || '').toString('utf8').trim() || 'curl failed');
+  return Buffer.from(result.stdout);
+}
+
+async function registry() {
+  const url = process.env.CICY_AGENT_ROLE_REGISTRY || DEFAULT_REGISTRY;
+  let data;
+  try {
+    const response = await fetchWithRetry(url, { headers: { accept: 'application/json' } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    data = await response.json();
+  } catch (fetchError) {
+    try { data = JSON.parse(curlBuffer(url).toString('utf8')); }
+    catch (curlError) { fail(`registry unavailable: ${fetchError.message}; ${curlError.message}`, 5); }
+  }
+  if (!Array.isArray(data.roles)) fail('invalid registry response', 5);
+  return { ...data, url };
+}
+
+function matchingRoles(roles, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return roles;
+  return roles.filter(role => [role.slug, role.name, role.name_zh, role.description, role.description_zh, ...(role.tags || [])]
+    .some(value => String(value || '').toLowerCase().includes(q)));
+}
+
+async function market(query = '') {
+  const data = await registry();
+  const roles = matchingRoles(data.roles, query);
+  for (const role of roles) {
+    process.stdout.write(`${role.slug}\t${role.version}\t${role.name_zh || role.name}\t${role.description_zh || role.description}\n`);
+  }
+}
+
+async function roleEntry(slug) {
+  const data = await registry();
+  const role = data.roles.find(item => item.slug === cleanSlug(slug));
+  if (!role) fail(`role not found in market: ${slug}`, 6);
+  return { role, registryUrl: data.url };
+}
+
+async function info(slug) {
+  const { role } = await roleEntry(slug);
+  process.stdout.write(JSON.stringify(role, null, 2) + '\n');
+}
+
+async function downloadPackage(role) {
+  if (!role.download_url || !/^[a-f0-9]{64}$/.test(role.sha256 || '')) fail(`role ${role.slug} is not published yet`, 6);
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), `cicy-role-${role.slug}-`));
+  const archive = path.join(temp, 'role.tar.gz');
+  const unpack = path.join(temp, 'unpack');
+  fs.mkdirSync(unpack);
+  try {
+    const response = await fetchWithRetry(role.download_url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    fs.writeFileSync(archive, Buffer.from(await response.arrayBuffer()));
+  } catch (fetchError) {
+    try { fs.writeFileSync(archive, curlBuffer(role.download_url)); }
+    catch (curlError) { fail(`download failed: ${fetchError.message}; ${curlError.message}`, 5); }
+  }
+  if (shaFile(archive) !== role.sha256) fail('download sha256 mismatch', 7);
+  const extracted = spawnSync('tar', ['-xzf', archive, '-C', unpack], { encoding: 'utf8' });
+  if (extracted.status !== 0) fail(`cannot extract role: ${extracted.stderr || extracted.stdout}`, 7);
+  validate(unpack, true);
+  return { temp, unpack };
+}
+
+function metadataPath(dir) { return path.join(dir, '.cicy-role.json'); }
+
+function writeMetadata(dir, metadata) {
+  fs.writeFileSync(metadataPath(dir), JSON.stringify(metadata, null, 2) + '\n');
+}
+
+function snapshotBase(dir, version, source) {
+  const base = path.join(dir, '.cicy-role', 'base', version);
+  fs.mkdirSync(base, { recursive: true });
+  for (const file of STANDARD_FILES) fs.copyFileSync(path.join(source, file), path.join(base, file));
+}
+
+async function install(slug) {
+  const { role, registryUrl } = await roleEntry(slug);
+  const dir = path.join(rootDir(), role.slug);
+  if (fs.existsSync(dir) && !args.includes('--force')) fail(`target exists: ${dir}; use update for managed roles or --force to replace`, 3);
+  const { temp, unpack } = await downloadPackage(role);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    for (const file of STANDARD_FILES) fs.copyFileSync(path.join(unpack, file), path.join(dir, file));
+    snapshotBase(dir, role.version, unpack);
+    writeMetadata(dir, {
+      source: 'public', registry: registryUrl, slug: role.slug, version: role.version,
+      sha256: role.sha256, file_hashes: Object.fromEntries(STANDARD_FILES.map(file => [file, shaFile(path.join(unpack, file))])),
+      installed_at: new Date().toISOString(), conflicts: [],
+    });
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+  process.stdout.write(`installed ${role.slug}@${role.version} -> ${dir}\n`);
+}
+
+function readMetadata(dir) {
+  try { return JSON.parse(fs.readFileSync(metadataPath(dir), 'utf8')); }
+  catch { fail(`role is not market-managed: ${dir}`, 3); }
+}
+
+async function update(slug) {
+  const dir = path.join(rootDir(), cleanSlug(slug));
+  const old = readMetadata(dir);
+  const { role, registryUrl } = await roleEntry(slug);
+  if (old.version === role.version && !(old.conflicts || []).length) {
+    process.stdout.write(`${slug} is current at ${role.version}\n`);
+    return;
+  }
+  const { temp, unpack } = await downloadPackage(role);
+  const conflicts = [];
+  const newHashes = {};
+  try {
+    for (const file of STANDARD_FILES) {
+      const localPath = path.join(dir, file);
+      const upstreamPath = path.join(unpack, file);
+      const localHash = fs.existsSync(localPath) ? shaFile(localPath) : '';
+      const oldHash = old.file_hashes?.[file] || '';
+      const newHash = shaFile(upstreamPath);
+      newHashes[file] = newHash;
+      if (!localHash || localHash === oldHash) {
+        fs.copyFileSync(upstreamPath, localPath);
+      } else if (newHash !== oldHash) {
+        fs.copyFileSync(upstreamPath, localPath + '.upstream');
+        conflicts.push(file);
+      }
+    }
+    snapshotBase(dir, role.version, unpack);
+    writeMetadata(dir, {
+      ...old, registry: registryUrl, version: role.version, sha256: role.sha256,
+      file_hashes: newHashes, updated_at: new Date().toISOString(), conflicts,
+    });
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+  if (conflicts.length) fail(`updated ${slug}@${role.version} with conflicts: ${conflicts.join(', ')}; local files kept, review *.upstream`, 4);
+  process.stdout.write(`updated ${slug} ${old.version} -> ${role.version}\n`);
+}
+
+function diff(slug) {
+  const dir = path.join(rootDir(), cleanSlug(slug));
+  const meta = readMetadata(dir);
+  let changed = 0;
+  for (const file of STANDARD_FILES) {
+    const current = fs.existsSync(path.join(dir, file)) ? shaFile(path.join(dir, file)) : '';
+    const state = current === (meta.file_hashes?.[file] || '') ? 'clean' : 'modified';
+    if (state === 'modified') changed++;
+    process.stdout.write(`${state}\t${file}${fs.existsSync(path.join(dir, file + '.upstream')) ? '\tupstream-pending' : ''}\n`);
+  }
+  process.exitCode = changed ? 4 : 0;
+}
+
 const command = args[0];
 if (!command || command === '--help' || command === '-h' || command === 'help') help();
 else if (command === 'create') create();
 else if (command === 'validate') validate(templateDir(args[1] || fail('validate requires <slug-or-dir>', 2)));
 else if (command === 'list') list();
+else if (command === 'market') await market(args[1] || '');
+else if (command === 'search') await market(args.slice(1).filter(x => !x.startsWith('--')).join(' ') || fail('search requires a query', 2));
+else if (command === 'info') await info(args[1] || fail('info requires a slug', 2));
+else if (command === 'install') await install(args[1] || fail('install requires a slug', 2));
+else if (command === 'update') await update(args[1] || fail('update requires a slug', 2));
+else if (command === 'diff') diff(args[1] || fail('diff requires a slug', 2));
 else fail(`unknown command: ${command}`, 2);
