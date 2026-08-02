@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { runSkill, assert, finish } from '../../../tools/test-helper.js';
 
 const D = new URL('..', import.meta.url).pathname;
@@ -37,6 +39,44 @@ assert('create refuses accidental overwrite', duplicate.status !== 0);
 
 const listed = runSkill(D, ['list', '--root', root]);
 assert('list includes generated role', listed.stdout.includes('sales-assistant'));
+
+function marketEnv(version, roleText) {
+  const packageDir = path.join(temp, `package-${version}`);
+  fs.mkdirSync(packageDir);
+  for (const file of ['meta.yaml', 'role.zh.md', 'system.md']) {
+    fs.copyFileSync(path.join(root, 'sales-assistant', file), path.join(packageDir, file));
+  }
+  fs.writeFileSync(path.join(packageDir, 'role.md'), roleText);
+  const archive = path.join(temp, `market-role-${version}.tar.gz`);
+  const packed = spawnSync('tar', ['-czf', archive, '-C', packageDir, 'meta.yaml', 'role.md', 'role.zh.md', 'system.md']);
+  if (packed.status !== 0) throw new Error('test tar failed');
+  const bytes = fs.readFileSync(archive);
+  const entry = {
+    slug: 'market-role', version, name: 'Market Role', name_zh: '市场角色',
+    description: 'A deterministic role used by the marketplace tests.',
+    description_zh: '用于市场测试的确定性角色。', tags: ['test'],
+    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    download_url: `data:application/gzip;base64,${bytes.toString('base64')}`,
+  };
+  return { CICY_AGENT_ROLE_REGISTRY: `data:application/json,${encodeURIComponent(JSON.stringify({ roles: [entry] }))}` };
+}
+
+const marketRoot = path.join(temp, 'market-root');
+const roleV1 = '# Role\n\nThis is the first marketplace role version with enough content for deterministic validation and installation.\n';
+const envV1 = marketEnv('1.0.0', roleV1);
+const marketList = runSkill(D, ['market', 'market'], envV1);
+assert('market search returns matching role', marketList.stdout.includes('market-role'));
+const installed = runSkill(D, ['install', 'market-role', '--root', marketRoot], envV1);
+assert('market role installs', installed.status === 0);
+assert('install writes provenance metadata', fs.existsSync(path.join(marketRoot, 'market-role', '.cicy-role.json')));
+
+const localRole = path.join(marketRoot, 'market-role', 'role.md');
+fs.appendFileSync(localRole, '\nLocal user customization must survive.\n');
+const envV2 = marketEnv('1.1.0', '# Role\n\nThis upstream role changed in version two and contains enough content for deterministic conflict validation.\n');
+const updated = runSkill(D, ['update', 'market-role', '--root', marketRoot], envV2);
+assert('conflicting update exits 4', updated.status === 4);
+assert('conflicting update preserves local edit', fs.readFileSync(localRole, 'utf8').includes('Local user customization'));
+assert('conflicting update writes upstream candidate', fs.existsSync(localRole + '.upstream'));
 
 fs.rmSync(temp, { recursive: true, force: true });
 finish();

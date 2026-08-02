@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent-role",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "CiCy Agent Role",
-  "description": "Create and validate standard CiCy Agent role templates with meta.yaml, role.md, role.zh.md, and system.md. Use when building or checking reusable roles for the Create Agent dialog.",
+  "description": "Create, validate, search, install, and safely update CiCy Agent role templates. Use when building reusable roles for the Create Agent dialog or managing roles from the public Agent Role Market.",
   "category": "agent",
   "tags": ["agent", "role", "persona", "template"],
   "author": "cicy",
@@ -12,7 +12,7 @@
   "system_requirements": [],
   "npm_dependencies": false,
   "entry": "bin/cicy-agent-role",
-  "permissions": ["filesystem:home", "filesystem:tmp"],
+  "permissions": ["network", "filesystem:home", "filesystem:tmp", "process:spawn"],
   "compatible_agents": ["*"],
   "files": {
     "skill_md": "SKILL.md",

@@ -34,3 +34,18 @@ cicy-agent-role validate <slug-or-directory> [--root <dir>]
 ```sh
 cicy-agent-role list [--root <dir>]
 ```
+
+## Public Role Market
+
+```sh
+cicy-agent-role market [query]
+cicy-agent-role search <query>
+cicy-agent-role info <slug>
+cicy-agent-role install <slug>
+cicy-agent-role diff <slug>
+cicy-agent-role update <slug>
+```
+
+The default registry is the public `cicy-ai/cicy-agent-roles` GitHub repository. Override it with `CICY_AGENT_ROLE_REGISTRY` for testing or a compatible private registry.
+
+An update never overwrites a locally modified file when upstream also changed. It keeps the local file, writes `<file>.upstream`, records the conflict, and exits 4.

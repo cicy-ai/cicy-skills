@@ -14,3 +14,5 @@
 - `system.md`：该角色共用的系统运行基座。
 
 通过 `--root` 或 `CICY_AGENT_ROLE_ROOT` 更改根目录。`create` 默认拒绝覆盖；检查旧模板后才能使用 `--force`。
+
+市场安装的角色还包含 `.cicy-role.json` 和 `.cicy-role/base/<version>/`，用于记录来源、哈希和安全更新。CiCy 实际消费的角色契约仍然只有上面的四个文件。
