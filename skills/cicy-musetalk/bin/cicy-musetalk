@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+import { main } from '../lib/cli.mjs';
+main({ command: 'cicy-musetalk', engine: 'musetalk', envPrefix: 'CICY_MUSETALK', version: 'MuseTalk-1.5', minGpuMb: 8000, minDiskGiB: 20, gpuOptional: false, positionalInputCount: 2, maxPositionals: 2, forbiddenOptions: ['--out'], criticalFiles: [{ path: 'READY' }, { path: 'MuseTalk/models/musetalkV15/unet.pth', minBytes: 1000000 }], hashFiles: ['READY', 'MuseTalk/models/musetalkV15/musetalk.json'], summary: 'Install and run lip-sync video generation on a Colab or Linux GPU worker' }, import.meta.url);
