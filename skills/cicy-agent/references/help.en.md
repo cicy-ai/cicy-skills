@@ -58,6 +58,7 @@ cicy-agent cloud ls [--all]                  List Cloud teams with nested Agents
 cicy-agent cloud agents [--all]              Flat Cloud Agent address list.
 cicy-agent msg <team.agent> <text>            A team-qualified target automatically routes through
                                               CiCy Cloud; no target instance token is required.
+                                              Waits by default and prints msg → done plus the reply.
 
 cicy-agent --json ...                         JSON output mode
 cicy-agent --help / -h / help

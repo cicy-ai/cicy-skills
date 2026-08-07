@@ -57,7 +57,8 @@ cicy-agent cloud ls [--all]                  按 Team 分组列出 Cloud Agents�
                                               --all 包含离线 Team。
 cicy-agent cloud agents [--all]              平铺列出 Cloud Agent 完整地址。
 cicy-agent msg <team.agent> <消息>            带 Team 前缀的目标自动通过 CiCy Cloud 路由；
-                                              不需要目标 Instance Token。
+                                              不需要目标 Instance Token。默认等待并输出
+                                              msg → done 和关联回复。
 
 cicy-agent --json ...                         JSON 输出模式
 cicy-agent --help / -h / help

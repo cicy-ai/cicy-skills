@@ -295,7 +295,10 @@ async function cmdMsg(args, node) {
       const result = await sendCloudMessage(cloudTarget, text, { waitForReply, waitSeconds });
       if (json) return ok(result);
       console.log(`sent → ${pane}  msg_id=${result.messageId}`);
-      if (result.reply) console.log(`${pane}: ${result.reply.text}`);
+      if (result.reply) {
+        console.log(`🔔 [${pane}] msg ${result.messageId} → done`);
+        console.log(`${pane}: ${result.reply.text}`);
+      }
       else if (waitForReply) console.log(`(no reply within ${waitSeconds}s; use --no-wait to send asynchronously)`);
       return;
     }
