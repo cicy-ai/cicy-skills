@@ -21,18 +21,21 @@ if (argv.length === 0 || argv.includes('--help') || argv[0] === '-h' || argv[0] 
   process.exit(0);
 }
 
-const json = argv.includes('--json');
-const cmd = argv[0];
-const rest = argv.slice(1).filter((a) => a !== '--json');
+const globalArgs = extractGlobalArgs(argv);
+const json = globalArgs.json;
+const cmd = globalArgs.args[0];
+const rest = globalArgs.args.slice(1);
 
 const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
+const CLOUD_DEVICE_JSON = process.env.CICY_CLOUD_DEVICE_JSON || join(homedir(), 'cicy-ai', 'db', 'cloud-device.json');
 const NODES_JSON = process.env.CICY_AGENT_JSON || join(homedir(), 'cicy-ai', 'db', 'cicy-agent.json');
 const API_PORT = process.env.CICY_API_PORT || '8008';
 const API_BASE = `http://127.0.0.1:${API_PORT}`;
 
 (async () => {
   try {
-    const { rest: r2, node } = extractNode(rest);
+    const { rest: r2, node: trailingNode } = extractNode(rest);
+    const node = globalArgs.node || trailingNode;
     switch (cmd) {
       case 'tools':              printTools(); return;
       case 'list':               await cmdList(r2, node); break;
@@ -53,6 +56,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'fork':               await cmdFork(r2, node); break;
       case 'create': case 'new':  await cmdCreate(r2, node); break;
       case 'team':               await cmdTeam(r2); break;
+      case 'cloud':              await cmdCloud(r2); break;
       default: bail(`unknown command: ${cmd}. Try cicy-agent --help.`, 2);
     }
   } catch (e) {
@@ -76,6 +80,20 @@ function printHelp() {
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
   catch { process.stdout.write('# cicy-agent tools\n'); }
+}
+
+function extractGlobalArgs(args) {
+  let node = '', jsonMode = false;
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--json') { jsonMode = true; continue; }
+    if (args[i] === '--team' || args[i] === '-T' || args[i] === '--node' || args[i] === '-n') {
+      node = args[++i] || '';
+      continue;
+    }
+    rest.push(args[i]);
+  }
+  return { args: rest, node, json: jsonMode };
 }
 
 function extractNode(args) {
@@ -117,6 +135,37 @@ function loadLocalToken() {
   catch (e) { throw Object.assign(new Error(`failed to parse ${GLOBAL_JSON}: ${e.message}`), { exitCode: 3 }); }
   if (!cfg.api_token) throw Object.assign(new Error(`api_token not found in ${GLOBAL_JSON}`), { exitCode: 3 });
   return cfg.api_token;
+}
+
+function loadCloudCredential() {
+  if (!existsSync(CLOUD_DEVICE_JSON)) {
+    throw Object.assign(new Error(`CiCy Cloud login not found: ${CLOUD_DEVICE_JSON}. Add your Cloud account first.`), { exitCode: 3 });
+  }
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(CLOUD_DEVICE_JSON, 'utf8')); }
+  catch (e) { throw Object.assign(new Error(`failed to parse ${CLOUD_DEVICE_JSON}: ${e.message}`), { exitCode: 3 }); }
+  const token = String(cfg.token || '').trim();
+  const origin = String(cfg.cloud_origin || cfg.origin || 'https://cicy-ai.com').replace(/\/+$/, '');
+  if (!token) throw Object.assign(new Error(`Cloud session token missing in ${CLOUD_DEVICE_JSON}`), { exitCode: 3 });
+  return { token, origin };
+}
+
+async function cloudAPI(method, path, payload) {
+  const { token, origin } = loadCloudCredential();
+  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
+  const init = { method, headers, signal: AbortSignal.timeout(15000) };
+  if (payload !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(payload);
+  }
+  let res;
+  try { res = await fetch(origin + path, init); }
+  catch (e) { throw Object.assign(new Error(`cannot reach CiCy Cloud at ${origin} (${e.message})`), { exitCode: 3 }); }
+  const text = await res.text();
+  let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error(`Cloud login expired (${res.status}); sign in again`), { exitCode: 3 });
+  if (!res.ok) throw Object.assign(new Error(`Cloud API error (${res.status}): ${body?.error || body?.message || text}`), { exitCode: 4 });
+  return body;
 }
 
 // resolve { api, token, proxy } for a registered team, or the local cicy-code by default
@@ -674,6 +723,83 @@ async function cmdTeam(args) {
   }
 
   throw Object.assign(new Error(`unknown team subcommand: ${sub}. Use add|ls|rm|ping.`), { exitCode: 2 });
+}
+
+// ── CiCy Cloud instance messaging ──────────────────────────────────────
+// Uses the existing Cloud device session. The target instance's local API
+// token never leaves the server and is not needed for message routing.
+async function cmdCloud(args) {
+  const sub = args[0] || 'ls';
+  const showAll = args.includes('--all');
+  const loadDirectory = async () => {
+    const [instanceData, agentData] = await Promise.all([
+      cloudAPI('GET', '/api/code/instances'),
+      cloudAPI('GET', '/api/code/agents'),
+    ]);
+    return { instances: instanceData.instances || [], agents: agentData.agents || [] };
+  };
+
+  const isOnline = (instance) => {
+    const seen = Date.parse(String(instance.lastSeenAt || '').replace(' ', 'T') + 'Z');
+    return instance.status === 'online' && Number.isFinite(seen) && Date.now() - seen < 90000;
+  };
+
+  if (sub === 'agents') {
+    const { instances, agents } = await loadDirectory();
+    const byID = new Map(instances.map((i) => [i.instanceId, i]));
+    const rows = agents.filter((a) => showAll || isOnline(byID.get(a.instanceId) || {})).map((a) => {
+      const instance = byID.get(a.instanceId) || {};
+      return { address: `${instance.teamId || a.instanceId}.${a.agentId}`, teamId: instance.teamId || '',
+        instanceId: a.instanceId, agentId: a.agentId, title: a.title || '', status: a.status || '',
+        instanceStatus: instance.status || a.instanceStatus || '' };
+    });
+    if (json) return ok({ agents: rows });
+    console.log('address\tstatus\ttitle');
+    console.log('-------\t------\t-----');
+    for (const row of rows) console.log(`${row.address}\t${row.instanceStatus || row.status}\t${row.title}`);
+    return;
+  }
+
+  if (sub === 'ls' || sub === 'list' || sub === 'instances') {
+    const { instances: allInstances, agents } = await loadDirectory();
+    const instances = allInstances.filter((i) => showAll || isOnline(i)).map((i) => ({
+      ...i, online: isOnline(i), agents: agents.filter((a) => a.instanceId === i.instanceId),
+    }));
+    if (json) return ok({ teams: instances });
+    if (!instances.length) { console.log(showAll ? '(no Cloud teams)' : '(no online Cloud teams; use --all)'); return; }
+    for (const i of instances) {
+      const environment = [i.platform, i.arch, i.runtime].filter(Boolean).join('/');
+      console.log(`${i.teamId}\t${i.online ? 'online' : 'offline'}\t${environment}\t${i.lastSeenAt || ''}`);
+      if (!i.agents.length) console.log('  └─ (no agents)');
+      for (let index = 0; index < i.agents.length; index++) {
+        const a = i.agents[index];
+        console.log(`  ${index === i.agents.length - 1 ? '└─' : '├─'} ${i.teamId}.${a.agentId}\t${a.status || ''}\t${a.title || ''}`);
+      }
+    }
+    return;
+  }
+
+  if (sub === 'msg') {
+    const address = String(args[1] || '').trim();
+    const text = args.slice(2).join(' ').trim();
+    if (!address || !text) throw Object.assign(new Error('Usage: cicy-agent cloud msg <team.agent> <message>'), { exitCode: 2 });
+    const { instances, agents } = await loadDirectory();
+    const candidates = instances.filter((i) => address.startsWith(`${i.teamId}.`)).sort((a, b) => String(b.teamId).length - String(a.teamId).length);
+    const instance = candidates[0];
+    if (!instance) throw Object.assign(new Error(`Cloud team not found in address: ${address}`), { exitCode: 4 });
+    const agentID = address.slice(String(instance.teamId).length + 1);
+    const agent = agents.find((a) => a.instanceId === instance.instanceId && a.agentId === agentID);
+    if (!agent) throw Object.assign(new Error(`Cloud agent not found: ${address}`), { exitCode: 4 });
+    const data = await cloudAPI('POST', '/api/code/messages', {
+      targetInstanceId: instance.instanceId, targetAgentId: agentID, text,
+    });
+    const id = data?.message?.id || '';
+    if (json) return ok({ messageId: id, address });
+    console.log(`sent → ${address}${id ? `  msg_id=${id}` : ''}`);
+    return;
+  }
+
+  throw Object.assign(new Error('Usage: cicy-agent cloud <ls|agents|msg> [--all]'), { exitCode: 2 });
 }
 
 async function cmdFork(args, node) {

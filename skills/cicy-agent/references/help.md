@@ -64,6 +64,12 @@ cicy-agent team ping [name]                   Liveness + version via /api/health
                                               version, agents count. All teams when name omitted;
                                               exit code 1 if any team is down.
 
+cicy-agent cloud ls [--all]                  List Cloud teams with nested Agents. Online only
+                                              by default; --all includes offline teams.
+cicy-agent cloud agents [--all]              Flat Cloud Agent address list.
+cicy-agent cloud msg <team.agent> <text>      Message through CiCy Cloud using the saved login;
+                                              no target instance token is required.
+
 cicy-agent --team <NAME> ...                  Run ANY command against a registered team
                                               (their cicy-code API + token). Legacy alias: --node.
                                               Note: msg --notify can't push back across teams —
@@ -79,4 +85,5 @@ cicy-agent tools
 - `CICY_API_PORT`      — local server port (default 8008)
 - `CICY_GLOBAL_JSON`   — global.json path override
 - `CICY_AGENT_JSON`    — team registry override (default `~/cicy-ai/db/cicy-agent.json`)
+- `CICY_CLOUD_DEVICE_JSON` — Cloud login override (default `~/cicy-ai/db/cloud-device.json`)
 - `X_AGENT_SHORT_ID`   — required for `msg --callback` (set inside panes)

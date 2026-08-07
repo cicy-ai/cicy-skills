@@ -64,6 +64,12 @@ cicy-agent team ping [name]                   通过 /api/health 检测活性与
                                               版本，代理数量。省略名称时检测所有团队；
                                               如果任何团队宕机则退出码为 1。
 
+cicy-agent cloud ls [--all]                  按 Team 分组列出 Cloud Agents。默认仅在线 Team；
+                                              --all 包含离线 Team。
+cicy-agent cloud agents [--all]              平铺列出 Cloud Agent 完整地址。
+cicy-agent cloud msg <team.agent> <消息>      通过 CiCy Cloud 发消息，自动使用已保存的登录；
+                                              不需要目标 Instance Token。
+
 cicy-agent --team <NAME> ...                  针对已注册团队运行任意命令
                                               （他们的 cicy-code API + 令牌）。旧别名：--node。
                                               注意：msg --notify 无法跨团队推送——
@@ -79,4 +85,5 @@ cicy-agent tools
 - `CICY_API_PORT`      — 本地服务器端口（默认 8008）
 - `CICY_GLOBAL_JSON`   — global.json 路径覆盖
 - `CICY_AGENT_JSON`    — 团队注册表覆盖（默认 `~/cicy-ai/db/cicy-agent.json`）
+- `CICY_CLOUD_DEVICE_JSON` — Cloud 登录文件（默认 `~/cicy-ai/db/cloud-device.json`）
 - `X_AGENT_SHORT_ID`   — `msg --callback` 所需（在面板内部设置）
