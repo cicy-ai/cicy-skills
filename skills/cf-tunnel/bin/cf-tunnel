@@ -24,6 +24,7 @@ const CONFIG_PATH = process.env.CICY_CF_CONFIG ||
   (existsSync(REGISTRY_PATH) || !existsSync(LEGACY_CF_JSON) ? REGISTRY_PATH : LEGACY_CF_JSON);
 const CF_API = 'https://api.cloudflare.com/client/v4';
 const ENV = process.env.CF_ENV || 'prod';
+const ACCOUNT = process.env.CF_ACCOUNT || '';
 const CORE_FIELDS = ['api_token', 'account_id', 'domain', 'zone_id'];
 const REQUIRED_FIELDS = [...CORE_FIELDS, 'tunnel_id']; // legacy add/del/list only
 
@@ -85,9 +86,16 @@ function readEnvCfg(fields = CORE_FIELDS) {
   } catch (e) {
     throw Object.assign(new Error(`parse ${CONFIG_PATH}: ${e.message}`), { exitCode: 1 });
   }
-  // Accept either nested {prod:{...}} OR flat {api_token,...} (cf-skill style)
+  // Accept v2 {default,accounts:{name:{...}}}, nested {prod:{...}}, or the
+  // legacy flat {api_token,...} form.
   let block;
-  if (raw[ENV] && typeof raw[ENV] === 'object') {
+  if (raw.accounts && typeof raw.accounts === 'object') {
+    const accountName = ACCOUNT || raw.default;
+    block = raw.accounts[accountName];
+    if (!block || typeof block !== 'object') {
+      throw Object.assign(new Error(`config has no account '${accountName || '(default)'}'`), { exitCode: 3 });
+    }
+  } else if (raw[ENV] && typeof raw[ENV] === 'object') {
     block = raw[ENV];
   } else if (ENV === 'prod' && raw.api_token) {
     // flat form (cf skill) — synthesize a prod block from top-level fields
@@ -237,7 +245,9 @@ async function cmdStatus() {
     } catch {}
     try {
       const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
-      const block = (raw[ENV] && typeof raw[ENV] === 'object') ? raw[ENV] :
+      const accountName = ACCOUNT || raw.default;
+      const block = (raw.accounts && typeof raw.accounts === 'object') ? raw.accounts[accountName] :
+                    (raw[ENV] && typeof raw[ENV] === 'object') ? raw[ENV] :
                     (ENV === 'prod' && raw.api_token) ? raw : null;
       if (block) {
         for (const f of CORE_FIELDS) {
