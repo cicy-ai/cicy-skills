@@ -2,17 +2,11 @@
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
 // Subcommands: list / ls / tree / windows / capture / reply / msg / msgs /
 //              broadcast / get_online_agents / get_offline_agents /
-//              get_all_agents / send-keys / restart / clear / fork / create / team
-//
-// Cross-team: every subcommand accepts --team NAME (legacy alias: --node) to
-// run against another team's cicy-code instance — same API, their address +
-// token. Teams are registered with `cicy-agent team add <name> <api> <token>`
-// into ~/cicy-ai/db/cicy-agent.json.
+//              get_all_agents / send-keys / restart / clear / fork / create / cloud
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
 
@@ -28,14 +22,13 @@ const rest = globalArgs.args.slice(1);
 
 const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json');
 const CLOUD_DEVICE_JSON = process.env.CICY_CLOUD_DEVICE_JSON || join(homedir(), 'cicy-ai', 'db', 'cloud-device.json');
-const NODES_JSON = process.env.CICY_AGENT_JSON || join(homedir(), 'cicy-ai', 'db', 'cicy-agent.json');
 const API_PORT = process.env.CICY_API_PORT || '8008';
 const API_BASE = `http://127.0.0.1:${API_PORT}`;
 
 (async () => {
   try {
-    const { rest: r2, node: trailingNode } = extractNode(rest);
-    const node = globalArgs.node || trailingNode;
+    const r2 = rest;
+    const node = '';
     switch (cmd) {
       case 'tools':              printTools(); return;
       case 'list':               await cmdList(r2, node); break;
@@ -55,7 +48,6 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'clear':               await cmdClear(r2, node); break;
       case 'fork':               await cmdFork(r2, node); break;
       case 'create': case 'new':  await cmdCreate(r2, node); break;
-      case 'team':               await cmdTeam(r2); break;
       case 'cloud':              await cmdCloud(r2); break;
       default: bail(`unknown command: ${cmd}. Try cicy-agent --help.`, 2);
     }
@@ -75,7 +67,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork|create|team> [args...] [--team NAME]\n'); }
+  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork|create|cloud> [args...]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -83,46 +75,13 @@ function printTools() {
 }
 
 function extractGlobalArgs(args) {
-  let node = '', jsonMode = false;
+  let jsonMode = false;
   const rest = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--json') { jsonMode = true; continue; }
-    if (args[i] === '--team' || args[i] === '-T' || args[i] === '--node' || args[i] === '-n') {
-      node = args[++i] || '';
-      continue;
-    }
     rest.push(args[i]);
   }
-  return { args: rest, node, json: jsonMode };
-}
-
-function extractNode(args) {
-  let node = '';
-  const rest = [];
-  for (let i = 0; i < args.length; i++) {
-    // --team is the canonical flag; --node kept as a legacy alias.
-    if (args[i] === '--team' || args[i] === '-T' || args[i] === '--node' || args[i] === '-n') { node = args[++i] || ''; continue; }
-    rest.push(args[i]);
-  }
-  return { rest, node };
-}
-
-// ── team registry (~/cicy-ai/db/cicy-agent.json) ────────────────────────
-// Shape: { teams: [{name, api, api_token}, ...] }. Legacy shapes (bare array,
-// {nodes: [...]}) are still read; writes always normalize to {teams}.
-
-function loadTeams() {
-  if (!existsSync(NODES_JSON)) return [];
-  let cfg;
-  try { cfg = JSON.parse(readFileSync(NODES_JSON, 'utf8')); }
-  catch (e) { throw Object.assign(new Error(`failed to parse ${NODES_JSON}: ${e.message}`), { exitCode: 3 }); }
-  const arr = Array.isArray(cfg) ? cfg : (cfg.teams || cfg.nodes || []);
-  return arr.filter((t) => t && t.name);
-}
-
-function saveTeams(teams) {
-  mkdirSync(dirname(NODES_JSON), { recursive: true });
-  writeFileSync(NODES_JSON, JSON.stringify({ teams }, null, 2) + '\n', { mode: 0o600 });
+  return { args: rest, json: jsonMode };
 }
 
 function loadLocalToken() {
@@ -147,7 +106,7 @@ function loadCloudCredential() {
   const token = String(cfg.token || '').trim();
   const origin = String(cfg.cloud_origin || cfg.origin || 'https://cicy-ai.com').replace(/\/+$/, '');
   if (!token) throw Object.assign(new Error(`Cloud session token missing in ${CLOUD_DEVICE_JSON}`), { exitCode: 3 });
-  return { token, origin };
+  return { token, origin, instanceId: String(cfg.instance_id || '').trim() };
 }
 
 async function cloudAPI(method, path, payload) {
@@ -168,35 +127,12 @@ async function cloudAPI(method, path, payload) {
   return body;
 }
 
-// resolve { api, token, proxy } for a registered team, or the local cicy-code by default
-function resolveTarget(team) {
-  if (!team) return { api: API_BASE, token: loadLocalToken(), proxy: '' };
-  const teams = loadTeams();
-  if (!teams.length) {
-    throw Object.assign(new Error(`--team ${team} requested but no teams registered. Run: cicy-agent team add <name> <api> <token>`), { exitCode: 3 });
-  }
-  const found = teams.find((t) => t.name === team);
-  if (!found) throw Object.assign(new Error(`team ${team} not registered (have: ${teams.map((t) => t.name).join(', ')}). Run: cicy-agent team add ${team} <api> <token>`), { exitCode: 4 });
-  if (!found.api || !found.api_token) throw Object.assign(new Error(`team ${team} missing api or api_token in ${NODES_JSON}`), { exitCode: 3 });
-  return { api: found.api.replace(/\/+$/, ''), token: found.api_token, proxy: found.proxy || '' };
-}
-
-// HTTP via curl subprocess — used when a team has a `proxy` configured, since
-// Node's fetch ignores proxies entirely (a team behind an SNI-filtered path,
-// e.g. *.trycloudflare.com, is only reachable through a specific egress).
-function curlRequest(method, url, { headers = {}, body, timeoutMs = 60000, proxy } = {}) {
-  const args = ['-sS', '-m', String(Math.max(1, Math.ceil(timeoutMs / 1000))), '-X', method, '-w', '\n%{http_code}'];
-  if (proxy) args.push('-x', proxy);
-  for (const [k, v] of Object.entries(headers)) args.push('-H', `${k}: ${v}`);
-  if (body !== undefined) args.push('--data-binary', body);
-  args.push(url);
-  const out = execFileSync('curl', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  const i = out.lastIndexOf('\n');
-  return { status: parseInt(out.slice(i + 1), 10) || 0, text: out.slice(0, i) };
+function resolveTarget() {
+  return { api: API_BASE, token: loadLocalToken() };
 }
 
 async function api(method, path, payload, node, timeoutMs) {
-  const { api: base, token, proxy } = resolveTarget(node);
+  const { api: base, token } = resolveTarget(node);
   const headers = { 'Authorization': `Bearer ${token}` };
   let body;
   if (payload !== undefined) {
@@ -204,10 +140,7 @@ async function api(method, path, payload, node, timeoutMs) {
     body = JSON.stringify(payload);
   }
   let status, text;
-  if (proxy) {
-    try { ({ status, text } = curlRequest(method, base + path, { headers, body, timeoutMs: timeoutMs > 0 ? timeoutMs : 60000, proxy })); }
-    catch (e) { throw Object.assign(new Error(`cannot reach ${base} via proxy ${proxy} (${String(e.message || e).split('\n')[0]})`), { exitCode: 3 }); }
-  } else {
+  {
     const init = { method, headers };
     if (body !== undefined) init.body = body;
     // Per-call timeout (broadcast uses it so one dead pane can't stall the run).
@@ -299,8 +232,14 @@ async function cmdReply(args, node) {
 // Idempotent: leaves the text alone if it already carries either marker
 // (the receiver may forward the stamped text back to us). The 📨 check stays
 // so text stamped by older installs is still recognized during the rollover.
+function currentAgentID() {
+  const direct = String(process.env.X_AGENT_SHORT_ID || process.env.CICY_PANE_ID || '').trim();
+  if (direct) return direct;
+  return String(process.env.X_AGENT_ID || '').trim().split(':')[0];
+}
+
 function stampSender(text, teamId) {
-  const raw = (process.env.X_AGENT_SHORT_ID || '').trim();
+  const raw = currentAgentID();
   if (!raw) return { text, senderID: '' };
   // In team mode (the local node has an --id), the sender is team-qualified so a
   // cross-team recipient sees the full address: [teamA.w-1001]. Otherwise plain.
@@ -333,33 +272,40 @@ async function cmdMsg(args, node) {
   // --no-callback is full fire-and-forget: no tracking, no push.
   let callback = true;
   let notify = false;
+  let waitForReply = true;
+  let waitSeconds = 180;
   const filtered = [];
-  for (const a of args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
     if (a === '--callback' || a === '-c') callback = true;
     else if (a === '--no-callback' || a === '--no-cb') callback = false;
     else if (a === '--notify') notify = true;
+    else if (a === '--no-wait') waitForReply = false;
+    else if (a === '--timeout') waitSeconds = Math.max(1, Math.min(3600, Number(args[++i] || 180) || 180));
     else filtered.push(a);
   }
   if (filtered.length < 2) throw Object.assign(new Error('Usage: cicy-agent msg <pane|team.agent> <text> [--no-callback] [--notify]'), { exitCode: 2 });
-  // Address parsing: "teamA.1001" → route to team teamA, pane w-1001 (when teamA
-  // is a registered team). An explicit --team still takes precedence.
+  // A team-qualified address routes exclusively through CiCy Cloud.
   let pane = filtered[0];
   let target = node;
-  if (!target && pane.includes('.')) {
-    const dot = pane.indexOf('.');
-    const maybeTeam = pane.slice(0, dot);
-    if (loadTeams().some((t) => t.name === maybeTeam)) { target = maybeTeam; pane = pane.slice(dot + 1); }
+  if (!target && pane.includes('.') && !pane.startsWith('w-')) {
+    const cloudTarget = await resolveCloudAgent(pane);
+    if (cloudTarget) {
+      const text = filtered.slice(1).join(' ');
+      const result = await sendCloudMessage(cloudTarget, text, { waitForReply, waitSeconds });
+      if (json) return ok(result);
+      console.log(`sent → ${pane}  msg_id=${result.messageId}`);
+      if (result.reply) console.log(`${pane}: ${result.reply.text}`);
+      else if (waitForReply) console.log(`(no reply within ${waitSeconds}s; use --no-wait to send asynchronously)`);
+      return;
+    }
   }
   if (/^\d+$/.test(pane)) pane = 'w-' + pane; // bare agent number → w-<n>
-  const crossTeam = !!target;
   const teamId = await localTeamId(); // team mode → sender stamp is [teamId.me]
   const { text, senderID } = stampSender(filtered.slice(1).join(' '), teamId);
   const payload = { pane_id: pane, text };
-  // callback_to (auto-reply tracking) only works when sender+recipient share the
-  // node. Cross-team replies must route back through the hub (not built yet), so
-  // skip callback there — the team-qualified stamp still shows who sent it.
-  if (callback && senderID && !crossTeam) payload.callback_to = senderID;
-  if (callback && senderID && notify && !crossTeam) payload.notify = true;
+  if (callback && senderID) payload.callback_to = senderID;
+  if (callback && senderID && notify) payload.notify = true;
   const data = await api('POST', '/api/tmux/send', payload, target);
   if (json) return ok(data);
   // Echo the message id (when the send was recorded in the agent_messages store)
@@ -440,8 +386,7 @@ async function fetchAgentSets(node) {
 //   reply.json   → idle ("thinking" = in-turn) + exact model id
 //   context.json → context_usage (used_pct, written by the claude statusline)
 //   usage.jsonl  → cumulative cost (Σ cost_credit) + provider
-// Local-only: with --node these files live on the remote host, so runtime
-// fields degrade to null (rendered n/a) instead of lying.
+// Runtime files are local-only; Cloud listings use their own reported fields.
 function runtimeOf(id, isRemote) {
   const out = { model: null, provider: null, context_usage: null, cost: null, idle: null };
   if (isRemote) return out;
@@ -625,119 +570,13 @@ async function cmdCreate(args, node) {
   console.log(pid ? `created ${type} agent "${title}" -> ${pid}` : (typeof data === 'string' ? data : JSON.stringify(data)));
 }
 
-// ── team registry commands ──────────────────────────────────────────────
-// cicy-agent team add <name> <api> <token>   register / update a team
-// cicy-agent team ls                          list teams (token masked)
-// cicy-agent team rm <name>                   unregister
-// cicy-agent team ping [name]                 liveness + version (all teams when omitted)
-
-function mask(t) { return t && t.length > 8 ? t.slice(0, 4) + '…' + t.slice(-4) : '***'; }
-
-// Probe one team: GET /api/health (unauthenticated on cicy-code, but we send
-// the Bearer anyway for setups that gate it). Honors the team's `proxy` (via
-// curl). Returns {online, version, agents, error}.
-async function probeTeam(t, timeoutMs = 8000) {
-  const base = String(t.api || '').replace(/\/+$/, '');
-  const headers = { 'Authorization': `Bearer ${t.api_token || ''}` };
-  try {
-    let status, text;
-    if (t.proxy) {
-      ({ status, text } = curlRequest('GET', base + '/api/health', { headers, timeoutMs, proxy: t.proxy }));
-    } else {
-      const res = await fetch(base + '/api/health', { headers, signal: AbortSignal.timeout(timeoutMs) });
-      status = res.status;
-      text = await res.text();
-    }
-    if (status >= 400) return { online: false, version: null, agents: null, error: `http ${status}` };
-    let body; try { body = JSON.parse(text); } catch { body = {}; }
-    return { online: true, version: body.version || null, agents: body.agents_count ?? null, error: null };
-  } catch (e) {
-    return { online: false, version: null, agents: null, error: String(e.message || e).split('\n')[0] };
-  }
-}
-
-async function cmdTeam(args) {
-  const sub = args[0] || 'ls';
-  const teams = loadTeams();
-
-  if (sub === 'add') {
-    let proxy = '', tokenFlag = '';
-    const pos = [];
-    for (let i = 1; i < args.length; i++) {
-      if (args[i] === '--token') { tokenFlag = args[++i] || ''; continue; }
-      if (args[i] === '--proxy') { proxy = args[++i] || ''; continue; }
-      pos.push(args[i]);
-    }
-    const [name, apiURL, tokenPos] = pos;
-    const token = tokenFlag || tokenPos;
-    if (!name || !apiURL || !token) {
-      throw Object.assign(new Error('Usage: cicy-agent team add <name> <api-url> <api-token> [--proxy http://127.0.0.1:9001]'), { exitCode: 2 });
-    }
-    if (!/^https?:\/\//.test(apiURL)) {
-      throw Object.assign(new Error(`api-url must start with http(s)://, got: ${apiURL}`), { exitCode: 2 });
-    }
-    const entry = { name, api: apiURL.replace(/\/+$/, ''), api_token: token };
-    if (proxy) entry.proxy = proxy;
-    const next = teams.filter((t) => t.name !== name).concat([entry]);
-    saveTeams(next);
-    // Probe right away so a typo'd address/token surfaces at registration time.
-    const p = await probeTeam(entry);
-    if (json) return ok({ added: entry.name, api: entry.api, proxy: entry.proxy || null, online: p.online, version: p.version, error: p.error });
-    console.log(`registered team ${name} → ${entry.api}${proxy ? ` (proxy ${proxy})` : ''}`);
-    console.log(p.online ? `  ✓ online  version=${p.version || '?'}  agents=${p.agents ?? '?'}` : `  ✗ unreachable: ${p.error}`);
-    return;
-  }
-
-  if (sub === 'ls' || sub === 'list') {
-    if (json) return ok({ teams: teams.map((t) => ({ name: t.name, api: t.api, proxy: t.proxy || null })) });
-    if (!teams.length) { console.log('(no teams registered — cicy-agent team add <name> <api> <token>)'); return; }
-    console.log('name\tapi\ttoken\tproxy');
-    for (const t of teams) console.log(`${t.name}\t${t.api}\t${mask(t.api_token)}\t${t.proxy || '-'}`);
-    return;
-  }
-
-  if (sub === 'rm' || sub === 'remove') {
-    const name = args[1];
-    if (!name) throw Object.assign(new Error('Usage: cicy-agent team rm <name>'), { exitCode: 2 });
-    if (!teams.some((t) => t.name === name)) throw Object.assign(new Error(`team ${name} not registered`), { exitCode: 4 });
-    saveTeams(teams.filter((t) => t.name !== name));
-    if (json) return ok({ removed: name });
-    console.log(`removed team ${name}`);
-    return;
-  }
-
-  if (sub === 'ping') {
-    const name = args[1];
-    const sel = name ? teams.filter((t) => t.name === name) : teams;
-    if (name && !sel.length) throw Object.assign(new Error(`team ${name} not registered`), { exitCode: 4 });
-    if (!sel.length) { console.log('(no teams registered)'); return; }
-    const results = await Promise.all(sel.map(async (t) => ({ name: t.name, api: t.api, ...(await probeTeam(t)) })));
-    if (json) return ok({ teams: results });
-    console.log('name\tonline\tversion\tagents\tapi');
-    for (const r of results) {
-      console.log(`${r.name}\t${r.online ? '✓' : '✗'}\t${r.version || 'n/a'}\t${r.agents ?? 'n/a'}\t${r.api}${r.error ? `  (${r.error})` : ''}`);
-    }
-    const down = results.filter((r) => !r.online).length;
-    if (down) process.exitCode = 1;
-    return;
-  }
-
-  throw Object.assign(new Error(`unknown team subcommand: ${sub}. Use add|ls|rm|ping.`), { exitCode: 2 });
-}
-
 // ── CiCy Cloud instance messaging ──────────────────────────────────────
 // Uses the existing Cloud device session. The target instance's local API
 // token never leaves the server and is not needed for message routing.
 async function cmdCloud(args) {
   const sub = args[0] || 'ls';
   const showAll = args.includes('--all');
-  const loadDirectory = async () => {
-    const [instanceData, agentData] = await Promise.all([
-      cloudAPI('GET', '/api/code/instances'),
-      cloudAPI('GET', '/api/code/agents'),
-    ]);
-    return { instances: instanceData.instances || [], agents: agentData.agents || [] };
-  };
+  const loadDirectory = loadCloudDirectory;
 
   const isOnline = (instance) => {
     const seen = Date.parse(String(instance.lastSeenAt || '').replace(' ', 'T') + 'Z');
@@ -779,27 +618,47 @@ async function cmdCloud(args) {
     return;
   }
 
-  if (sub === 'msg') {
-    const address = String(args[1] || '').trim();
-    const text = args.slice(2).join(' ').trim();
-    if (!address || !text) throw Object.assign(new Error('Usage: cicy-agent cloud msg <team.agent> <message>'), { exitCode: 2 });
-    const { instances, agents } = await loadDirectory();
-    const candidates = instances.filter((i) => address.startsWith(`${i.teamId}.`)).sort((a, b) => String(b.teamId).length - String(a.teamId).length);
-    const instance = candidates[0];
-    if (!instance) throw Object.assign(new Error(`Cloud team not found in address: ${address}`), { exitCode: 4 });
-    const agentID = address.slice(String(instance.teamId).length + 1);
-    const agent = agents.find((a) => a.instanceId === instance.instanceId && a.agentId === agentID);
-    if (!agent) throw Object.assign(new Error(`Cloud agent not found: ${address}`), { exitCode: 4 });
-    const data = await cloudAPI('POST', '/api/code/messages', {
-      targetInstanceId: instance.instanceId, targetAgentId: agentID, text,
-    });
-    const id = data?.message?.id || '';
-    if (json) return ok({ messageId: id, address });
-    console.log(`sent → ${address}${id ? `  msg_id=${id}` : ''}`);
-    return;
-  }
+  throw Object.assign(new Error('Usage: cicy-agent cloud <ls|agents> [--all]'), { exitCode: 2 });
+}
 
-  throw Object.assign(new Error('Usage: cicy-agent cloud <ls|agents|msg> [--all]'), { exitCode: 2 });
+async function loadCloudDirectory() {
+  const [instanceData, agentData] = await Promise.all([
+    cloudAPI('GET', '/api/code/instances'), cloudAPI('GET', '/api/code/agents'),
+  ]);
+  return { instances: instanceData.instances || [], agents: agentData.agents || [] };
+}
+
+async function resolveCloudAgent(address) {
+  const { instances, agents } = await loadCloudDirectory();
+  const instance = instances.filter((i) => address.startsWith(`${i.teamId}.`))
+    .sort((a, b) => String(b.teamId).length - String(a.teamId).length)[0];
+  if (!instance) return null;
+  const agentID = address.slice(String(instance.teamId).length + 1);
+  const agent = agents.find((a) => a.instanceId === instance.instanceId && a.agentId === agentID);
+  if (!agent) throw Object.assign(new Error(`Cloud agent not found: ${address}`), { exitCode: 4 });
+  const credential = loadCloudCredential();
+  const senderInstance = instances.find((i) => i.instanceId === credential.instanceId);
+  const senderAgentID = currentAgentID();
+  const senderAgentRegistered = senderAgentID && agents.some((a) => a.instanceId === credential.instanceId && a.agentId === senderAgentID);
+  const senderID = [senderInstance?.teamId || credential.instanceId, senderAgentID].filter(Boolean).join('.');
+  return { address, instanceId: instance.instanceId, agentId: agentID,
+    senderID, senderAgentId: senderAgentRegistered ? senderAgentID : '' };
+}
+
+async function sendCloudMessage(target, text, { waitForReply, waitSeconds }) {
+  const stamped = target.senderID && !/^📮\s/.test(text) ? `📮 [${target.senderID}] ${text}` : text;
+  const payload = { targetInstanceId: target.instanceId, targetAgentId: target.agentId, text: stamped };
+  if (target.senderAgentId) payload.senderAgentId = target.senderAgentId;
+  const data = await cloudAPI('POST', '/api/code/messages', payload);
+  const messageId = data?.message?.id || '';
+  if (!messageId || !waitForReply) return { messageId, address: target.address, reply: null };
+  const deadline = Date.now() + waitSeconds * 1000;
+  while (Date.now() < deadline) {
+    const status = await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
+    if (status.reply) return { messageId, address: target.address, status: status.status, reply: status.reply };
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return { messageId, address: target.address, status: 'timeout', reply: null };
 }
 
 async function cmdFork(args, node) {

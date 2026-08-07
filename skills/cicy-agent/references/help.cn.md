@@ -37,7 +37,6 @@ cicy-agent get_all_agents                     名册：整个数据库（在线 
                                               （reply.json → idle+model, context.json →
                                               context_usage, usage.jsonl → Σcost +
                                               provider）；不可用 → null / "n/a"
-                                              （使用 --team 时始终为 n/a——文件是远程的）。
                                               idle 是启发式判断："思考中"或请求活动 <45秒前
                                               = 忙碌。
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
@@ -54,26 +53,12 @@ cicy-agent create <title> [--type cicy] [--model M]   从头创建全新代理�
               ~/cicy-ai/memory/agents/<RT>/，其中的 system.md 成为系统提示词，
               role.md 用于初始化代理的 AGENTS.md（编辑该文件进行自定义）。
 
-cicy-agent team add <name> <api> <token>      注册另一个团队的 cicy-code（立即探测）
-            [--proxy http://127.0.0.1:9001]    --proxy：通过出口代理访问此团队（基于 curl；
-                                              当团队的域名在直连路径上被 SNI 过滤时使用，
-                                              例如 *.trycloudflare.com 快速隧道）
-cicy-agent team ls                            列出已注册的团队（令牌已掩码）
-cicy-agent team rm <name>                     取消注册一个团队
-cicy-agent team ping [name]                   通过 /api/health 检测活性与版本——在线 ✓/✗，
-                                              版本，代理数量。省略名称时检测所有团队；
-                                              如果任何团队宕机则退出码为 1。
-
 cicy-agent cloud ls [--all]                  按 Team 分组列出 Cloud Agents。默认仅在线 Team；
                                               --all 包含离线 Team。
 cicy-agent cloud agents [--all]              平铺列出 Cloud Agent 完整地址。
-cicy-agent cloud msg <team.agent> <消息>      通过 CiCy Cloud 发消息，自动使用已保存的登录；
+cicy-agent msg <team.agent> <消息>            带 Team 前缀的目标自动通过 CiCy Cloud 路由；
                                               不需要目标 Instance Token。
 
-cicy-agent --team <NAME> ...                  针对已注册团队运行任意命令
-                                              （他们的 cicy-code API + 令牌）。旧别名：--node。
-                                              注意：msg --notify 无法跨团队推送——
-                                              使用 `cicy-agent msgs --team <NAME>` 检查状态。
 cicy-agent --json ...                         JSON 输出模式
 cicy-agent --help / -h / help
 cicy-agent tools
@@ -84,6 +69,5 @@ cicy-agent tools
 - `CICY_API_TOKEN`     — 不记名令牌（覆盖 global.json）
 - `CICY_API_PORT`      — 本地服务器端口（默认 8008）
 - `CICY_GLOBAL_JSON`   — global.json 路径覆盖
-- `CICY_AGENT_JSON`    — 团队注册表覆盖（默认 `~/cicy-ai/db/cicy-agent.json`）
 - `CICY_CLOUD_DEVICE_JSON` — Cloud 登录文件（默认 `~/cicy-ai/db/cloud-device.json`）
 - `X_AGENT_SHORT_ID`   — `msg --callback` 所需（在面板内部设置）

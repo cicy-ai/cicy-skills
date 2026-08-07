@@ -5,9 +5,9 @@ description: Operate tmux panes/windows on this host (list, capture, send-keys, 
 
 # Cicy Agent
 
-This skill is the local `cicy-agent` wrapper for tmux pane / window
-operations on this host — and on other TEAMS' hosts via `--team NAME`
-(register with `cicy-agent team add`; probe with `cicy-agent team ping`).
+This skill wraps local tmux pane/window operations and CiCy Cloud routing to
+Agents on other Instances. Cloud targets use `<team>.<agent>` addresses and do
+not require the target Instance's API Token.
 
 ## ⭐ `--notify` — get woken when the agent you dispatched finishes
 
@@ -57,15 +57,14 @@ Details:
 - `msgs` — the cross-agent message link: who→who, status, and a q⟶answer
   summary of what the receiver actually did
 - restart all panes / clear one
-- `team add/ls/rm/ping` — register another team's cicy-code (api + token) and
-  probe liveness + version; then any command works cross-team with `--team NAME`
+- `cloud ls [--all]` / `cloud agents [--all]` — discover Cloud Instances and Agents
+- `msg <team.agent>` — route through CiCy Cloud and print the correlated reply
 
 ## Rules
 
-1. Prefer `cicy-agent` for local convenience operations on this host; use
-   `--team NAME` for other teams (registry `~/cicy-ai/db/cicy-agent.json`,
-   managed by `cicy-agent team add/ls/rm`; legacy alias `--node`). Cross-team
-   `--notify` can't push back — check with `cicy-agent msgs --team NAME`.
+1. Use a plain Agent ID such as `w-102` locally. Use a Cloud address such as
+   `gh_linux.w-1001` for another Instance; Cloud discovery and authentication
+   are automatic from `~/cicy-ai/db/cloud-device.json`.
 2. `msg --notify` needs `X_AGENT_SHORT_ID` env (set inside cicy panes) — it's
    the sender id the callback wakes.
 3. To judge "did they finish" or read their conclusion, use `reply` (parsed

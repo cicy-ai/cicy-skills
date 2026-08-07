@@ -46,7 +46,7 @@
   "i18n": {
     "zh-CN": {
       "title": "Cicy Agent (tmux)",
-      "description": "通过 cicy-code /api/tmux/* 端点操作 tmux 面板和窗口（列表、capture、send-keys、msg、create、restart、clear），支持多节点。"
+    "description": "操作本地 Agent，并通过 CiCy Cloud 自动发现和消息路由访问其他 Instance；无需目标 Token。"
     }
   },
   "tools": [

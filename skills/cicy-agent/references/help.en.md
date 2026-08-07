@@ -37,7 +37,6 @@ cicy-agent get_all_agents                     Roster: whole db (online ∪ offli
                                               (reply.json → idle+model, context.json →
                                               context_usage, usage.jsonl → Σcost +
                                               provider); unavailable → null / "n/a"
-                                              (always n/a with --team — files are remote).
                                               idle is a heuristic: "thinking" or request
                                               activity <45s ago = busy.
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
@@ -54,26 +53,12 @@ cicy-agent create <title> [--type cicy] [--model M]   Create a BRAND-NEW agent f
               ~/cicy-ai/memory/agents/<RT>/ whose system.md becomes the system prompt and
               whose role.md seeds the agent's AGENTS.md (edit that file to customize).
 
-cicy-agent team add <name> <api> <token>      Register another team's cicy-code (probes it immediately)
-            [--proxy http://127.0.0.1:9001]    --proxy: reach this team via an egress proxy (curl-based;
-                                              use when the team's domain is SNI-filtered on the direct
-                                              path, e.g. *.trycloudflare.com quick tunnels)
-cicy-agent team ls                            List registered teams (token masked)
-cicy-agent team rm <name>                     Unregister a team
-cicy-agent team ping [name]                   Liveness + version via /api/health — online ✓/✗,
-                                              version, agents count. All teams when name omitted;
-                                              exit code 1 if any team is down.
-
 cicy-agent cloud ls [--all]                  List Cloud teams with nested Agents. Online only
                                               by default; --all includes offline teams.
 cicy-agent cloud agents [--all]              Flat Cloud Agent address list.
-cicy-agent cloud msg <team.agent> <text>      Message through CiCy Cloud using the saved login;
-                                              no target instance token is required.
+cicy-agent msg <team.agent> <text>            A team-qualified target automatically routes through
+                                              CiCy Cloud; no target instance token is required.
 
-cicy-agent --team <NAME> ...                  Run ANY command against a registered team
-                                              (their cicy-code API + token). Legacy alias: --node.
-                                              Note: msg --notify can't push back across teams —
-                                              check status with `cicy-agent msgs --team <NAME>`.
 cicy-agent --json ...                         JSON output mode
 cicy-agent --help / -h / help
 cicy-agent tools
@@ -84,6 +69,5 @@ cicy-agent tools
 - `CICY_API_TOKEN`     — bearer token (overrides global.json)
 - `CICY_API_PORT`      — local server port (default 8008)
 - `CICY_GLOBAL_JSON`   — global.json path override
-- `CICY_AGENT_JSON`    — team registry override (default `~/cicy-ai/db/cicy-agent.json`)
 - `CICY_CLOUD_DEVICE_JSON` — Cloud login override (default `~/cicy-ai/db/cloud-device.json`)
 - `X_AGENT_SHORT_ID`   — required for `msg --callback` (set inside panes)

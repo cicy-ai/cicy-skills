@@ -35,26 +35,18 @@ cicy-agent send-keys w-1001 'ls -la' Enter
 cicy-agent clear w-1001
 cicy-agent restart                # restart_all
 
-# remote node
-cicy-agent --node prod-box list
-
 # CiCy Cloud instances (no target instance token needed)
 cicy-agent cloud ls                         # online teams with nested Agents
 cicy-agent cloud ls --all                   # include offline teams
-cicy-agent cloud msg gh_linux.w-102 'hello'
+cicy-agent msg gh_linux.w-102 'hello'        # team prefix → automatic Cloud routing
 ```
 
 ## Auth
 
 Local: `~/cicy-ai/global.json` `api_token` (mode 0600), or `CICY_API_TOKEN` env.
 
-Remote: entries in `~/cicy-ai/db/cicy-agent.json`:
-
-```json
-[
-  { "name": "prod-box", "api": "https://prod-box.example.com:8008", "api_token": "..." }
-]
-```
+Cross-Instance: `~/cicy-ai/db/cloud-device.json` Cloud session. Target Instance
+API Tokens are not required.
 
 ## License
 

@@ -13,10 +13,11 @@ assert('--help has output', help.stdout.length > 0);
 const bad = runSkill(D, ['badcmd']);
 assert('unknown subcommand exits non-0', bad.status !== 0);
 
-const prefixedTeam = runSkill(D, ['--team', 'missing', 'ls'], {
-  CICY_AGENT_JSON: '/tmp/cicy-agent-test-missing-teams.json',
-});
-assert('--team works before the command', prefixedTeam.status !== 0 && !prefixedTeam.stderr.includes('unknown command: --team'));
+const removedTeam = runSkill(D, ['team', 'ls']);
+assert('legacy team registry command is removed', removedTeam.status !== 0 && removedTeam.stderr.includes('unknown command: team'));
+
+const removedTeamFlag = runSkill(D, ['--team', 'missing', 'ls']);
+assert('legacy --team flag is removed', removedTeamFlag.status !== 0 && removedTeamFlag.stderr.includes('unknown command: --team'));
 
 const cloudMissing = runSkill(D, ['cloud', 'ls'], {
   CICY_CLOUD_DEVICE_JSON: '/tmp/cicy-agent-test-missing-cloud-device.json',

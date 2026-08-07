@@ -15,8 +15,8 @@
 | `send-keys`     | POST   | `/api/tmux/send-keys`      |
 | `restart`       | POST   | `/api/tmux/restart_all`    |
 | `clear`         | POST   | `/api/tmux/clear`          |
-| `team ping`     | GET    | `<team.api>/api/health` (per team; online + version + agents_count) |
-| `team add/ls/rm`| —      | local registry file only (add also probes `/api/health`) |
+| `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |
+| `msg <team.agent>` | POST + GET | `/api/code/messages`, then `/api/code/messages/status` |
 
 All requests carry `Authorization: Bearer <api_token>`.
 
@@ -25,11 +25,10 @@ All requests carry `Authorization: Bearer <api_token>`.
 | path                              | mode | secret_fields  |
 |-----------------------------------|------|----------------|
 | `~/cicy-ai/global.json`           | 0600 | `api_token`    |
-| `~/cicy-ai/db/cicy-agent.json`    | 0600 | per-team `api_token` |
+| `~/cicy-ai/db/cloud-device.json`  | 0600 | Cloud session `token` |
 
-`cicy-agent.json` is the team registry: `{ "teams": [{name, api, api_token}, ...] }`
-(legacy bare-array / `{nodes}` shapes still read). Selected with `--team NAME`
-(legacy alias `--node`). When omitted, the local cicy-code server is used.
+Cross-Instance messages use the authenticated Cloud device session. Target
+Instance API Tokens are never stored or supplied to `cicy-agent`.
 
 ## Common payloads
 

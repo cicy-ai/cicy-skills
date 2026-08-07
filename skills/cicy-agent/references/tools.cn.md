@@ -15,8 +15,8 @@
 | `send-keys` | POST | `/api/tmux/send-keys` |
 | `restart` | POST | `/api/tmux/restart_all` |
 | `clear` | POST | `/api/tmux/clear` |
-| `team ping` | GET | `<team.api>/api/health`（按团队；状态+版本+代理数量） |
-| `team add/ls/rm` | — | 仅本地注册表文件（add 时还会探测 `/api/health`） |
+| `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |
+| `msg <team.agent>` | POST + GET | `/api/code/messages`，然后 `/api/code/messages/status` |
 
 所有请求携带 `Authorization: Bearer <api_token>`。
 
@@ -25,10 +25,9 @@
 | 路径 | 权限 | 敏感字段 |
 |-----------------------------------|------|----------------|
 | `~/cicy-ai/global.json` | 0600 | `api_token` |
-| `~/cicy-ai/db/cicy-agent.json` | 0600 | 各团队的 `api_token` |
+| `~/cicy-ai/db/cloud-device.json` | 0600 | Cloud 会话 `token` |
 
-`cicy-agent.json` 是团队注册表：`{ "teams": [{name, api, api_token}, ...] }`
-（仍支持旧版纯数组/`{nodes}` 格式）。通过 `--team NAME` 选择（旧别名 `--node`）。省略时使用本地 cicy-code 服务器。
+跨 Instance 消息使用已认证的 Cloud 设备会话；无需保存或提供目标 Instance API Token。
 
 ## 常用载荷
 
