@@ -2,7 +2,8 @@
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
 // Subcommands: list / ls / tree / windows / capture / reply / msg / msgs /
 //              broadcast / get_online_agents / get_offline_agents /
-//              get_all_agents / send-keys / restart / clear / fork / create / cloud
+//              get_all_agents / send-keys / restart / clear / fork / create /
+//              whoami / cloud
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -48,6 +49,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'clear':               await cmdClear(r2, node); break;
       case 'fork':               await cmdFork(r2, node); break;
       case 'create': case 'new':  await cmdCreate(r2, node); break;
+      case 'whoami': case 'identity': case 'self': await cmdWhoami(r2, node); break;
       case 'cloud':              await cmdCloud(r2); break;
       default: bail(`unknown command: ${cmd}. Try cicy-agent --help.`, 2);
     }
@@ -67,7 +69,7 @@ function ok(data) { if (json) console.log(JSON.stringify({ ok: true, data })); }
 
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork|create|cloud> [args...]\n'); }
+  catch { process.stdout.write('Usage: cicy-agent <list|ls|tree|windows|capture|reply|msg|msgs|send-keys|restart|clear|fork|create|whoami|cloud> [args...]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -571,6 +573,48 @@ async function cmdCreate(args, node) {
   if (data && data.success === false) throw Object.assign(new Error(`create failed: ${data.error || 'unknown'}`), { exitCode: 4 });
   const pid = data?.pane_id || data?.data?.pane_id || '';
   console.log(pid ? `created ${type} agent "${title}" -> ${pid}` : (typeof data === 'string' ? data : JSON.stringify(data)));
+}
+
+// Resolve this running node against the authenticated Cloud directory. The
+// Cloud row is authoritative for the fixed proxy host; never guess a domain
+// from team_id because the slug also contains owner/hash material.
+async function cmdWhoami(args, node) {
+  if (args.length) throw Object.assign(new Error('Usage: cicy-agent whoami'), { exitCode: 2 });
+  let health = {};
+  try { health = await api('GET', '/api/health', undefined, node); } catch { /* Cloud identity can still resolve */ }
+  const localTeamID = String(health?.team_id || health?.teamId || '').trim();
+  const agentID = currentAgentID();
+  let credential = { instanceId: '' };
+  let instance = null;
+  let cloudError = '';
+  try {
+    credential = loadCloudCredential();
+    const { instances } = await loadCloudDirectory();
+    instance = instances.find((i) => credential.instanceId && i.instanceId === credential.instanceId)
+      || instances.find((i) => localTeamID && i.teamId === localTeamID)
+      || null;
+  } catch (e) {
+    cloudError = e.message || String(e);
+  }
+  const teamId = String(instance?.teamId || localTeamID || '').trim();
+  const instanceId = String(instance?.instanceId || credential.instanceId || '').trim();
+  const proxyHost = String(instance?.proxyHost || '').trim().toLowerCase();
+  const identity = {
+    agentId: agentID,
+    teamId,
+    instanceId,
+    proxyHost,
+    url: proxyHost ? `https://${proxyHost}/` : '',
+    proxyAvailable: Boolean(instance?.proxyAvailable),
+    status: String(instance?.status || ''),
+  };
+  if (json) return ok({ ...identity, ...(cloudError ? { cloudError } : {}) });
+  console.log(`agent_id\t${identity.agentId || '(not in an Agent pane)'}`);
+  console.log(`team_id\t${identity.teamId || '(not registered)'}`);
+  console.log(`instance_id\t${identity.instanceId || '(not registered)'}`);
+  console.log(`domain\t${identity.proxyHost || '(not available)'}`);
+  console.log(`url\t${identity.url || '(not available)'}`);
+  if (cloudError) console.error(`warning: ${cloudError}`);
 }
 
 // ── CiCy Cloud instance messaging ──────────────────────────────────────

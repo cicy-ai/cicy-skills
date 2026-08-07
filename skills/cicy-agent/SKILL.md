@@ -1,6 +1,6 @@
 ---
 name: cicy-agent
-description: Operate tmux panes/windows on this host (list, capture, send-keys, msg, create, restart). `msg --notify` wakes the SENDER when the dispatched agent finishes — the multi-agent coordination primitive.
+description: Operate local and Cloud Agents, discover this Instance's team ID and fixed domain, and coordinate work with tracked messages and completion notifications.
 ---
 
 # Cicy Agent
@@ -58,6 +58,7 @@ Details:
   summary of what the receiver actually did
 - restart all panes / clear one
 - `cloud ls [--all]` / `cloud agents [--all]` — discover Cloud Instances and Agents
+- `whoami` — return this Agent, team, Instance, and fixed-domain identity
 - `msg <team.agent>` — route through CiCy Cloud and print the correlated reply
 
 ## Rules
@@ -69,6 +70,8 @@ Details:
    the sender id the callback wakes.
 3. To judge "did they finish" or read their conclusion, use `reply` (parsed
    last turn) — do NOT scrape `capture` (raw scrollback drifts as it scrolls).
+4. To obtain the current `team_id` or fixed Instance URL, use
+   `cicy-agent --json whoami`; never infer the hostname from the team name.
 
 ## References
 

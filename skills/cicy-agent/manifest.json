@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "title": "Cicy Agent",
-  "description": "Operate tmux panes/windows on this host (list, capture, send-keys, msg, create, restart). `msg --notify` wakes the SENDER when the dispatched agent finishes — the multi-agent coordination primitive.",
+  "description": "Operate local and Cloud Agents, discover this Instance's team ID and fixed domain, and coordinate work with tracked messages and completion notifications.",
   "category": "dev",
   "tags": [
     "tmux",
@@ -89,6 +89,11 @@
       "name": "create",
       "example": "cicy-agent create <title> --type cicy",
       "description": "Create a BRAND-NEW agent from scratch (POST /api/panes/create); agent_type defaults to cicy. Not a clone — use fork to inherit an existing agent's context."
+    },
+    {
+      "name": "instance identity",
+      "example": "cicy-agent whoami --json",
+      "description": "Return this Agent ID, team ID, Instance ID, fixed proxy host, and HTTPS URL from the authenticated Cloud directory."
     }
   ]
 }

@@ -53,6 +53,10 @@ cicy-agent create <title> [--type cicy] [--model M]   Create a BRAND-NEW agent f
               ~/cicy-ai/memory/agents/<RT>/ whose system.md becomes the system prompt and
               whose role.md seeds the agent's AGENTS.md (edit that file to customize).
 
+cicy-agent whoami                            Show this Agent ID, team ID, Instance ID,
+                                              fixed domain and HTTPS URL.
+cicy-agent --json whoami                     Machine-readable identity for scripts.
+
 cicy-agent cloud ls [--all]                  List Cloud teams with nested Agents. Online only
                                               by default; --all includes offline teams.
 cicy-agent cloud agents [--all]              Flat Cloud Agent address list.

@@ -15,6 +15,7 @@
 | `send-keys`     | POST   | `/api/tmux/send-keys`      |
 | `restart`       | POST   | `/api/tmux/restart_all`    |
 | `clear`         | POST   | `/api/tmux/clear`          |
+| `whoami`        | GET    | `/api/health` + `/api/code/instances` |
 | `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |
 | `msg <team.agent>` | POST + GET | `/api/code/messages`, then `/api/code/messages/status` |
 

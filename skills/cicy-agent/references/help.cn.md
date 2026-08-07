@@ -53,6 +53,10 @@ cicy-agent create <title> [--type cicy] [--model M]   从头创建全新代理�
               ~/cicy-ai/memory/agents/<RT>/，其中的 system.md 成为系统提示词，
               role.md 用于初始化代理的 AGENTS.md（编辑该文件进行自定义）。
 
+cicy-agent whoami                            查看当前 Agent ID、team ID、Instance ID、
+                                              固定域名和 HTTPS URL。
+cicy-agent --json whoami                     供脚本使用的结构化身份信息。
+
 cicy-agent cloud ls [--all]                  按 Team 分组列出 Cloud Agents。默认仅在线 Team；
                                               --all 包含离线 Team。
 cicy-agent cloud agents [--all]              平铺列出 Cloud Agent 完整地址。
