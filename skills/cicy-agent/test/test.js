@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { runSkill, assert, finish } from '../../../tools/test-helper.js';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const D = new URL('..', import.meta.url).pathname;
 
 const noArgs = runSkill(D, []);
@@ -28,5 +32,50 @@ assert('cloud command reports missing login clearly', cloudMissing.status !== 0 
 const list = runSkill(D, ['list', '--json']);
 const listJson = (() => { try { JSON.parse(list.stdout); return true; } catch { return false; } })();
 assert('list --json is valid JSON or exits non-0', listJson || list.status !== 0);
+
+// A Cloud send must become observable as soon as POST succeeds, rather than
+// remaining silent while the correlated reply poll is still pending.
+const fixtureDir = mkdtempSync(join(tmpdir(), 'cicy-agent-cloud-test-'));
+const portFile = join(fixtureDir, 'port');
+const server = spawn(process.execPath, ['-e', `
+  const http = require('http');
+  const fs = require('fs');
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/code/instances') return res.end(JSON.stringify({instances:[
+      {instanceId:'code-source-1234567890123456',teamId:'local'},
+      {instanceId:'code-target-1234567890123456',teamId:'remote'}
+    ]}));
+    if (req.url === '/api/code/agents') return res.end(JSON.stringify({agents:[
+      {instanceId:'code-source-1234567890123456',agentId:'w-test'},
+      {instanceId:'code-target-1234567890123456',agentId:'w-102'}
+    ]}));
+    if (req.method === 'POST' && req.url === '/api/code/messages') return res.end(JSON.stringify({message:{id:'msg-test-12345678'}}));
+    if (req.url.startsWith('/api/code/messages/status')) return res.end(JSON.stringify({status:'pending',reply:null}));
+    res.statusCode = 404; res.end(JSON.stringify({error:'not_found'}));
+  });
+  server.listen(0, '127.0.0.1', () => fs.writeFileSync(process.argv[1], String(server.address().port)));
+`, portFile], { stdio: 'ignore' });
+let port = '';
+for (let i = 0; i < 100 && !port; i++) {
+  try { port = readFileSync(portFile, 'utf8').trim(); } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }
+}
+const deviceFile = join(fixtureDir, 'cloud-device.json');
+writeFileSync(deviceFile, JSON.stringify({ token: 'test-token', cloud_origin: `http://127.0.0.1:${port}`, instance_id: 'code-source-1234567890123456' }));
+const started = Date.now();
+const cli = spawn(process.execPath, [join(D, 'bin/cicy-agent'), 'msg', 'remote.w-102', 'hello', '--timeout', '1'], {
+  env: { ...process.env, CICY_CLOUD_DEVICE_JSON: deviceFile, X_AGENT_SHORT_ID: 'w-test' },
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+let firstOutputAt = 0;
+let cloudStdout = '';
+cli.stdout.on('data', (chunk) => {
+  if (!firstOutputAt) firstOutputAt = Date.now();
+  cloudStdout += chunk;
+});
+await new Promise((resolve) => cli.on('close', resolve));
+server.kill();
+rmSync(fixtureDir, { recursive: true, force: true });
+assert('cloud msg prints pending immediately after POST', firstOutputAt > 0 && firstOutputAt - started < 900 && cloudStdout.includes('msg_id=msg-test-12345678  status=pending'), cloudStdout);
 
 finish();
