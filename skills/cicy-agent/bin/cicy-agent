@@ -325,7 +325,18 @@ async function cmdMsg(args, node) {
     if (json) return ok({ messageId, address: filtered[0], ...result });
     if (result.message?.status === 'done') {
       console.log(`🔔 [${filtered[0]}] msg ${messageId} → done`);
-      if (result.message.turn?.a) console.log(`${filtered[0]}: ${result.message.turn.a}`);
+      let replyText = result.message.turn?.a || '';
+      // The compact /api/agent/messages response may only carry the linked
+      // reply turn id. Resolve the parsed reply explicitly so local and Cloud
+      // `msg` both print the correlated answer before returning.
+      if (!replyText && result.message.reply_turn_id) {
+        try {
+          const reply = await api('POST', '/api/tmux/reply_text', { pane_id: pane, full: false }, target);
+          replyText = typeof reply === 'string' ? reply : (reply?.text || '');
+        } catch { /* completion is still valid when reply retrieval fails */ }
+      }
+      replyText = String(replyText || '').replace(/^\[text\]\s*/i, '').trim();
+      if (replyText) console.log(`${filtered[0]}: ${replyText}`);
     } else if (result.message?.status === 'failed') {
       console.log(`⚠️ [${filtered[0]}] msg ${messageId} → failed${result.message.error ? `: ${result.message.error}` : ''}`);
     } else {
