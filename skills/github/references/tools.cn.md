@@ -1,0 +1,12 @@
+# 配置与安全
+
+- 配置文件：`~/cicy-ai/db/github.json`
+- 自定义路径：`CICY_GITHUB_CONFIG`
+- 默认账号：`CICY_GITHUB_ACCOUNT`
+- 格式：以账号名为键的对象，字段为 `api_token` 和可选的 `email`。
+- 配置采用原子写入，并强制权限为 `0600`。
+- Token 只能从标准输入写入；账号列表绝不返回 Token。
+- Clone 通过子进程临时环境和 `GIT_ASKPASS` 鉴权，不把 Token 写入 URL、进程参数、全局 `gh` 状态或 Git 凭据库。
+- GitHub API 失败时只显示 HTTP 状态，不输出响应正文。
+
+退出码：`0` 成功，`2` 命令错误，`4` 鉴权失败，其他错误为 `1` 或 Git 原始退出码。

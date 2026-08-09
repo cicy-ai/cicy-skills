@@ -1,0 +1,12 @@
+# Configuration and security
+
+- Config: `~/cicy-ai/db/github.json`
+- Override path: `CICY_GITHUB_CONFIG`
+- Default account: `CICY_GITHUB_ACCOUNT`
+- Format: an object keyed by account name, with `api_token` and optional `email`.
+- Config writes are atomic and force mode `0600`.
+- Token input is accepted only through stdin. Tokens are never returned by account-listing commands.
+- Clone authentication uses a temporary child-process environment and `GIT_ASKPASS`; it is not embedded in the URL, process arguments, global `gh` state, or Git credential storage.
+- GitHub API failures expose only HTTP status, not response bodies.
+
+Exit codes: `0` success, `2` invalid command, `4` authentication failure, otherwise `1` or the underlying Git exit code.

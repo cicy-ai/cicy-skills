@@ -1,0 +1,39 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "github",
+  "version": "1.0.0",
+  "title": "GitHub Multi-Account",
+  "description": "Secure multi-account GitHub operations for listing accessible repositories, verifying identities, cloning with a selected account, and managing local credentials without exposing or persisting tokens.",
+  "category": "dev",
+  "tags": ["github", "git", "multi-account", "repository", "security"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/github",
+  "license": "MIT",
+  "runtime": { "node": ">=18" },
+  "system_requirements": ["git"],
+  "npm_dependencies": false,
+  "entry": "bin/github",
+  "permissions": ["network", "filesystem:home", "process:spawn"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "GitHub 多账号",
+      "description": "安全管理多个 GitHub 账号，按指定账号验证身份、列出仓库和克隆，并避免 Token 出现在参数、日志或 Git 配置中。"
+    }
+  },
+  "tools": [
+    { "name": "List accounts", "example": "github accounts", "description": "List configured identities without displaying tokens" },
+    { "name": "List repositories", "example": "github repos --account work", "description": "List repositories accessible to one identity" },
+    { "name": "Clone repository", "example": "github clone --account work owner/repo", "description": "Clone without persisting or displaying the token" }
+  ]
+}

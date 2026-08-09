@@ -1,0 +1,217 @@
+#!/usr/bin/env node
+// Multi-account GitHub CLI for CiCy. Zero dependencies; Node.js 18+.
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import { spawn } from 'node:child_process';
+
+const args = process.argv.slice(2);
+const configPath = process.env.CICY_GITHUB_CONFIG || join(homedir(), 'cicy-ai', 'db', 'github.json');
+const accountPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
+
+try {
+  if (process.env.CICY_GITHUB_ASKPASS === '1') askpass();
+  else if (!args.length || ['help', '--help', '-h'].includes(args[0])) help();
+  else if (args[0] === 'accounts') accounts();
+  else if (args[0] === 'add') await add();
+  else if (args[0] === 'remove') remove();
+  else if (args[0] === 'whoami') await whoami();
+  else if (args[0] === 'repos') await repos();
+  else if (args[0] === 'clone') await clone();
+  else fail(`unknown command: ${args[0]}. Try github --help.`, 2);
+} catch (error) {
+  fail(sanitize(error?.message || String(error)), error?.exitCode || 1);
+}
+
+function help() {
+  process.stdout.write(`github — safe multi-account GitHub operations
+
+Usage:
+  github accounts
+  printf '%s' "$TOKEN" | github add <account> --token-stdin [--email <email>]
+  github remove <account> --yes
+  github whoami --account <account>
+  github repos --account <account> [--limit 100] [--json]
+  github clone --account <account> <owner/repo> [directory]
+
+Account selection: --account, then CICY_GITHUB_ACCOUNT, or the only configured account.
+Tokens are read only from stdin/config, never accepted as command arguments or printed.
+Config: ${configPath}
+`);
+  process.exit(0);
+}
+
+function option(name) {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+function readConfig() {
+  if (!existsSync(configPath)) return {};
+  let value;
+  try { value = JSON.parse(readFileSync(configPath, 'utf8')); }
+  catch { throw new Error(`invalid JSON in ${configPath}`); }
+  if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error(`invalid account map in ${configPath}`);
+  return value;
+}
+
+function writeConfig(value) {
+  mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
+  const temp = `${configPath}.tmp-${process.pid}`;
+  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(temp, 0o600);
+  renameSync(temp, configPath);
+  chmodSync(configPath, 0o600);
+}
+
+function accounts() {
+  const config = readConfig();
+  const rows = Object.entries(config).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => ({
+    name,
+    email: typeof value?.email === 'string' ? value.email : '',
+    token_configured: Boolean(value?.api_token),
+  }));
+  if (args.includes('--json')) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+  else if (!rows.length) process.stdout.write('No GitHub accounts configured.\n');
+  else for (const row of rows) process.stdout.write(`${row.name}\t${row.email || '-'}\t${row.token_configured ? 'token configured' : 'token missing'}\n`);
+}
+
+async function add() {
+  const name = args[1];
+  if (!name || !accountPattern.test(name)) throw new Error('account name must use 1-63 letters, digits, dot, underscore, or hyphen');
+  if (!args.includes('--token-stdin')) throw new Error('refusing token argument; pipe it with --token-stdin');
+  const token = (await readStdin()).trim();
+  if (!token) throw new Error('empty token on stdin');
+  if (token.length > 4096) throw new Error('token is unexpectedly long');
+  const config = readConfig();
+  const current = config[name] && typeof config[name] === 'object' ? config[name] : {};
+  config[name] = { ...current, api_token: token, email: option('--email') || current.email || '' };
+  writeConfig(config);
+  process.stdout.write(`Saved GitHub account ${name}; token was not displayed.\n`);
+}
+
+function remove() {
+  const name = args[1];
+  if (!name) throw new Error('account name is required');
+  if (!args.includes('--yes')) throw new Error('add --yes to confirm removal');
+  const config = readConfig();
+  if (!Object.hasOwn(config, name)) throw new Error(`account not found: ${name}`);
+  delete config[name];
+  writeConfig(config);
+  process.stdout.write(`Removed GitHub account ${name}.\n`);
+}
+
+function selectAccount() {
+  const config = readConfig();
+  const names = Object.keys(config).sort();
+  const name = option('--account') || process.env.CICY_GITHUB_ACCOUNT || (names.length === 1 ? names[0] : '');
+  if (!name) throw new Error(`multiple accounts configured; choose --account (${names.join(', ')})`);
+  const value = config[name];
+  if (!value || typeof value !== 'object') throw new Error(`account not found: ${name}`);
+  if (!value.api_token || typeof value.api_token !== 'string') throw new Error(`token missing for account: ${name}`);
+  return { name, token: value.api_token, email: typeof value.email === 'string' ? value.email : '' };
+}
+
+async function githubApi(path, account) {
+  const response = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${account.token}`,
+      'User-Agent': 'cicy-github-skill',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!response.ok) throw Object.assign(new Error(`GitHub API request failed (HTTP ${response.status})`), { exitCode: response.status === 401 ? 4 : 1 });
+  return { data: await response.json(), headers: response.headers };
+}
+
+async function whoami() {
+  const account = selectAccount();
+  const { data } = await githubApi('/user', account);
+  const result = { account: account.name, login: data.login, name: data.name || '', id: data.id };
+  process.stdout.write(args.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : `${result.account}\t${result.login}\t${result.name || '-'}\n`);
+}
+
+async function repos() {
+  const account = selectAccount();
+  const requested = Number(option('--limit') || 100);
+  if (!Number.isInteger(requested) || requested < 1 || requested > 1000) throw new Error('--limit must be an integer from 1 to 1000');
+  const output = [];
+  for (let page = 1; output.length < requested; page++) {
+    const count = Math.min(100, requested - output.length);
+    const { data } = await githubApi(`/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=${count}&page=${page}`, account);
+    if (!Array.isArray(data) || !data.length) break;
+    output.push(...data.map((repo) => ({
+      full_name: repo.full_name,
+      visibility: repo.visibility,
+      archived: Boolean(repo.archived),
+      default_branch: repo.default_branch,
+      updated_at: repo.updated_at,
+      clone_url: repo.clone_url,
+    })));
+    if (data.length < count) break;
+  }
+  if (args.includes('--json')) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+  else for (const repo of output) process.stdout.write(`${repo.full_name}\t${repo.visibility}\t${repo.archived ? 'archived' : repo.updated_at}\n`);
+}
+
+async function clone() {
+  const account = selectAccount();
+  const accountIndex = args.indexOf('--account');
+  const positional = args.slice(1).filter((_, index) => !(accountIndex > 0 && (index + 1 === accountIndex || index + 1 === accountIndex + 1)));
+  const repo = positional[0];
+  const target = positional[1];
+  if (!repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error('repository must be owner/repo');
+  const gitArgs = ['-c', 'credential.helper=', 'clone', `https://github.com/${repo}.git`];
+  if (target) gitArgs.push(target);
+  const env = {
+    ...process.env,
+    GIT_ASKPASS: process.argv[1],
+    GIT_TERMINAL_PROMPT: '0',
+    CICY_GITHUB_ASKPASS: '1',
+    CICY_GITHUB_ASKPASS_TOKEN: account.token,
+  };
+  await run('git', gitArgs, env);
+  const directory = target || basename(repo);
+  if (account.email) await run('git', ['-C', directory, 'config', 'user.email', account.email], process.env);
+  await run('git', ['-C', directory, 'config', 'user.name', account.name], process.env);
+  process.stdout.write(`Cloned ${repo} with account ${account.name}; credentials were not persisted.\n`);
+}
+
+function askpass() {
+  const prompt = args.slice(1).join(' ').toLowerCase();
+  const token = process.env.CICY_GITHUB_ASKPASS_TOKEN || '';
+  process.stdout.write(prompt.includes('username') ? 'x-access-token\n' : `${token}\n`);
+  process.exit(token ? 0 : 1);
+}
+
+function run(command, commandArgs, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, commandArgs, { stdio: 'inherit', env });
+    child.once('error', reject);
+    child.once('exit', (code) => code === 0 ? resolve() : reject(Object.assign(new Error(`${command} failed with exit code ${code}`), { exitCode: code || 1 })));
+  });
+}
+
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    let text = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => { text += chunk; if (text.length > 8192) reject(new Error('stdin is too large')); });
+    process.stdin.on('end', () => resolve(text));
+    process.stdin.on('error', reject);
+  });
+}
+
+function sanitize(message) {
+  const config = (() => { try { return readConfig(); } catch { return {}; } })();
+  let safe = String(message).replace(/gh[pousr]_[A-Za-z0-9_]{10,}/g, '[REDACTED]');
+  if (process.env.CICY_GITHUB_ASKPASS_TOKEN) safe = safe.split(process.env.CICY_GITHUB_ASKPASS_TOKEN).join('[REDACTED]');
+  for (const value of Object.values(config)) if (value?.api_token) safe = safe.split(value.api_token).join('[REDACTED]');
+  return safe;
+}
+
+function fail(message, code = 1) {
+  process.stderr.write(`github: ${message}\n`);
+  process.exit(code);
+}
