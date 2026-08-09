@@ -31,6 +31,10 @@ All requests carry `Authorization: Bearer <api_token>`.
 Cross-Instance messages use the authenticated Cloud device session. Target
 Instance API Tokens are never stored or supplied to `cicy-agent`.
 
+Local and Cloud `msg` both print an id immediately and wait for structured
+completion by default. `--no-wait` is asynchronous. Cloud callbacks use
+`agent_reply.reply_to`; `capture` is never used for delivery or completion.
+
 ## Common payloads
 
 ```jsonc

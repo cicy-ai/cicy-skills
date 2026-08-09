@@ -35,10 +35,11 @@ orchestrator:  cicy-agent msg w-200 --notify "do X"     # dispatch
 
 Details:
 
-- **Default (no `--notify`) is silent.** The message is still recorded in the
-  store (`cicy-agent msgs` shows status `sent → done/failed`), but NO chat push
-  fires — so routine dispatches don't spam you. Add `--notify` only when you
-  want to be woken.
+- **Local and Cloud have the same CLI lifecycle.** `msg` prints `msg_id`
+  immediately, then waits for a structured `done/failed` result by default.
+  `--no-wait` returns after durable acceptance. Neither path scrapes `capture`.
+- **Default has no unsolicited chat push.** Waiting output belongs to the
+  calling CLI. Add `--notify` only when the sender Agent itself must be woken.
 - **De-duped.** If the receiver already replied to you in-band during that turn,
   the `--notify` push is suppressed — you won't be double-notified.
 - **You get an id immediately.** `msg` returns `msg_id=<id>`; use it with
@@ -68,8 +69,9 @@ Details:
    are automatic from `~/cicy-ai/db/cloud-device.json`.
 2. `msg --notify` needs `X_AGENT_SHORT_ID` env (set inside cicy panes) — it's
    the sender id the callback wakes.
-3. To judge "did they finish" or read their conclusion, use `reply` (parsed
-   last turn) — do NOT scrape `capture` (raw scrollback drifts as it scrolls).
+3. Message completion and replies MUST use structured message/turn state. Never
+   scrape `capture`; it is manual diagnostics only and is forbidden in Cloud
+   delivery callbacks.
 4. To obtain the current `team_id` or fixed Instance URL, use
    `cicy-agent --json whoami`; never infer the hostname from the team name.
 

@@ -9,10 +9,10 @@ cicy-agent tree                               树形结构（JSON格式）
 cicy-agent windows                            窗口列表（JSON格式）
 cicy-agent capture <pane>                     捕获原始面板文本
 cicy-agent reply <pane> [--full]              面板的最后回复文本（已解析）
-cicy-agent msg <pane> <text>                  发送聊天消息。默认：在消息存储中跟踪
-            [--no-callback] [--notify]         （状态 → done/failed）但不产生
-                                              完成聊天行，并打印 msg_id=<id>
-                                              以便后续查找。--notify 还会在轮次结束时
+cicy-agent msg <pane> <text>                  发送本地或 Cloud 跟踪消息，立即打印
+            [--no-wait] [--timeout S]          msg_id，默认等待结构化 done/failed 回复。
+            [--no-callback] [--notify]         --no-wait 在接收后立即返回；--notify 还会
+                                              在轮次结束时
                                               推送单行状态唤醒（"🔔 [B] msg <id>
                                               → done"；如果对方已回复则抑制）。
                                               --no-callback = 完全

@@ -9,10 +9,10 @@ cicy-agent tree                               Tree (JSON)
 cicy-agent windows                            Window list (JSON)
 cicy-agent capture <pane>                     Capture raw pane text
 cicy-agent reply <pane> [--full]              Last reply text from pane (parsed)
-cicy-agent msg <pane> <text>                  Send chat message. Default: tracked in the
-            [--no-callback] [--notify]         message store (status → done/failed) but NO
-                                              completion chat line, and prints msg_id=<id>
-                                              for later lookup. --notify also pushes a one-line
+cicy-agent msg <pane> <text>                  Send a tracked local or Cloud message, print
+            [--no-wait] [--timeout S]          msg_id immediately, then wait for its structured
+            [--no-callback] [--notify]         done/failed reply by default. --no-wait returns
+                                              after acceptance. --notify also pushes a one-line
                                               status wake-up when the turn ends ("🔔 [B] msg <id>
                                               → done"; suppressed if they already replied).
                                               --no-callback = full

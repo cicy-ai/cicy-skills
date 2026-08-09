@@ -30,6 +30,9 @@
 
 跨 Instance 消息使用已认证的 Cloud 设备会话；无需保存或提供目标 Instance API Token。
 
+本地与 Cloud `msg` 都会立即打印消息 ID，并默认等待结构化完成结果；`--no-wait`
+用于异步发送。Cloud 回调只使用 `agent_reply.reply_to`，禁止用 `capture` 判断投递或完成。
+
 ## 常用载荷
 
 ```jsonc

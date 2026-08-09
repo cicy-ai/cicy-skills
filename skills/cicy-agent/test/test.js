@@ -78,4 +78,37 @@ server.kill();
 rmSync(fixtureDir, { recursive: true, force: true });
 assert('cloud msg prints pending immediately after POST', firstOutputAt > 0 && firstOutputAt - started < 900 && cloudStdout.includes('msg_id=msg-test-12345678  status=pending'), cloudStdout);
 
+// Local and Cloud messages expose the same immediate-id + structured-wait
+// lifecycle. Local completion comes from /api/agent/messages, never capture.
+const localDir = mkdtempSync(join(tmpdir(), 'cicy-agent-local-test-'));
+const localPortFile = join(localDir, 'port');
+const localServer = spawn(process.execPath, ['-e', `
+  const http = require('http'); const fs = require('fs'); let polls = 0;
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/health') return res.end(JSON.stringify({team_id:'local'}));
+    if (req.method === 'POST' && req.url === '/api/tmux/send') return res.end(JSON.stringify({success:true,msg_id:'local-msg-12345678'}));
+    if (req.url === '/api/agent/messages') {
+      polls++;
+      return res.end(JSON.stringify({messages:[{id:'local-msg-12345678',status:polls > 1 ? 'done' : 'sent',turn:polls > 1 ? {a:'local answer'} : null}]}));
+    }
+    res.statusCode=404; res.end(JSON.stringify({error:'not_found'}));
+  });
+  server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port)));
+`, localPortFile], { stdio: 'ignore' });
+let localPort = '';
+for (let i = 0; i < 100 && !localPort; i++) {
+  try { localPort = readFileSync(localPortFile, 'utf8').trim(); } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }
+}
+const globalFile = join(localDir, 'global.json');
+writeFileSync(globalFile, JSON.stringify({api_token:'local-test-token'}));
+const local = runSkill(D, ['msg', 'w-102', 'hello', '--timeout', '3'], {
+  CICY_GLOBAL_JSON: globalFile,
+  CICY_API_PORT: localPort,
+  X_AGENT_SHORT_ID: 'w-test',
+});
+localServer.kill();
+rmSync(localDir, { recursive: true, force: true });
+assert('local msg prints id and structured reply', local.status === 0 && local.stdout.includes('msg_id=local-msg-12345678  status=sent') && local.stdout.includes('local answer'), local.stdout + local.stderr);
+
 finish();

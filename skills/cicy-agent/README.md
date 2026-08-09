@@ -21,9 +21,9 @@ cicy-agent capture w-1001       # raw pane text
 cicy-agent reply w-1001         # last reply (parsed)
 cicy-agent reply w-1001 --full  # include tool_use entries
 
-cicy-agent msg w-10002 'do this'              # tracked in the message store (status → done/
-                                              # failed) + prints msg_id, but NO completion chat
-                                              # line by default
+cicy-agent msg w-10002 'do this'              # prints msg_id immediately, then waits for the
+                                              # structured done/failed reply
+cicy-agent msg w-10002 'do this' --no-wait    # return after durable acceptance
 cicy-agent msg w-10002 'do this' --notify     # also push a one-line status wake-up when the
                                               # turn ends ("🔔 [B] msg <id> → done"; suppressed
                                               # if they already replied in-band)
@@ -40,7 +40,7 @@ cicy-agent whoami                          # this Agent/team/Instance/fixed URL
 cicy-agent --json whoami                   # structured identity
 cicy-agent cloud ls                         # online teams with nested Agents
 cicy-agent cloud ls --all                   # include offline teams
-cicy-agent msg gh_linux.w-102 'hello'        # team prefix → automatic Cloud routing
+cicy-agent msg gh_linux.w-102 'hello'        # same lifecycle through durable Cloud routing
 ```
 
 ## Auth

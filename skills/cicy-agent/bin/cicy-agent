@@ -304,6 +304,9 @@ async function cmdMsg(args, node) {
         console.log(`🔔 [${pane}] msg ${result.messageId} → done`);
         console.log(`${pane}: ${result.reply.text}`);
       }
+      else if (result.status === 'failed') {
+        console.log(`⚠️ [${pane}] msg ${result.messageId} → failed${result.error ? `: ${result.error}` : ''}`);
+      }
       else if (waitForReply) console.log(`(no reply within ${waitSeconds}s; use --no-wait to send asynchronously)`);
       return;
     }
@@ -315,15 +318,42 @@ async function cmdMsg(args, node) {
   if (callback && senderID) payload.callback_to = senderID;
   if (callback && senderID && notify) payload.notify = true;
   const data = await api('POST', '/api/tmux/send', payload, target);
-  if (json) return ok(data);
+  const messageId = data && typeof data === 'object' ? String(data.msg_id || '') : '';
+  if (messageId && !json) console.log(`sent → ${filtered[0]}  msg_id=${messageId}  status=sent`);
+  if (messageId && callback && waitForReply) {
+    const result = await waitForLocalMessage(messageId, waitSeconds, node);
+    if (json) return ok({ messageId, address: filtered[0], ...result });
+    if (result.message?.status === 'done') {
+      console.log(`🔔 [${filtered[0]}] msg ${messageId} → done`);
+      if (result.message.turn?.a) console.log(`${filtered[0]}: ${result.message.turn.a}`);
+    } else if (result.message?.status === 'failed') {
+      console.log(`⚠️ [${filtered[0]}] msg ${messageId} → failed${result.message.error ? `: ${result.message.error}` : ''}`);
+    } else {
+      console.log(`(no reply within ${waitSeconds}s; use --no-wait to send asynchronously)`);
+    }
+    return;
+  }
+  if (json) return ok({ messageId, address: filtered[0], status: messageId ? 'sent' : 'accepted', raw: data });
   // Echo the message id (when the send was recorded in the agent_messages store)
   // so the sender can later `cicy-agent msgs` it by id. Falls back to the raw
   // response for non-agent sends that carry no msg_id.
-  if (data && typeof data === 'object' && data.msg_id) {
-    console.log(`sent → ${filtered[0]}  msg_id=${data.msg_id}`);
-  } else {
+  if (!messageId) {
     console.log(typeof data === 'string' ? data : JSON.stringify(data));
   }
+}
+
+async function waitForLocalMessage(messageId, waitSeconds, node) {
+  const deadline = Date.now() + waitSeconds * 1000;
+  while (Date.now() < deadline) {
+    const data = await api('GET', '/api/agent/messages', undefined, node, 15000);
+    const messages = data?.messages || data?.data?.messages || [];
+    const message = messages.find((item) => String(item?.id || '') === messageId);
+    if (message && ['done', 'failed'].includes(String(message.status || ''))) {
+      return { status: message.status, message };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return { status: 'timeout', message: null };
 }
 
 // cicy-agent msgs [--from PANE] [--to PANE] [--status sent|done|failed] [--open]
@@ -707,6 +737,7 @@ async function sendCloudMessage(target, text, { waitForReply, waitSeconds, onSen
   while (Date.now() < deadline) {
     const status = await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
     if (status.reply) return { messageId, address: target.address, status: status.status, reply: status.reply };
+	if (status.status === 'failed') return { messageId, address: target.address, status: 'failed', error: status.error || status.message || '', reply: null };
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   return { messageId, address: target.address, status: 'timeout', reply: null };

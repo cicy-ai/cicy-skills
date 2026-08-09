@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "title": "Cicy Agent",
   "description": "Operate local and Cloud Agents, discover this Instance's team ID and fixed domain, and coordinate work with tracked messages and completion notifications.",
   "category": "dev",
@@ -67,8 +67,8 @@
     },
     {
       "name": "tmux msg",
-      "example": "cicy-agent msg <worker> <message> [--notify] [--no-callback]",
-      "description": "Message an agent worker. Tracked in the message store (status→done/failed), silent by default; --notify pushes a completion wake-up unless they already replied; --no-callback = fire-and-forget."
+      "example": "cicy-agent msg <worker|team.worker> <message> [--no-wait] [--notify] [--no-callback]",
+      "description": "Send a local or Cloud message. Prints msg_id immediately and waits for structured done/failed reply by default; --no-wait returns after acceptance; callbacks never scrape capture."
     },
     {
       "name": "agent msgs",
