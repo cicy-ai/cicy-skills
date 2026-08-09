@@ -8,7 +8,9 @@ cicy-agent ls                                 Short list
 cicy-agent tree                               Tree (JSON)
 cicy-agent windows                            Window list (JSON)
 cicy-agent capture <pane>                     Capture raw pane text
-cicy-agent reply <pane> [--full]              Last reply text from pane (parsed)
+cicy-agent reply <pane|team.agent> [--full]   Last structured reply; local and Cloud
+cicy-agent history <pane|team.agent>           Historical turn (latest by default)
+            [--index N]                        from history.db; local and Cloud
 cicy-agent msg <pane> <text>                  Send a tracked local or Cloud message, print
             [--no-wait] [--timeout S]          msg_id immediately, then wait for its structured
             [--no-callback] [--notify]         done/failed reply by default. --no-wait returns
@@ -17,7 +19,8 @@ cicy-agent msg <pane> <text>                  Send a tracked local or Cloud mess
                                               → done"; suppressed if they already replied).
                                               --no-callback = full
                                               fire-and-forget (no tracking, no push).
-cicy-agent msgs [--from P] [--to P]           Cross-agent message link: who→who, status,
+cicy-agent msgs [team.agent] [--from P]        Cross-agent message link; optional Cloud
+            [--to P]                           target queries that Instance by RPC
             [--status S] [--open] [--json]     id, and a q⟶answer summary of BOTH the sender's
                                               dispatch turn (from-turn) and what the receiver
                                               did (to-turn), JOINed from each agent's history.

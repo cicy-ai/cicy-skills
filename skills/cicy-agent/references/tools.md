@@ -9,6 +9,7 @@
 | `windows`       | GET    | `/api/tmux/windows`        |
 | `capture`       | POST   | `/api/tmux/capture_pane`   |
 | `reply`         | POST   | `/api/tmux/reply_text`     |
+| `history`       | POST   | `/api/tmux/chat_history`   |
 | `msg`           | POST   | `/api/tmux/send`           |
 | `broadcast`     | GET ×2 + POST ×N | `/api/tmux/panes` + `/api/tmux/tree`, then `/api/tmux/send` per target (per-send timeout) |
 | `get_online_agents` / `get_offline_agents` / `get_all_agents` | GET | `/api/tmux/panes` + `/api/tmux/tree` (online = session present in live tree) |
@@ -18,6 +19,7 @@
 | `whoami`        | GET    | `/api/health` + `/api/code/instances` |
 | `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |
 | `msg <team.agent>` | POST + GET | `/api/code/messages`, then `/api/code/messages/status` |
+| `reply/history/msgs <team.agent>` | POST + GET | Cloud `rpc_request/rpc_reply` through the same message endpoints |
 
 All requests carry `Authorization: Bearer <api_token>`.
 

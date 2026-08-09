@@ -9,6 +9,7 @@
 | `windows` | GET | `/api/tmux/windows` |
 | `capture` | POST | `/api/tmux/capture_pane` |
 | `reply` | POST | `/api/tmux/reply_text` |
+| `history` | POST | `/api/tmux/chat_history` |
 | `msg` | POST | `/api/tmux/send` |
 | `broadcast` | GET ×2 + POST ×N | `/api/tmux/panes` + `/api/tmux/tree`，然后为每个目标执行 `/api/tmux/send`（每次发送有超时） |
 | `get_online_agents` / `get_offline_agents` / `get_all_agents` | GET | `/api/tmux/panes` + `/api/tmux/tree`（在线 = 会话存在于实时树中） |
@@ -18,6 +19,7 @@
 | `whoami` | GET | `/api/health` + `/api/code/instances` |
 | `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |
 | `msg <team.agent>` | POST + GET | `/api/code/messages`，然后 `/api/code/messages/status` |
+| `reply/history/msgs <team.agent>` | POST + GET | 通过相同消息端点发送 Cloud `rpc_request/rpc_reply` |
 
 所有请求携带 `Authorization: Bearer <api_token>`。
 

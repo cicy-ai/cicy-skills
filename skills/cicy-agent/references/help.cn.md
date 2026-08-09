@@ -8,7 +8,9 @@ cicy-agent ls                                 简短列表
 cicy-agent tree                               树形结构（JSON格式）
 cicy-agent windows                            窗口列表（JSON格式）
 cicy-agent capture <pane>                     捕获原始面板文本
-cicy-agent reply <pane> [--full]              面板的最后回复文本（已解析）
+cicy-agent reply <pane|team.agent> [--full]   最后一条结构化回复；支持本地与 Cloud
+cicy-agent history <pane|team.agent>           历史回合（默认最新）
+            [--index N]                        从 history.db 读取；支持本地与 Cloud
 cicy-agent msg <pane> <text>                  发送本地或 Cloud 跟踪消息，立即打印
             [--no-wait] [--timeout S]          msg_id，默认等待结构化 done/failed 回复。
             [--no-callback] [--notify]         --no-wait 在接收后立即返回；--notify 还会
@@ -17,7 +19,8 @@ cicy-agent msg <pane> <text>                  发送本地或 Cloud 跟踪消息
                                               → done"；如果对方已回复则抑制）。
                                               --no-callback = 完全
                                               即发即忘（不跟踪，不推送）。
-cicy-agent msgs [--from P] [--to P]           跨代理消息链接：谁→谁，状态，
+cicy-agent msgs [team.agent] [--from P]        跨代理消息链；可指定 Cloud 目标
+            [--to P]                           通过 RPC 查询目标 Instance
             [--status S] [--open] [--json]     ID，以及发送方派发轮次（from-turn）
                                               和接收方操作（to-turn）的 q⟶answer 摘要，
                                               均从各自代理的历史记录中联接获取。

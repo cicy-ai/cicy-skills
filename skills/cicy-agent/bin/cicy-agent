@@ -38,6 +38,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'windows':            await cmdWindows(r2, node); break;
       case 'capture':            await cmdCapture(r2, node); break;
       case 'reply':              await cmdReply(r2, node); break;
+      case 'history':            await cmdHistory(r2, node); break;
       case 'msg':                await cmdMsg(r2, node); break;
       case 'msgs':               await cmdMsgs(r2, node); break;
       case 'broadcast':          await cmdBroadcast(r2, node); break;
@@ -223,10 +224,38 @@ async function cmdReply(args, node) {
     else filtered.push(a);
   }
   if (filtered.length < 1) throw Object.assign(new Error('Usage: cicy-agent reply <pane> [--full]'), { exitCode: 2 });
+  if (!node && isCloudAddress(filtered[0])) {
+    const target = await requireCloudAgent(filtered[0]);
+    const data = await sendCloudRPC(target, { op: 'reply', full });
+    if (json) return ok(data);
+    console.log(data?.text || JSON.stringify(data, null, 2));
+    return;
+  }
   const data = await api('POST', '/api/tmux/reply_text', { pane_id: filtered[0], full }, node);
   if (json) return ok(data);
   if (typeof data === 'string') console.log(data);
   else console.log(data?.text || JSON.stringify(data, null, 2));
+}
+
+async function cmdHistory(args, node) {
+  let index = 0;
+  const filtered = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--index' || args[i] === '-i') index = Math.max(0, Number(args[++i] || 0) || 0);
+    else filtered.push(args[i]);
+  }
+  if (filtered.length < 1) throw Object.assign(new Error('Usage: cicy-agent history <pane|team.agent> [--index N]'), { exitCode: 2 });
+  const address = filtered[0];
+  let data;
+  if (!node && isCloudAddress(address)) {
+    data = await sendCloudRPC(await requireCloudAgent(address), { op: 'history', index });
+  } else {
+    data = await api('POST', '/api/tmux/chat_history', { pane_id: address, index }, node);
+  }
+  if (json) return ok(data);
+  if (!data?.found) { console.log('(no history)'); return; }
+  console.log(`q: ${data.q || ''}`);
+  console.log(`a: ${data.a || ''}`);
 }
 
 // Stamp the sender id (set inside cicy panes) so the receiver can skim who
@@ -372,15 +401,24 @@ async function waitForLocalMessage(messageId, waitSeconds, node) {
 // of what the receiver actually did (q ⟶ answer, JOINed from history_turns).
 async function cmdMsgs(args, node) {
   const q = new URLSearchParams();
+  let cloudAddress = '';
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--from') q.set('from', args[++i] || '');
     else if (a === '--to') q.set('to', args[++i] || '');
     else if (a === '--status') q.set('status', args[++i] || '');
     else if (a === '--open') q.set('open', '1');
+    else if (!cloudAddress && isCloudAddress(a)) cloudAddress = a;
   }
-  const path = '/api/agent/messages' + (q.toString() ? `?${q.toString()}` : '');
-  const data = await api('GET', path, undefined, node);
+  let data;
+  if (!node && cloudAddress) {
+    const target = await requireCloudAgent(cloudAddress);
+    data = await sendCloudRPC(target, { op: 'msgs', from: q.get('from') || '', to: q.get('to') || '',
+      status: q.get('status') || '', open: q.get('open') === '1' });
+  } else {
+    const path = '/api/agent/messages' + (q.toString() ? `?${q.toString()}` : '');
+    data = await api('GET', path, undefined, node);
+  }
   if (json) return ok(data);
   const msgs = data?.messages || data?.data?.messages || [];
   if (!msgs.length) { console.log('(no messages)'); return; }
@@ -734,6 +772,38 @@ async function resolveCloudAgent(address) {
   const senderID = [senderInstance?.teamId || credential.instanceId, senderAgentID].filter(Boolean).join('.');
   return { address, instanceId: instance.instanceId, agentId: agentID,
     senderID, senderAgentId: senderAgentRegistered ? senderAgentID : '' };
+}
+
+function isCloudAddress(address) {
+  return String(address || '').includes('.') && !String(address || '').startsWith('w-');
+}
+
+async function requireCloudAgent(address) {
+  const target = await resolveCloudAgent(address);
+  if (!target) throw Object.assign(new Error(`Cloud agent not found: ${address}`), { exitCode: 4 });
+  return target;
+}
+
+async function sendCloudRPC(target, request, waitSeconds = 30) {
+  const payload = { targetInstanceId: target.instanceId, targetAgentId: target.agentId,
+    kind: 'rpc_request', text: JSON.stringify(request) };
+  if (target.senderAgentId) payload.senderAgentId = target.senderAgentId;
+  const sent = await cloudAPI('POST', '/api/code/messages', payload);
+  const messageId = sent?.message?.id || '';
+  if (!messageId) throw Object.assign(new Error('Cloud RPC was not accepted'), { exitCode: 4 });
+  const deadline = Date.now() + waitSeconds * 1000;
+  while (Date.now() < deadline) {
+    const status = await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
+    if (status.reply) {
+      let envelope;
+      try { envelope = JSON.parse(status.reply.text || '{}'); }
+      catch { throw Object.assign(new Error('invalid Cloud RPC reply'), { exitCode: 4 }); }
+      if (!envelope.ok) throw Object.assign(new Error(envelope.error || 'Cloud RPC failed'), { exitCode: 4 });
+      return envelope.data;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw Object.assign(new Error(`Cloud RPC timed out after ${waitSeconds}s`), { exitCode: 4 });
 }
 
 async function sendCloudMessage(target, text, { waitForReply, waitSeconds, onSent }) {

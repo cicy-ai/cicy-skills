@@ -55,7 +55,9 @@ Details:
 - capture pane output; `reply` returns the recipient's parsed last-turn text
 - `msg` a message to another pane (recorded in the store, status → done/failed;
   `--notify` above; `--no-callback` = fire-and-forget)
-- `msgs` — the cross-agent message link: who→who, status, and a q⟶answer
+- `reply` and `history` read structured replies/turns locally or from a
+  `team.agent` Cloud target; Cloud reads never use terminal capture
+- `msgs` — the local or Cloud cross-agent message link: who→who, status, and a q⟶answer
   summary of what the receiver actually did
 - restart all panes / clear one
 - `cloud ls [--all]` / `cloud agents [--all]` — discover Cloud Instances and Agents
