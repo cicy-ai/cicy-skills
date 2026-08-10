@@ -18,6 +18,8 @@ try {
   else if (args[0] === 'whoami') await whoami();
   else if (args[0] === 'repos') await repos();
   else if (args[0] === 'clone') await clone();
+  else if (args[0] === 'configure') await configure();
+  else if (args[0] === 'credential') await credential();
   else fail(`unknown command: ${args[0]}. Try github --help.`, 2);
 } catch (error) {
   fail(sanitize(error?.message || String(error)), error?.exitCode || 1);
@@ -33,6 +35,7 @@ Usage:
   github whoami --account <account>
   github repos --account <account> [--limit 100] [--json]
   github clone --account <account> <owner/repo> [directory]
+  github configure --account <account> [directory]
 
 Account selection: --account, then CICY_GITHUB_ACCOUNT, or the only configured account.
 Tokens are read only from stdin/config, never accepted as command arguments or printed.
@@ -173,9 +176,48 @@ async function clone() {
   };
   await run('git', gitArgs, env);
   const directory = target || basename(repo);
-  if (account.email) await run('git', ['-C', directory, 'config', 'user.email', account.email], process.env);
-  await run('git', ['-C', directory, 'config', 'user.name', account.name], process.env);
-  process.stdout.write(`Cloned ${repo} with account ${account.name}; credentials were not persisted.\n`);
+  await configureRepository(directory, account);
+  process.stdout.write(`Cloned ${repo} and bound future HTTPS pull/push to account ${account.name}.\n`);
+}
+
+async function configure() {
+  const account = selectAccount();
+  const positional = positionalAfterCommand();
+  const directory = positional[0] || '.';
+  await configureRepository(directory, account);
+  process.stdout.write(`Bound ${directory} HTTPS pull/push to GitHub account ${account.name}.\n`);
+}
+
+async function configureRepository(directory, account) {
+  const inside = (await runCapture('git', ['-C', directory, 'rev-parse', '--is-inside-work-tree'], process.env)).trim();
+  if (inside !== 'true') throw new Error(`${directory} is not a Git repository`);
+  const origin = (await runCapture('git', ['-C', directory, 'remote', 'get-url', 'origin'], process.env)).trim();
+  if (/^http:\/\/github\.com\//i.test(origin)) {
+    await run('git', ['-C', directory, 'remote', 'set-url', 'origin', origin.replace(/^http:/i, 'https:')], process.env);
+  } else if (!/^https:\/\/github\.com\//i.test(origin)) {
+    throw new Error('origin must be an HTTP(S) GitHub URL; SSH remotes keep their own key-based authentication');
+  }
+  const helper = `!CICY_GITHUB_CREDENTIAL=1 ${shellQuote(process.argv[1])} credential --account ${shellQuote(account.name)}`;
+  const key = 'credential.https://github.com.helper';
+  await run('git', ['-C', directory, 'config', '--local', '--replace-all', key, ''], process.env);
+  await run('git', ['-C', directory, 'config', '--local', '--add', key, helper], process.env);
+  await run('git', ['-C', directory, 'config', '--local', 'credential.https://github.com.useHttpPath', 'true'], process.env);
+  await run('git', ['-C', directory, 'config', '--local', 'cicy.githubAccount', account.name], process.env);
+  await run('git', ['-C', directory, 'config', '--local', 'user.name', account.name], process.env);
+  if (account.email) await run('git', ['-C', directory, 'config', '--local', 'user.email', account.email], process.env);
+}
+
+async function credential() {
+  if (process.env.CICY_GITHUB_CREDENTIAL !== '1') throw new Error('credential is an internal Git helper; use github configure instead');
+  const operation = args.at(-1);
+  const request = Object.fromEntries((await readStdin()).split(/\r?\n/).filter(Boolean).map((line) => {
+    const index = line.indexOf('=');
+    return index < 0 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
+  }));
+  if (operation !== 'get') return;
+  if (request.protocol !== 'https' || String(request.host || '').toLowerCase() !== 'github.com') return;
+  const account = selectAccount();
+  process.stdout.write(`username=x-access-token\npassword=${account.token}\n\n`);
 }
 
 function askpass() {
@@ -191,6 +233,31 @@ function run(command, commandArgs, env) {
     child.once('error', reject);
     child.once('exit', (code) => code === 0 ? resolve() : reject(Object.assign(new Error(`${command} failed with exit code ${code}`), { exitCode: code || 1 })));
   });
+}
+
+function runCapture(command, commandArgs, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, commandArgs, { stdio: ['ignore', 'pipe', 'pipe'], env });
+    let stdout = '', stderr = '';
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('exit', (code) => code === 0 ? resolve(stdout) : reject(Object.assign(new Error(`${command} failed with exit code ${code}: ${stderr.trim()}`), { exitCode: code || 1 })));
+  });
+}
+
+function positionalAfterCommand() {
+  const output = [];
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === '--account') { i++; continue; }
+    output.push(args[i]);
+  }
+  return output;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 function readStdin() {

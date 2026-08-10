@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "github",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "title": "GitHub Multi-Account",
-  "description": "Secure multi-account GitHub operations for listing accessible repositories, verifying identities, cloning with a selected account, and managing local credentials without exposing or persisting tokens.",
+  "description": "Secure multi-account GitHub operations for identity verification, repository discovery, cloning, and persistent per-repository account binding without exposing tokens.",
   "category": "dev",
   "tags": ["github", "git", "multi-account", "repository", "security"],
   "author": "cicy-ai",
@@ -28,12 +28,13 @@
   "i18n": {
     "zh-CN": {
       "title": "GitHub 多账号",
-      "description": "安全管理多个 GitHub 账号，按指定账号验证身份、列出仓库和克隆，并避免 Token 出现在参数、日志或 Git 配置中。"
+      "description": "安全管理多个 GitHub 账号，按指定账号验证身份、列出仓库和克隆，并为仓库持久绑定推送账号而不暴露 Token。"
     }
   },
   "tools": [
     { "name": "List accounts", "example": "github accounts", "description": "List configured identities without displaying tokens" },
     { "name": "List repositories", "example": "github repos --account work", "description": "List repositories accessible to one identity" },
-    { "name": "Clone repository", "example": "github clone --account work owner/repo", "description": "Clone without persisting or displaying the token" }
+    { "name": "Clone repository", "example": "github clone --account work owner/repo", "description": "Clone and bind future HTTPS pull/push to the selected account" },
+    { "name": "Configure repository", "example": "github configure --account work .", "description": "Bind an existing HTTPS clone to one configured account" }
   ]
 }
