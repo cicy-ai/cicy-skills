@@ -19,6 +19,7 @@ try {
   else if (args[0] === 'repos') await repos();
   else if (args[0] === 'clone') await clone();
   else if (args[0] === 'configure') await configure();
+  else if (args[0] === 'gh') await gh();
   else if (args[0] === 'credential') await credential();
   else fail(`unknown command: ${args[0]}. Try github --help.`, 2);
 } catch (error) {
@@ -36,6 +37,7 @@ Usage:
   github repos --account <account> [--limit 100] [--json]
   github clone --account <account> <owner/repo> [directory]
   github configure --account <account> [directory]
+  github gh --account <account> <gh arguments...>
 
 Account selection: --account, then CICY_GITHUB_ACCOUNT, or the only configured account.
 Tokens are read only from stdin/config, never accepted as command arguments or printed.
@@ -186,6 +188,22 @@ async function configure() {
   const directory = positional[0] || '.';
   await configureRepository(directory, account);
   process.stdout.write(`Bound ${directory} HTTPS pull/push to GitHub account ${account.name}.\n`);
+}
+
+async function gh() {
+  const account = selectAccount();
+  const ghArgs = positionalAfterCommand();
+  if (!ghArgs.length) throw new Error('gh arguments are required');
+  if (ghArgs[0] === 'auth' && ghArgs[1] === 'token') {
+    throw new Error('refusing `gh auth token`; use github accounts to inspect configured identities without exposing tokens');
+  }
+  const env = {
+    ...process.env,
+    GH_TOKEN: account.token,
+    GH_HOST: 'github.com',
+  };
+  delete env.GITHUB_TOKEN;
+  await run('gh', ghArgs, env);
 }
 
 async function configureRepository(directory, account) {

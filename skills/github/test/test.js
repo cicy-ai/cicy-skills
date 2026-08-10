@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -22,6 +22,25 @@ result = spawnSync(bin, ['accounts', '--json'], { env, encoding: 'utf8' });
 assert.equal(result.status, 0, result.stderr);
 assert.equal(result.stdout.includes(token), false);
 assert.deepEqual(JSON.parse(result.stdout), [{ name: 'work', email: 'dev@example.com', token_configured: true }]);
+
+const fakeBin = join(dir, 'bin');
+const ghCapture = join(dir, 'gh-capture.json');
+mkdirSync(fakeBin);
+writeFileSync(join(fakeBin, 'gh'), `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+writeFileSync(process.env.TEST_GH_CAPTURE, JSON.stringify({ token: process.env.GH_TOKEN, githubToken: process.env.GITHUB_TOKEN || '', args: process.argv.slice(2) }));
+`);
+chmodSync(join(fakeBin, 'gh'), 0o755);
+result = spawnSync(bin, ['gh', '--account', 'work', 'run', 'list', '--repo', 'owner/repo'], {
+  env: { ...env, PATH: `${fakeBin}:${process.env.PATH}`, TEST_GH_CAPTURE: ghCapture, GITHUB_TOKEN: 'wrong-account-token' }, encoding: 'utf8',
+});
+assert.equal(result.status, 0, result.stderr);
+assert.equal(result.stdout.includes(token) || result.stderr.includes(token), false);
+assert.deepEqual(JSON.parse(readFileSync(ghCapture, 'utf8')), { token, githubToken: '', args: ['run', 'list', '--repo', 'owner/repo'] });
+
+result = spawnSync(bin, ['gh', '--account', 'work', 'auth', 'token'], { env, encoding: 'utf8' });
+assert.notEqual(result.status, 0);
+assert.equal(result.stdout.includes(token) || result.stderr.includes(token), false);
 
 result = spawnSync(bin, ['add', 'bad/account', '--token-stdin'], { env, input: token, encoding: 'utf8' });
 assert.notEqual(result.status, 0);
