@@ -7,8 +7,11 @@ github remove <account> --yes
 github whoami --account <account> [--json]
 github repos --account <account> [--limit 1..1000] [--json]
 github clone --account <account> <owner/repo> [directory]
+github configure --account <account> [directory]
 ```
 
 Account resolution order: `--account`, `CICY_GITHUB_ACCOUNT`, then the only configured account. When multiple accounts exist, explicit selection is required.
 
-`github clone` configures `user.name` and the configured email only in the cloned repository. It does not modify global Git or `gh` authentication.
+`github clone` configures the account binding, `user.name`, and configured email in the cloned repository. Ordinary `git pull` and `git push` then use that account automatically.
+
+Run `github configure --account <account> [directory]` once for an existing HTTPS clone. HTTP origins are upgraded to HTTPS; SSH origins are left unchanged.
