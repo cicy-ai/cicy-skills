@@ -38,6 +38,7 @@ path is unavailable, cicy-agent falls back to the durable Worker HTTP/D1 path.
 Local and Cloud `msg` both print an id immediately and wait for structured
 completion by default. `--no-wait` is asynchronous. Cloud callbacks use
 `agent_reply.reply_to`; `capture` is never used for delivery or completion.
+Cloud sends also print `transport=ws|http`, reporting the path actually used.
 
 ## Common payloads
 

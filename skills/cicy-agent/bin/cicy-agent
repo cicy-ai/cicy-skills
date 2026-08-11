@@ -326,7 +326,7 @@ async function cmdMsg(args, node) {
       const result = await sendCloudMessage(cloudTarget, text, {
         waitForReply,
         waitSeconds,
-        onSent: json ? null : (messageId) => console.log(`sent → ${pane}  msg_id=${messageId}  status=pending`),
+        onSent: json ? null : (messageId, transport) => console.log(`sent → ${pane}  msg_id=${messageId}  transport=${transport}  status=pending`),
       });
       if (json) return ok(result);
       if (result.reply) {
@@ -814,18 +814,18 @@ async function sendCloudMessage(target, text, { waitForReply, waitSeconds, onSen
   if (target.senderAgentId) payload.senderAgentId = target.senderAgentId;
   const data = await sendPreferredCloudPayload(payload);
   const messageId = data?.message?.id || '';
-  if (messageId && typeof onSent === 'function') onSent(messageId);
-  if (!messageId || !waitForReply) return { messageId, address: target.address, reply: null };
+  if (messageId && typeof onSent === 'function') onSent(messageId, data.transport);
+  if (!messageId || !waitForReply) return { messageId, address: target.address, transport: data.transport, reply: null };
   const deadline = Date.now() + waitSeconds * 1000;
   while (Date.now() < deadline) {
     const status = data.transport === 'ws'
       ? await api('GET', `/api/im/cicy-cloud/status?id=${encodeURIComponent(messageId)}`)
       : await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
-    if (status.reply) return { messageId, address: target.address, status: status.status, reply: status.reply };
-	if (status.status === 'failed') return { messageId, address: target.address, status: 'failed', error: status.error || status.message || '', reply: null };
+    if (status.reply) return { messageId, address: target.address, transport: data.transport, status: status.status, reply: status.reply };
+	if (status.status === 'failed') return { messageId, address: target.address, transport: data.transport, status: 'failed', error: status.error || status.message || '', reply: null };
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  return { messageId, address: target.address, status: 'timeout', reply: null };
+  return { messageId, address: target.address, transport: data.transport, status: 'timeout', reply: null };
 }
 
 async function sendPreferredCloudPayload(payload) {

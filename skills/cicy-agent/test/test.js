@@ -80,7 +80,7 @@ cli.stdout.on('data', (chunk) => {
 await new Promise((resolve) => cli.on('close', resolve));
 server.kill();
 rmSync(fixtureDir, { recursive: true, force: true });
-assert('cloud msg prefers local websocket path and receives reply', firstOutputAt > 0 && firstOutputAt - started < 1500 && cloudStdout.includes('msg_id=msg-ws-12345678  status=pending') && cloudStdout.includes('ws answer') && !cloudStdout.includes('msg-http-12345678'), cloudStdout);
+assert('cloud msg prefers local websocket path and receives reply', firstOutputAt > 0 && firstOutputAt - started < 1500 && cloudStdout.includes('msg_id=msg-ws-12345678  transport=ws  status=pending') && cloudStdout.includes('ws answer') && !cloudStdout.includes('msg-http-12345678'), cloudStdout);
 
 // Local and Cloud messages expose the same immediate-id + structured-wait
 // lifecycle. Local completion comes from /api/agent/messages, never capture.
