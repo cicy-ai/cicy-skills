@@ -18,8 +18,8 @@
 | `clear`         | POST   | `/api/tmux/clear`          |
 | `whoami`        | GET    | `/api/health` + `/api/code/instances` |
 | `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |
-| `msg <team.agent>` | POST + GET | `/api/code/messages`, then `/api/code/messages/status` |
-| `reply/history/msgs <team.agent>` | POST + GET | Cloud `rpc_request/rpc_reply` through the same message endpoints |
+| `msg <team.agent>` | POST + GET | Local `/api/im/cicy-cloud/send` + `/status` over WS; Worker `/api/code/messages` fallback |
+| `reply/history/msgs <team.agent>` | POST + GET | Cloud `rpc_request/rpc_reply` through the same WS-first transport |
 
 All requests carry `Authorization: Bearer <api_token>`.
 
@@ -32,6 +32,8 @@ All requests carry `Authorization: Bearer <api_token>`.
 
 Cross-Instance messages use the authenticated Cloud device session. Target
 Instance API Tokens are never stored or supplied to `cicy-agent`.
+The local cicy-code daemon sends through its connected WebSocket first. If that
+path is unavailable, cicy-agent falls back to the durable Worker HTTP/D1 path.
 
 Local and Cloud `msg` both print an id immediately and wait for structured
 completion by default. `--no-wait` is asynchronous. Cloud callbacks use

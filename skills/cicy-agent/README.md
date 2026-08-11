@@ -43,7 +43,7 @@ cicy-agent whoami                          # this Agent/team/Instance/fixed URL
 cicy-agent --json whoami                   # structured identity
 cicy-agent cloud ls                         # online teams with nested Agents
 cicy-agent cloud ls --all                   # include offline teams
-cicy-agent msg gh_linux.w-102 'hello'        # same lifecycle through durable Cloud routing
+cicy-agent msg gh_linux.w-102 'hello'        # WebSocket first; durable HTTP/D1 fallback
 ```
 
 ## Auth

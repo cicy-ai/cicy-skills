@@ -50,7 +50,9 @@ const server = spawn(process.execPath, ['-e', `
       {instanceId:'code-source-1234567890123456',agentId:'w-test'},
       {instanceId:'code-target-1234567890123456',agentId:'w-102'}
     ]}));
-    if (req.method === 'POST' && req.url === '/api/code/messages') return res.end(JSON.stringify({message:{id:'msg-test-12345678'}}));
+    if (req.method === 'POST' && req.url === '/api/im/cicy-cloud/send') return res.end(JSON.stringify({transport:'ws',message:{id:'msg-ws-12345678'}}));
+    if (req.url.startsWith('/api/im/cicy-cloud/status')) return res.end(JSON.stringify({status:'replied',transport:'ws',reply:{id:'msg-reply-12345678',text:'ws answer'}}));
+    if (req.method === 'POST' && req.url === '/api/code/messages') return res.end(JSON.stringify({message:{id:'msg-http-12345678'}}));
     if (req.url.startsWith('/api/code/messages/status')) return res.end(JSON.stringify({status:'pending',reply:null}));
     res.statusCode = 404; res.end(JSON.stringify({error:'not_found'}));
   });
@@ -62,9 +64,11 @@ for (let i = 0; i < 100 && !port; i++) {
 }
 const deviceFile = join(fixtureDir, 'cloud-device.json');
 writeFileSync(deviceFile, JSON.stringify({ token: 'test-token', cloud_origin: `http://127.0.0.1:${port}`, instance_id: 'code-source-1234567890123456' }));
+const cloudGlobalFile = join(fixtureDir, 'global.json');
+writeFileSync(cloudGlobalFile, JSON.stringify({api_token:'local-test-token'}));
 const started = Date.now();
-const cli = spawn(process.execPath, [join(D, 'bin/cicy-agent'), 'msg', 'remote.w-102', 'hello', '--timeout', '1'], {
-  env: { ...process.env, CICY_CLOUD_DEVICE_JSON: deviceFile, X_AGENT_SHORT_ID: 'w-test' },
+const cli = spawn(process.execPath, [join(D, 'bin/cicy-agent'), 'msg', 'remote.w-102', 'hello', '--timeout', '3'], {
+  env: { ...process.env, CICY_CLOUD_DEVICE_JSON: deviceFile, CICY_GLOBAL_JSON: cloudGlobalFile, CICY_API_PORT: port, X_AGENT_SHORT_ID: 'w-test' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let firstOutputAt = 0;
@@ -76,7 +80,7 @@ cli.stdout.on('data', (chunk) => {
 await new Promise((resolve) => cli.on('close', resolve));
 server.kill();
 rmSync(fixtureDir, { recursive: true, force: true });
-assert('cloud msg prints pending immediately after POST', firstOutputAt > 0 && firstOutputAt - started < 900 && cloudStdout.includes('msg_id=msg-test-12345678  status=pending'), cloudStdout);
+assert('cloud msg prefers local websocket path and receives reply', firstOutputAt > 0 && firstOutputAt - started < 1500 && cloudStdout.includes('msg_id=msg-ws-12345678  status=pending') && cloudStdout.includes('ws answer') && !cloudStdout.includes('msg-http-12345678'), cloudStdout);
 
 // Local and Cloud messages expose the same immediate-id + structured-wait
 // lifecycle. Local completion comes from /api/agent/messages, never capture.

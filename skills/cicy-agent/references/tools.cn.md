@@ -18,8 +18,8 @@
 | `clear` | POST | `/api/tmux/clear` |
 | `whoami` | GET | `/api/health` + `/api/code/instances` |
 | `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |
-| `msg <team.agent>` | POST + GET | `/api/code/messages`，然后 `/api/code/messages/status` |
-| `reply/history/msgs <team.agent>` | POST + GET | 通过相同消息端点发送 Cloud `rpc_request/rpc_reply` |
+| `msg <team.agent>` | POST + GET | WS 优先走本机 `/api/im/cicy-cloud/send` + `/status`；失败回退 Worker `/api/code/messages` |
+| `reply/history/msgs <team.agent>` | POST + GET | 通过相同的 WS 优先传输发送 Cloud `rpc_request/rpc_reply` |
 
 所有请求携带 `Authorization: Bearer <api_token>`。
 
@@ -31,6 +31,8 @@
 | `~/cicy-ai/db/cloud-device.json` | 0600 | Cloud 会话 `token` |
 
 跨 Instance 消息使用已认证的 Cloud 设备会话；无需保存或提供目标 Instance API Token。
+本机 cicy-code 已连接 WebSocket 时优先通过 Hub 发送；WS 不可用时，cicy-agent
+自动回退到可靠的 Worker HTTP/D1 链路。
 
 本地与 Cloud `msg` 都会立即打印消息 ID，并默认等待结构化完成结果；`--no-wait`
 用于异步发送。Cloud 回调只使用 `agent_reply.reply_to`，禁止用 `capture` 判断投递或完成。

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.6.11",
+  "version": "1.6.12",
   "title": "Cicy Agent",
   "description": "Operate local and Cloud Agents, discover this Instance's team ID and fixed domain, and coordinate work with tracked messages and completion notifications.",
   "category": "dev",

@@ -788,12 +788,14 @@ async function sendCloudRPC(target, request, waitSeconds = 30) {
   const payload = { targetInstanceId: target.instanceId, targetAgentId: target.agentId,
     kind: 'rpc_request', text: JSON.stringify(request) };
   if (target.senderAgentId) payload.senderAgentId = target.senderAgentId;
-  const sent = await cloudAPI('POST', '/api/code/messages', payload);
+  const sent = await sendPreferredCloudPayload(payload);
   const messageId = sent?.message?.id || '';
   if (!messageId) throw Object.assign(new Error('Cloud RPC was not accepted'), { exitCode: 4 });
   const deadline = Date.now() + waitSeconds * 1000;
   while (Date.now() < deadline) {
-    const status = await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
+    const status = sent.transport === 'ws'
+      ? await api('GET', `/api/im/cicy-cloud/status?id=${encodeURIComponent(messageId)}`)
+      : await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
     if (status.reply) {
       let envelope;
       try { envelope = JSON.parse(status.reply.text || '{}'); }
@@ -810,18 +812,35 @@ async function sendCloudMessage(target, text, { waitForReply, waitSeconds, onSen
   const stamped = target.senderID && !/^📮\s/.test(text) ? `📮 [${target.senderID}] ${text}` : text;
   const payload = { targetInstanceId: target.instanceId, targetAgentId: target.agentId, text: stamped };
   if (target.senderAgentId) payload.senderAgentId = target.senderAgentId;
-  const data = await cloudAPI('POST', '/api/code/messages', payload);
+  const data = await sendPreferredCloudPayload(payload);
   const messageId = data?.message?.id || '';
   if (messageId && typeof onSent === 'function') onSent(messageId);
   if (!messageId || !waitForReply) return { messageId, address: target.address, reply: null };
   const deadline = Date.now() + waitSeconds * 1000;
   while (Date.now() < deadline) {
-    const status = await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
+    const status = data.transport === 'ws'
+      ? await api('GET', `/api/im/cicy-cloud/status?id=${encodeURIComponent(messageId)}`)
+      : await cloudAPI('GET', `/api/code/messages/status?id=${encodeURIComponent(messageId)}`);
     if (status.reply) return { messageId, address: target.address, status: status.status, reply: status.reply };
 	if (status.status === 'failed') return { messageId, address: target.address, status: 'failed', error: status.error || status.message || '', reply: null };
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   return { messageId, address: target.address, status: 'timeout', reply: null };
+}
+
+async function sendPreferredCloudPayload(payload) {
+  try {
+    const local = await api('POST', '/api/im/cicy-cloud/send', {
+      target_instance_id: payload.targetInstanceId,
+      target_agent_id: payload.targetAgentId || '',
+      sender_agent_id: payload.senderAgentId || '',
+      text: payload.text,
+      kind: payload.kind || 'user_message',
+    });
+    if (local?.message?.id && (local.transport === 'ws' || local.transport === 'http')) return local;
+  } catch { /* old/unavailable local daemon: use the durable Worker fallback */ }
+  const fallback = await cloudAPI('POST', '/api/code/messages', payload);
+  return { ...fallback, transport: 'http' };
 }
 
 async function cmdFork(args, node) {
