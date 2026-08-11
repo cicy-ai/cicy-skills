@@ -78,9 +78,16 @@ cli.stdout.on('data', (chunk) => {
   cloudStdout += chunk;
 });
 await new Promise((resolve) => cli.on('close', resolve));
+const fallback = runSkill(D, ['msg', 'remote.w-102', 'fallback', '--timeout', '1'], {
+  CICY_CLOUD_DEVICE_JSON: deviceFile,
+  CICY_GLOBAL_JSON: cloudGlobalFile,
+  CICY_API_PORT: '1',
+  X_AGENT_SHORT_ID: 'w-test',
+});
 server.kill();
 rmSync(fixtureDir, { recursive: true, force: true });
 assert('cloud msg prefers local websocket path and receives reply', firstOutputAt > 0 && firstOutputAt - started < 1500 && cloudStdout.includes('msg_id=msg-ws-12345678  transport=ws  status=pending') && cloudStdout.includes('ws answer') && !cloudStdout.includes('msg-http-12345678'), cloudStdout);
+assert('cloud msg falls back to Worker HTTP when local websocket path is unavailable', fallback.stdout.includes('msg_id=msg-http-12345678  transport=http  status=pending'), fallback.stdout + fallback.stderr);
 
 // Local and Cloud messages expose the same immediate-id + structured-wait
 // lifecycle. Local completion comes from /api/agent/messages, never capture.
