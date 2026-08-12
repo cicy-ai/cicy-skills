@@ -251,12 +251,11 @@ function toolResultText(block) {
 // Chronological turns: text + thinking in full, tool calls as one-line
 // headlines with truncated results; the system prompt and harness boilerplate
 // are dropped. Output:
-//   ## Turn N
-//   USER: <message>
-//   AI (thinking): <reasoning>
-//   AI (tool): <name>: <key arg>
+//   Q: <message>
+//   A (thinking): <reasoning>
+//   A (tool): <name>: <key arg>
 //   TOOL RESULT: <truncated head>
-//   AI: <reply text>
+//   A: <reply text>
 function generateStructuredText(messages) {
   const clean = (s) => {
     s = (s || '').trim();
@@ -321,14 +320,11 @@ function generateStructuredText(messages) {
     }
   }
 
-  const LABELS = { text: 'AI: ', thinking: 'AI (thinking): ', tool: 'AI (tool): ', tool_result: 'TOOL RESULT: ' };
+  const LABELS = { text: 'A: ', thinking: 'A (thinking): ', tool: 'A (tool): ', tool_result: 'TOOL RESULT: ' };
   const lines = [];
-  let turnNo = 0;
   for (const t of turns) {
     if (!t.user.length && !t.ai.length) continue;
-    turnNo += 1;
-    lines.push(`## Turn ${turnNo}`);
-    for (const u of t.user) lines.push(`USER: ${u}`);
+    for (const u of t.user) lines.push(`Q: ${u}`);
     for (const [kind, txt] of t.ai) lines.push(LABELS[kind] + txt);
     lines.push('');
   }

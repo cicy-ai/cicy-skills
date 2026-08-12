@@ -26,12 +26,11 @@ agent-summary <path/to/current.json>     # explicit snapshot file
 ## Output shape
 
 ```
-## Turn N
-USER: <message>
-AI (thinking): <reasoning>
-AI (tool): Bash: npm run build …
+Q: <message>
+A (thinking): <reasoning>
+A (tool): Bash: npm run build …
 TOOL RESULT: <first 400 chars> …[+N chars]     # errors keep 1000
-AI: <reply text>
+A: <reply text>
 ```
 
 ## Source
