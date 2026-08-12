@@ -6,6 +6,8 @@
 Per-profile system Chrome control on a connected cicy-desktop host. Each
 subcommand maps to a `chrome_*` electronRPC tool, dispatched as
 `desktop_event { rpc_call, tool, args, requestId }` over the chat WebSocket.
+This is primarily the remote-control path. For local native macOS/Linux Chrome,
+use `chrome-cli` instead.
 
 ## Install
 
@@ -14,6 +16,9 @@ cicy-code skill install agent-chrome
 ```
 
 ## Quick usage
+
+`accountIdx` and profile ID are the same numeric ID. For example, profile ID
+`3`, `accountIdx=3`, and the stored key `profile_3` all refer to one profile.
 
 ```bash
 agent-chrome profiles                      # list profiles in ~/cicy-ai/db/chrome.json

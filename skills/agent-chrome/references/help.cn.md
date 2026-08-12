@@ -1,5 +1,8 @@
 # agent-chrome — 帮助
 
+本 Skill 主要用于通过 Electron RPC 远程连接 cicy-desktop client 来管理
+Chrome。本机原生 macOS/Linux Chrome 请使用 `chrome-cli`。
+
 ## 命令
 
 ```
@@ -31,6 +34,9 @@ agent-chrome --client <client_id> ...
 agent-chrome --help / -h / help
 agent-chrome tools
 ```
+
+`accountIdx` 和 profile ID 是同一个编号，也就是 `profile_N` 中的 `N`。
+例如 profile ID `3`、`accountIdx=3` 和 `profile_3` 都表示同一个 Chrome 配置文件。
 
 ## 每个配置文件的账户（ID + 密码 + 2FA）+ 备注
 

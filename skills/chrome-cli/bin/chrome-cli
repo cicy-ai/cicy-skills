@@ -1,0 +1,290 @@
+#!/usr/bin/env node
+// chrome-cli — manage local macOS/Linux Chrome profiles and CDP directly.
+
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { homedir, platform } from 'node:os';
+import { dirname, join } from 'node:path';
+import { spawn } from 'node:child_process';
+
+const argv = process.argv.slice(2);
+const json = argv.includes('--json');
+const args = argv.filter((x) => x !== '--json');
+const cmd = args[0];
+const rest = args.slice(1);
+const configPath = process.env.CHROME_CLI_CONFIG || join(homedir(), 'cicy-ai', 'db', 'chrome.json');
+const profileRoot = process.env.CHROME_CLI_PROFILE_ROOT || join(homedir(), 'chrome');
+const basePort = Number(process.env.CHROME_CLI_DEBUGGER_BASE_PORT || 11000);
+
+if (!cmd || ['help', '--help', '-h'].includes(cmd)) {
+  printReference('help.md', 'Usage: chrome-cli <profiles|profile|add|proxy|launch|close|targets|cdp>');
+  process.exit(0);
+}
+if (cmd === 'tools') {
+  printReference('tools.md', '# chrome-cli tools\n');
+  process.exit(0);
+}
+
+try {
+  let result;
+  switch (cmd) {
+    case 'list':
+    case 'profiles': result = await profiles(rest); break;
+    case 'profile': result = await profile(rest); break;
+    case 'add': result = await add(rest); break;
+    case 'proxy': result = await proxy(rest); break;
+    case 'launch': result = await launch(rest); break;
+    case 'close': result = await close(rest); break;
+    case 'targets': result = await targets(rest); break;
+    case 'cdp': result = await cdp(rest); break;
+    default: fail(`unknown command: ${cmd}. Try chrome-cli --help`, 2);
+  }
+  emit(result);
+} catch (error) {
+  fail(error.message, error.exitCode || 1);
+}
+
+function printReference(name, fallback) {
+  try { process.stdout.write(readFileSync(new URL(`../references/${name}`, import.meta.url), 'utf8')); }
+  catch { process.stdout.write(`${fallback}\n`); }
+}
+
+function fail(message, exitCode = 1) {
+  if (json) process.stdout.write(`${JSON.stringify({ ok: false, error: { message, code: exitCode } })}\n`);
+  else process.stderr.write(`chrome-cli: ${message}\n`);
+  process.exit(exitCode);
+}
+
+function emit(data) {
+  if (json) console.log(JSON.stringify({ ok: true, data }));
+  else if (typeof data === 'string') console.log(data);
+  else console.log(JSON.stringify(data, null, 2));
+}
+
+function id(value) {
+  const match = /^(?:chrome-)?(\d+)$/.exec(String(value || '').trim());
+  if (!match) throw Object.assign(new Error(`profile ID must be N or chrome-N, got: ${value}`), { exitCode: 2 });
+  return Number(match[1]);
+}
+
+function readConfig() {
+  if (!existsSync(configPath)) return {};
+  try { return JSON.parse(readFileSync(configPath, 'utf8')); }
+  catch (error) { throw new Error(`cannot parse ${configPath}: ${error.message}`); }
+}
+
+function writeConfig(config) {
+  mkdirSync(dirname(configPath), { recursive: true });
+  const temp = `${configPath}.tmp-${process.pid}`;
+  writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(temp, 0o600);
+  renameSync(temp, configPath);
+}
+
+function entryFor(profileId, create = false) {
+  const config = readConfig();
+  const key = `profile_${profileId}`;
+  if (!config[key] && !create) throw Object.assign(new Error(`${key} not found in ${configPath}`), { exitCode: 4 });
+  if (!config[key]) config[key] = {};
+  const entry = config[key];
+  return { config, key, entry, profileId, debuggerPort: Number(entry.debuggerPort || entry.port || basePort + profileId), userDataDir: expandHome(entry.userDataDir || join(profileRoot, key)) };
+}
+
+function expandHome(value) {
+  return String(value).replace(/^~(?=\/|$)/, homedir());
+}
+
+function proxyUrl(raw) {
+  if (!raw) return '';
+  if (typeof raw === 'string') return raw;
+  if (raw.enabled === false) return '';
+  return raw.url || '';
+}
+
+async function isLive(port) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(800) });
+    return response.ok;
+  } catch { return false; }
+}
+
+async function profiles(args) {
+  const includeHidden = args.includes('--all');
+  const config = readConfig();
+  const rows = [];
+  for (const [key, entry] of Object.entries(config)) {
+    const match = /^profile_(\d+)$/.exec(key);
+    if (!match || (!includeHidden && key.startsWith('__'))) continue;
+    const profileId = Number(match[1]);
+    const debuggerPort = Number(entry.debuggerPort || entry.port || basePort + profileId);
+    rows.push({ profileId, accountIdx: profileId, profileKey: key, userDataDir: expandHome(entry.userDataDir || join(profileRoot, key)), debuggerPort, proxy: proxyUrl(entry.proxy), running: await isLive(debuggerPort), ...pickMeta(entry) });
+  }
+  return rows.sort((a, b) => a.profileId - b.profileId);
+}
+
+async function profile(args) {
+  if (!args[0]) throw Object.assign(new Error('usage: chrome-cli profile <profileId>'), { exitCode: 2 });
+  const item = entryFor(id(args[0]));
+  return { profileId: item.profileId, accountIdx: item.profileId, profileKey: item.key, userDataDir: item.userDataDir, debuggerPort: item.debuggerPort, proxy: proxyUrl(item.entry.proxy), running: await isLive(item.debuggerPort), config: item.entry };
+}
+
+function pickMeta(entry) {
+  const out = {};
+  for (const key of ['gmail', 'note', 'orgPath', 'platform']) if (entry[key] !== undefined) out[key] = entry[key];
+  return out;
+}
+
+async function add(args) {
+  const config = readConfig();
+  const used = Object.keys(config).map((key) => /^profile_(\d+)$/.exec(key)).filter(Boolean).map((m) => Number(m[1]));
+  let profileId = used.length ? Math.max(...used) + 1 : 1;
+  let gmail = '';
+  let note = '';
+  let launchNow = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--id') profileId = id(args[++i]);
+    else if (args[i] === '--gmail') gmail = args[++i] || '';
+    else if (args[i] === '--note') note = args[++i] || '';
+    else if (args[i] === '--launch') launchNow = true;
+  }
+  const key = `profile_${profileId}`;
+  if (config[key]) throw Object.assign(new Error(`${key} already exists`), { exitCode: 4 });
+  config[key] = { userDataDir: join(profileRoot, key), debuggerPort: basePort + profileId };
+  if (gmail) config[key].gmail = gmail;
+  if (note) config[key].note = note;
+  writeConfig(config);
+  if (launchNow) return launch([String(profileId)]);
+  return { created: true, profileId, accountIdx: profileId, profileKey: key, ...config[key] };
+}
+
+async function proxy(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: chrome-cli proxy <profileId> <url|"">'), { exitCode: 2 });
+  const item = entryFor(id(args[0]));
+  const url = args[1];
+  item.entry.proxy = url ? { url, enabled: true } : { url: '', enabled: false };
+  writeConfig(item.config);
+  return { profileId: item.profileId, accountIdx: item.profileId, proxy: item.entry.proxy, appliesOnNextLaunch: true };
+}
+
+function chromeBinary() {
+  if (process.env.CHROME_CLI_BINARY) return process.env.CHROME_CLI_BINARY;
+  if (platform() === 'darwin') {
+    const candidates = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium'];
+    return candidates.find(existsSync) || candidates[0];
+  }
+  if (platform() === 'linux') {
+    for (const candidate of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+      const found = findOnPath(candidate);
+      if (found) return found;
+    }
+    return 'google-chrome';
+  }
+  throw Object.assign(new Error('chrome-cli supports native macOS and Linux Chrome; use agent-chrome for remote cicy-desktop/Electron RPC'), { exitCode: 3 });
+}
+
+function findOnPath(name) {
+  for (const dir of String(process.env.PATH || '').split(':')) {
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
+async function launch(args) {
+  if (!args[0]) throw Object.assign(new Error('usage: chrome-cli launch <profileId> [--url <url>]'), { exitCode: 2 });
+  const item = entryFor(id(args[0]));
+  let url = 'about:blank';
+  for (let i = 1; i < args.length; i++) if (args[i] === '--url') url = args[++i] || url;
+  if (await isLive(item.debuggerPort)) {
+    if (url !== 'about:blank') await newTarget(item.debuggerPort, url);
+    return { profileId: item.profileId, accountIdx: item.profileId, debuggerPort: item.debuggerPort, running: true, reused: true };
+  }
+  mkdirSync(item.userDataDir, { recursive: true });
+  const binary = chromeBinary();
+  if (binary.includes('/') && !existsSync(binary)) throw Object.assign(new Error(`Chrome/Chromium binary not found: ${binary}`), { exitCode: 3 });
+  const launchArgs = [`--user-data-dir=${item.userDataDir}`, `--remote-debugging-port=${item.debuggerPort}`, '--remote-debugging-address=127.0.0.1', '--no-first-run', '--no-default-browser-check'];
+  const p = proxyUrl(item.entry.proxy);
+  if (p) launchArgs.push(`--proxy-server=${p}`);
+  launchArgs.push(url);
+  const child = spawn(binary, launchArgs, { detached: true, stdio: 'ignore' });
+  child.unref();
+  return { profileId: item.profileId, accountIdx: item.profileId, debuggerPort: item.debuggerPort, pid: child.pid, running: true, reused: false };
+}
+
+async function close(args) {
+  if (!args[0]) throw Object.assign(new Error('usage: chrome-cli close <profileId>'), { exitCode: 2 });
+  const item = entryFor(id(args[0]));
+  if (!(await isLive(item.debuggerPort))) return { profileId: item.profileId, accountIdx: item.profileId, closed: false, reason: 'not running' };
+  await cdpCall(item.debuggerPort, 'Browser.close', {}, null, true);
+  return { profileId: item.profileId, accountIdx: item.profileId, closed: true };
+}
+
+async function targets(args) {
+  const raw = flag(args, '--idx') || args.find((x) => !x.startsWith('--'));
+  if (!raw) throw Object.assign(new Error('usage: chrome-cli targets --idx <profileId>'), { exitCode: 2 });
+  const item = entryFor(id(raw));
+  return fetchJson(`http://127.0.0.1:${item.debuggerPort}/json/list`);
+}
+
+async function cdp(args) {
+  if (!args[0]) throw Object.assign(new Error('usage: chrome-cli cdp <method> [json_params] --idx <profileId> [--target <targetId>]'), { exitCode: 2 });
+  const method = args[0];
+  const rawId = flag(args, '--idx');
+  if (!rawId) throw Object.assign(new Error('cdp requires --idx <profileId>'), { exitCode: 2 });
+  let params = {};
+  if (args[1] && !args[1].startsWith('--')) {
+    try { params = JSON.parse(args[1]); }
+    catch (error) { throw Object.assign(new Error(`invalid json_params: ${error.message}`), { exitCode: 2 }); }
+  }
+  const item = entryFor(id(rawId));
+  return cdpCall(item.debuggerPort, method, params, flag(args, '--target'));
+}
+
+function flag(values, name) {
+  const index = values.indexOf(name);
+  return index >= 0 ? values[index + 1] : '';
+}
+
+async function fetchJson(url, options = {}) {
+  let response;
+  try { response = await fetch(url, { ...options, signal: AbortSignal.timeout(4000) }); }
+  catch (error) { throw Object.assign(new Error(`cannot connect to local Chrome at ${url}: ${error.message}`), { exitCode: 4 }); }
+  if (!response.ok) throw Object.assign(new Error(`Chrome CDP HTTP ${response.status}: ${url}`), { exitCode: 4 });
+  return response.json();
+}
+
+async function newTarget(port, url) {
+  return fetchJson(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
+}
+
+async function cdpCall(port, method, params = {}, targetId = null, browser = false) {
+  let wsUrl;
+  if (browser || /^(Browser|Target|SystemInfo)\./.test(method)) {
+    wsUrl = (await fetchJson(`http://127.0.0.1:${port}/json/version`)).webSocketDebuggerUrl;
+  } else {
+    const all = await fetchJson(`http://127.0.0.1:${port}/json/list`);
+    const target = targetId ? all.find((item) => item.id === targetId) : all.find((item) => item.type === 'page');
+    if (!target?.webSocketDebuggerUrl) throw Object.assign(new Error(targetId ? `target not found: ${targetId}` : 'no page target; open a tab first'), { exitCode: 4 });
+    wsUrl = target.webSocketDebuggerUrl;
+  }
+  return wsRequest(wsUrl, method, params);
+}
+
+function wsRequest(url, method, params) {
+  if (typeof WebSocket !== 'function') throw Object.assign(new Error('native WebSocket missing; Node 22+ required'), { exitCode: 3 });
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const requestId = 1;
+    const timer = setTimeout(() => { socket.close(); reject(new Error(`CDP timeout: ${method}`)); }, 15000);
+    socket.addEventListener('open', () => socket.send(JSON.stringify({ id: requestId, method, params })));
+    socket.addEventListener('message', (event) => {
+      let message;
+      try { message = JSON.parse(String(event.data)); } catch { return; }
+      if (message.id !== requestId) return;
+      clearTimeout(timer);
+      socket.close();
+      if (message.error) reject(Object.assign(new Error(`CDP ${message.error.code}: ${message.error.message}`), { exitCode: 4 }));
+      else resolve(message.result);
+    });
+    socket.addEventListener('error', () => { clearTimeout(timer); reject(Object.assign(new Error(`cannot open Chrome CDP WebSocket: ${url}`), { exitCode: 4 })); });
+  });
+}

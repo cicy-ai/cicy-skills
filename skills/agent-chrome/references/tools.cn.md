@@ -2,6 +2,8 @@
 
 ## 子命令 → electronRPC 工具
 
+`accountIdx` 就是 profile ID（即 `profile_N` 中的 `N`），不是两个不同的编号。
+
 | 子命令                          | 工具                          | 参数                                |
 |-------------------------------|-------------------------------|-------------------------------------|
 | `list` / `profiles [--all] [--with <svc>]` | `chrome_list_profiles` | `{ includeHidden }` (`--with` 在客户端过滤) |

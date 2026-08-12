@@ -1,5 +1,9 @@
 # agent-chrome — help
 
+Use this Skill primarily to manage Chrome remotely through Electron RPC on a
+connected cicy-desktop client. For local native macOS/Linux Chrome, use
+`chrome-cli`.
+
 ## Commands
 
 ```
@@ -31,6 +35,9 @@ agent-chrome --client <client_id> ...
 agent-chrome --help / -h / help
 agent-chrome tools
 ```
+
+`accountIdx` = profile ID = the `N` in `profile_N`. For example, profile ID
+`3`, `accountIdx=3`, and `profile_3` all refer to the same Chrome profile.
 
 ## Per-profile accounts (id + password + 2FA) + notes
 

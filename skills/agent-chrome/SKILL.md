@@ -5,9 +5,14 @@ description: Control system Chrome on a connected cicy-desktop host with per-pro
 
 # Agent Chrome
 
-This skill drives system-installed Google Chrome (or Chromium) on a
-connected cicy-desktop host via the Chrome DevTools Protocol. Each profile
-gets a dedicated `user-data-dir` and its own proxy.
+This skill is primarily for **remote Chrome management**: it connects through
+Electron RPC to a connected cicy-desktop client, which drives that host's
+system-installed Google Chrome (or Chromium) via CDP. Each profile gets a
+dedicated `user-data-dir` and its own proxy.
+
+For Chrome running locally on the agent's native macOS or Linux host, use
+`chrome-cli` instead; it talks directly to local loopback CDP and does not need
+cicy-desktop or Electron RPC.
 
 Rides on the same `desktop_event` / `rpc_call` channel as `agent-desktop`,
 but the work happens inside Chrome rather than Electron-main.
@@ -26,7 +31,7 @@ Use this skill when the task involves:
 
 ## Rules
 
-1. Each profile maps to `~/cicy-ai/db/chrome.json` on the cicy-desktop host, keyed by `profile_<N>`. The CLI accepts the numeric `accountIdx` (the `<N>`).
+1. Each profile maps to `~/cicy-ai/db/chrome.json` on the cicy-desktop host, keyed by `profile_<N>`. **`accountIdx` and profile ID are the same numeric ID**: profile `profile_3`, profile ID `3`, and `accountIdx=3` all identify the same Chrome profile. The CLI also accepts `chrome-3` where a command uses `<id>`.
 2. Per-profile proxy: `agent-chrome proxy <idx> <url>` writes the proxy into chrome.json. The next `launch` picks it up via `--proxy-server=<url>`. Pass `""` to clear. **The proxy URL must point to a port that is actually listening** — Chrome refuses creds in URLs and fails silently on ECONNREFUSED. The intended pairing is with cicy-mihomo's per-profile listeners (one listener per Chrome profile, routed by IN-NAME). See [proxy.md](./references/proxy.md) for the full topology, setup flow, and known pitfalls.
 3. `launch` resolves system Chrome (Mac: `/Applications/Google Chrome.app`, Windows: `%PROGRAMFILES%\Google\Chrome\Application\chrome.exe`, Linux: `google-chrome / chromium`). On missing binary it errors with "Chrome/Chromium binary not found" — the user must install Chrome / Chromium first.
 4. Default profile layout: user-data-dir `~/chrome/profile_<N>`, debugger port `11000 + N` (or chrome.json override). Profiles run concurrently with independent state.

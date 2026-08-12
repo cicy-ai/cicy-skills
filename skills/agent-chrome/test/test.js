@@ -11,6 +11,7 @@ assert('no args prints help', noArgs.stdout.includes('agent-chrome'));
 const help = runSkill(D, ['--help']);
 assert('--help exits 0', help.status === 0);
 assert('--help has output', help.stdout.length > 0);
+assert('--help documents accountIdx/profile identity', help.stdout.includes('accountIdx` = profile ID'));
 
 // unknown subcommand → non-0
 const bad = runSkill(D, ['badcmd']);

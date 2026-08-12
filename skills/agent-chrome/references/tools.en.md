@@ -2,6 +2,8 @@
 
 ## Subcommand → electronRPC tool
 
+`accountIdx` is the profile ID (the `N` in `profile_N`); they are not separate identifiers.
+
 | subcmd                  | tool                          | args                                |
 |-------------------------|-------------------------------|-------------------------------------|
 | `list` / `profiles [--all] [--with <svc>]` | `chrome_list_profiles` | `{ includeHidden }` (`--with` filters client-side) |
