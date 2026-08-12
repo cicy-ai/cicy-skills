@@ -15,16 +15,17 @@ over `/api/chat/push` with `wait_ack`), but operate on different surfaces:
 | concept           | agent-chrome                          | agent-electron                                       |
 |-------------------|---------------------------------------|------------------------------------------------------|
 | identity unit     | profile (`chrome.json` entry)         | session (`persist:sandbox-<N>` partition)            |
-| concrete instance | a Chrome process with `--user-data-dir`| an Electron `BrowserWindow` in that session         |
+| concrete instance | a Chrome process with `--user-data-dir`| an Electron `BrowserWindow` or BrowserView tab       |
 | proxy             | `--proxy-server=` arg at launch       | `session.setProxy(...)` — applies to all windows    |
 | introspection     | Chrome's `/json` debugger targets     | Electron `BrowserWindow.getAllWindows()` + `webContents.debugger` |
-| addressed by      | `accountIdx` (chrome.json key)        | `winId` (BrowserWindow.id) — accountIdx is the session it lives in |
+| addressed by      | `accountIdx` (chrome.json key)        | `winId` or `webContentsId` — accountIdx selects the session |
 
 ## Scope
 
 Use this skill when the task involves:
 
 - listing the live BrowserWindows on the cicy-desktop host
+- listing and controlling BrowserView tabs by `webContentsId`
 - opening a new BrowserWindow inside a specific sandbox session
 - setting the proxy on a session before opening windows in it
 - closing a BrowserWindow by id
@@ -33,13 +34,20 @@ Use this skill when the task involves:
 
 ## Rules
 
-1. **`accountIdx` selects the session.** The first BrowserWindow opened
+1. **`accountIdx` = profile id = session id.** They are three names for the
+   same numeric identifier. For example, `accountIdx=1`, `profile id=1`, and
+   `session id=1` all select the same `persist:sandbox-1` partition. The first BrowserWindow opened
    under a fresh `accountIdx` triggers `session.fromPartition('persist:sandbox-<N>')`.
    All windows opened under the same `accountIdx` share cookies, localStorage,
    IndexedDB, service workers, and proxy.
-2. **`winId` addresses one BrowserWindow.** Returned by `open` and listed
-   by `windows`; use it for `close`, `window`, `url`, `cdp`, `screenshot`,
-   `snapshot`.
+2. **Targets are typed because their numeric ids can collide.** `winId`
+   addresses a BrowserWindow and is returned by `open` / listed by `windows`.
+   `webContentsId` addresses a BrowserView tab and is listed by `tabs <idx>`;
+   `webcontents` returns every live WebContents across all profiles/surfaces.
+   Bare numbers remain window ids for compatibility; write `tab:4` or `wc:4`
+   for a tab. `close`, `window`, `url`, `cdp`, `screenshot`, and `snapshot`
+   accept both target kinds. `profiles` lists configured Electron profiles,
+   while `tabs` and `webcontents` discover the target pages.
 3. **Proxy is per-session, not per-window.** `proxy <accountIdx> <url>`
    calls `session.setProxy({proxyRules: url})`. New windows opened in that
    session pick it up immediately; **already-open windows keep their old

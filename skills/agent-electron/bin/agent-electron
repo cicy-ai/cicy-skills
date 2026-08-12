@@ -42,6 +42,9 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000);
       case 'tools':      printTools(); return;
       case 'sessions':   await cmdSessions(rest); return;
       case 'session':    await cmdSession(rest); return;
+      case 'profiles':   await cmdProfiles(rest); return;
+      case 'tabs':       await cmdTabs(rest); return;
+      case 'webcontents': await cmdWebContents(rest); return;
       case 'proxy':      await cmdProxy(rest); return;
       case 'open':       await cmdOpen(rest); return;
       case 'close':      await cmdClose(rest); return;
@@ -74,7 +77,7 @@ function emit(result) {
 }
 function printHelp() {
   try { process.stdout.write(readFileSync(new URL('../references/help.md', import.meta.url), 'utf8')); }
-  catch { process.stdout.write('Usage: agent-electron <sessions|session|proxy|open|close|windows|window|url|cdp|screenshot|snapshot|sysinfo> [...] [--client ID]\n'); }
+  catch { process.stdout.write('Usage: agent-electron <sessions|session|profiles|tabs|webcontents|proxy|open|close|windows|window|url|cdp|screenshot|snapshot|sysinfo> [...] [--client ID]\n'); }
 }
 function printTools() {
   try { process.stdout.write(readFileSync(new URL('../references/tools.md', import.meta.url), 'utf8')); }
@@ -84,6 +87,21 @@ function intArg(s, name) {
   const n = parseInt(s, 10);
   if (Number.isNaN(n)) throw Object.assign(new Error(`${name} must be a number, got: ${s}`), { exitCode: 2 });
   return n;
+}
+
+// BrowserWindow.id and webContents.id are separate Electron namespaces and
+// can contain the same number at the same time. Keep bare numeric ids backward
+// compatible as window ids; callers must use tab:<id> (or wc:<id>) for a tab.
+function targetArg(s, name = 'target') {
+  const raw = String(s || '').trim();
+  let kind = 'window';
+  let value = raw;
+  const m = /^(win(?:dow)?|tab|wc|webcontents):(.+)$/i.exec(raw);
+  if (m) {
+    kind = /^(tab|wc|webcontents)$/i.test(m[1]) ? 'tab' : 'window';
+    value = m[2];
+  }
+  return { kind, id: intArg(value, name), raw };
 }
 function loadToken() {
   if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
@@ -194,6 +212,26 @@ async function cmdSession(args) {
   });
 }
 
+async function cmdProfiles(_args) {
+  emit(unwrap(await rpc('electron_list_profiles', {})));
+}
+
+async function cmdTabs(args) {
+  const idx = args.length > 0 ? intArg(args[0], 'accountIdx') : 0;
+  emit(unwrap(await rpc('electron_tabs', { accountIdx: idx })));
+}
+
+async function webContentsInfo(webContentsId) {
+  return unwrap(await rpc('electron_tab_eval', {
+    webContentsId,
+    code: `({ webContentsId: ${webContentsId}, title: document.title, url: location.href, readyState: document.readyState, visibilityState: document.visibilityState })`,
+  }));
+}
+
+async function cmdWebContents(_args) {
+  emit(unwrap(await rpc('electron_webcontents', {})));
+}
+
 async function cmdProxy(args) {
   if (args.length < 2) throw Object.assign(new Error('usage: agent-electron proxy <accountIdx> <url|"">'), { exitCode: 2 });
   const idx = intArg(args[0], 'accountIdx');
@@ -224,8 +262,12 @@ async function cmdOpen(args) {
 }
 
 async function cmdClose(args) {
-  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron close <winId>'), { exitCode: 2 });
-  emit(unwrap(await rpc('close_window', { win_id: intArg(args[0], 'winId') })));
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron close <winId|webContentsId>'), { exitCode: 2 });
+  const target = targetArg(args[0]);
+  emit(unwrap(await rpc(
+    target.kind === 'tab' ? 'electron_tab_close' : 'close_window',
+    target.kind === 'tab' ? { webContentsId: target.id } : { win_id: target.id },
+  )));
 }
 
 async function cmdWindows(_args) {
@@ -233,30 +275,57 @@ async function cmdWindows(_args) {
 }
 
 async function cmdWindow(args) {
-  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron window <winId>'), { exitCode: 2 });
-  emit(unwrap(await rpc('get_window_info', { win_id: intArg(args[0], 'winId') })));
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron window <winId|webContentsId>'), { exitCode: 2 });
+  const target = targetArg(args[0]);
+  if (target.kind === 'window') {
+    emit(unwrap(await rpc('get_window_info', { win_id: target.id })));
+    return;
+  }
+  emit(await webContentsInfo(target.id));
 }
 
 async function cmdUrl(args) {
-  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron url <winId> <url>'), { exitCode: 2 });
-  emit(unwrap(await rpc('load_url', { win_id: intArg(args[0], 'winId'), url: args[1] })));
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron url <winId|webContentsId> <url>'), { exitCode: 2 });
+  const target = targetArg(args[0]);
+  emit(unwrap(await rpc(
+    target.kind === 'tab' ? 'electron_tab_navigate' : 'load_url',
+    target.kind === 'tab' ? { webContentsId: target.id, url: args[1] } : { win_id: target.id, url: args[1] },
+  )));
 }
 
 async function cmdCDP(args) {
-  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron cdp <winId> <method> [json_params]'), { exitCode: 2 });
-  const params = { win_id: intArg(args[0], 'winId'), method: args[1] };
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron cdp <winId|webContentsId> <method> [json_params]'), { exitCode: 2 });
+  const target = targetArg(args[0]);
+  const params = target.kind === 'tab'
+    ? { webContentsId: target.id, method: args[1] }
+    : { win_id: target.id, method: args[1] };
   if (args[2] && !args[2].startsWith('--')) {
     try { params.params = JSON.parse(args[2]); }
     catch (e) { throw Object.assign(new Error(`invalid json_params: ${e.message}`), { exitCode: 2 }); }
   }
-  emit(unwrap(await rpc('cdp_sendcmd', params)));
+  emit(unwrap(await rpc(target.kind === 'tab' ? 'electron_tab_cdp' : 'cdp_sendcmd', params)));
 }
 
 async function cmdScreenshot(args) {
-  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron screenshot <winId> [--out path]'), { exitCode: 2 });
-  const winId = intArg(args[0], 'winId');
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron screenshot <winId|webContentsId> [--out path]'), { exitCode: 2 });
+  const target = targetArg(args[0]);
   let outPath = '';
   for (let i = 1; i < args.length; i++) if (args[i] === '--out') outPath = args[++i];
+  if (target.kind === 'tab') {
+    const shot = unwrap(await rpc('electron_tab_screenshot', { webContentsId: target.id, format: 'png' }));
+    const dataUrl = String(shot?.base64 || '');
+    const b64 = dataUrl.replace(/^data:image\/[^;]+;base64,/, '');
+    if (!b64) throw Object.assign(new Error('no tab screenshot data returned'), { exitCode: 5 });
+    if (outPath) {
+      const bytes = Buffer.from(b64, 'base64');
+      writeFileSync(outPath, bytes);
+      emit({ ok: true, target: `tab:${target.id}`, out: outPath, bytes: bytes.length });
+    } else {
+      emit(unwrap(await rpc('clipboard_write_image', { base64: b64 })));
+    }
+    return;
+  }
+  const winId = target.id;
   // Use webpage_screenshot_to_clipboard which avoids the WS payload size limit
   // hit by Page.captureScreenshot's base64 response on large windows.
   if (!outPath) { emit(unwrap(await rpc('webpage_screenshot_to_clipboard', { win_id: winId }))); return; }
@@ -268,8 +337,12 @@ async function cmdScreenshot(args) {
 }
 
 async function cmdSnapshot(args) {
-  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron snapshot <winId>'), { exitCode: 2 });
-  emit(unwrap(await rpc('webpage_snapshot', { win_id: intArg(args[0], 'winId') })));
+  if (args.length === 0) throw Object.assign(new Error('usage: agent-electron snapshot <winId|webContentsId>'), { exitCode: 2 });
+  const target = targetArg(args[0]);
+  emit(unwrap(await rpc(
+    target.kind === 'tab' ? 'electron_tab_snapshot' : 'webpage_snapshot',
+    target.kind === 'tab' ? { webContentsId: target.id } : { win_id: target.id },
+  )));
 }
 
 async function cmdSysinfo(_args) {

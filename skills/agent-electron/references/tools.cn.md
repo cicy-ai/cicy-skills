@@ -6,17 +6,24 @@
 |---------------------------------|-----------------------------------|--------------------------------------------|
 | `sessions`                      | `get_windows`（分组）              | `{}` — 从窗口列表推导                     |
 | `session <idx>`                 | `get_windows`（筛选后）           | `{}` — 按 accountIdx 筛选                  |
+| `profiles`                      | `electron_list_profiles`          | `{}`                                       |
+| `tabs [idx]`                    | `electron_tabs`                   | `{ accountIdx }`                           |
+| `webcontents`                   | `electron_webcontents`            | `{}` — 所有实时 WebContents                |
 | `proxy <idx> <url>`             | `set_account_proxy`               | `{ accountIdx, proxy }`                    |
 | `open <url> [--idx 1]`          | `open_window`                     | `{ url, accountIdx, reuseWindow }`         |
-| `close <winId>`                 | `close_window`                    | `{ win_id }`                               |
+| `close <winId\|webContentsId>` | `close_window` / `electron_tab_close` | `{ win_id }` / `{ webContentsId }`     |
 | `windows`                       | `get_windows`                     | `{}`                                       |
-| `window <winId>`                | `get_window_info`                 | `{ win_id }`                               |
-| `url <winId> <url>`             | `load_url`                        | `{ win_id, url }`                          |
-| `cdp <winId> <method> [params]` | `cdp_sendcmd`                     | `{ win_id, method, params? }`              |
-| `screenshot <winId>`            | `webpage_screenshot_to_clipboard` | `{ win_id }`                               |
+| `window <winId\|webContentsId>`| `get_window_info` / `electron_tab_eval` | 目标详情                              |
+| `url <winId\|webContentsId> <url>` | `load_url` / `electron_tab_navigate` | 目标与 URL                          |
+| `cdp <winId\|webContentsId> ...` | `cdp_sendcmd` / `electron_tab_cdp` | 目标、method 与 params                 |
+| `screenshot <winId\|webContentsId>` | 窗口/标签页截图工具            | 目标 ID                                    |
 | `screenshot <winId> --out P`    | `cdp_sendcmd Page.captureScreenshot` | `{ win_id, method, params:{format:"png"} }` |
-| `snapshot <winId>`              | `webpage_snapshot`                | `{ win_id }`                               |
+| `snapshot <winId\|webContentsId>` | `webpage_snapshot` / `electron_tab_snapshot` | 目标 ID                    |
 | `sysinfo`                       | `get_system_info`                 | `{}`                                       |
+
+目标类型必须显式区分，因为 Electron 可能同时分配相同数字的
+`BrowserWindow.id` 和 `webContents.id`：裸 `4`（或 `win:4`）表示窗口，
+`tab:4` / `wc:4` 表示 BrowserView 标签页。
 
 ## 传输协议
 
@@ -40,6 +47,9 @@ POST /api/chat/push
 并在客户端写回任何带有该 requestId 的消息时通过 HTTP 响应进行回复。
 
 ## 会话布局
+
+`accountIdx` = profile id = session id。三种叫法取决于上下文，但数字完全
+相同，并直接映射到 `persist:sandbox-<N>`。
 
 每个 `accountIdx`（N）映射到：
 

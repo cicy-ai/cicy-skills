@@ -11,6 +11,13 @@ assert('no args prints help', noArgs.stdout.includes('agent-electron'));
 const help = runSkill(D, ['--help']);
 assert('--help exits 0', help.status === 0);
 assert('--help has output', help.stdout.length > 0);
+assert('--help lists tabs discovery', help.stdout.includes('tabs [accountIdx]'));
+assert('--help lists profiles discovery', help.stdout.includes('profiles [--json]'));
+assert('--help lists all-webcontents discovery', help.stdout.includes('webcontents [--json]'));
+assert('--help explains account/profile/session identity', help.stdout.includes('accountIdx` = profile id = session id'));
+assert('--help marks dual-id commands', help.stdout.includes('close <winId|webContentsId>'));
+assert('--help marks dual-id CDP', help.stdout.includes('cdp <winId|webContentsId>'));
+assert('--help marks dual-id snapshot', help.stdout.includes('snapshot <winId|webContentsId>'));
 
 // unknown subcommand → non-0
 const bad = runSkill(D, ['badcmd']);
@@ -27,5 +34,11 @@ assert('open without --url exits non-0', openBad.status !== 0);
 // cdp missing args → non-0
 const cdpBad = runSkill(D, ['cdp', '4', '--json']);
 assert('cdp without method exits non-0', cdpBad.status !== 0);
+
+// Typed ids are parsed before any RPC is attempted. This distinguishes a
+// malformed tab reference from an unavailable desktop connection.
+const tabBad = runSkill(D, ['window', 'tab:nope', '--json']);
+assert('malformed webContentsId exits non-0', tabBad.status !== 0);
+assert('malformed webContentsId reports numeric target', tabBad.stdout.includes('must be a number'));
 
 finish();

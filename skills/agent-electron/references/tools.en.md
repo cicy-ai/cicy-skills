@@ -6,17 +6,24 @@
 |---------------------------------|-----------------------------------|--------------------------------------------|
 | `sessions`                      | `get_windows` (grouped)           | `{}` — derived from window list            |
 | `session <idx>`                 | `get_windows` (filtered)          | `{}` — filtered by accountIdx              |
+| `profiles`                      | `electron_list_profiles`          | `{}`                                       |
+| `tabs [idx]`                    | `electron_tabs`                   | `{ accountIdx }`                           |
+| `webcontents`                   | `electron_webcontents`            | `{}` — all live WebContents                |
 | `proxy <idx> <url>`             | `set_account_proxy`               | `{ accountIdx, proxy }`                    |
 | `open <url> [--idx 1]`          | `open_window`                     | `{ url, accountIdx, reuseWindow }`         |
-| `close <winId>`                 | `close_window`                    | `{ win_id }`                               |
+| `close <winId\|webContentsId>` | `close_window` / `electron_tab_close` | `{ win_id }` / `{ webContentsId }`     |
 | `windows`                       | `get_windows`                     | `{}`                                       |
-| `window <winId>`                | `get_window_info`                 | `{ win_id }`                               |
-| `url <winId> <url>`             | `load_url`                        | `{ win_id, url }`                          |
-| `cdp <winId> <method> [params]` | `cdp_sendcmd`                     | `{ win_id, method, params? }`              |
-| `screenshot <winId>`            | `webpage_screenshot_to_clipboard` | `{ win_id }`                               |
+| `window <winId\|webContentsId>`| `get_window_info` / `electron_tab_eval` | target details                         |
+| `url <winId\|webContentsId> <url>` | `load_url` / `electron_tab_navigate` | target + URL                         |
+| `cdp <winId\|webContentsId> ...` | `cdp_sendcmd` / `electron_tab_cdp` | target + method + params                |
+| `screenshot <winId\|webContentsId>` | window/tab screenshot tool    | target id                                  |
 | `screenshot <winId> --out P`    | `cdp_sendcmd Page.captureScreenshot` | `{ win_id, method, params:{format:"png"} }` |
-| `snapshot <winId>`              | `webpage_snapshot`                | `{ win_id }`                               |
+| `snapshot <winId\|webContentsId>` | `webpage_snapshot` / `electron_tab_snapshot` | target id                    |
 | `sysinfo`                       | `get_system_info`                 | `{}`                                       |
+
+Target syntax is intentionally explicit because Electron may assign the same
+number to a `BrowserWindow.id` and a `webContents.id`: bare `4` (or `win:4`)
+means a window, while `tab:4` / `wc:4` means a BrowserView tab.
 
 ## Wire protocol
 
@@ -41,6 +48,9 @@ client over WS, and replies on the HTTP response when the client writes
 back any message with that requestId.
 
 ## Session layout
+
+`accountIdx` = profile id = session id. The names differ by context, but the
+number is identical and maps directly to `persist:sandbox-<N>`.
 
 Each `accountIdx` (N) maps to:
 

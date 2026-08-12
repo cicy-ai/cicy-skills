@@ -5,15 +5,18 @@
 ```
 agent-electron sessions [--json]
 agent-electron session <accountIdx> [--json]
+agent-electron profiles [--json]
+agent-electron tabs [accountIdx] [--json]
+agent-electron webcontents [--json]
 agent-electron proxy <accountIdx> <url|"">
 agent-electron open <url> [--idx 1] [--no-reuse] [--json]
-agent-electron close <winId>
+agent-electron close <winId|webContentsId>
 agent-electron windows [--json]
-agent-electron window <winId> [--json]
-agent-electron url <winId> <url>
-agent-electron cdp <winId> <method> [json_params]
-agent-electron screenshot <winId> [--out path]
-agent-electron snapshot <winId>
+agent-electron window <winId|webContentsId> [--json]
+agent-electron url <winId|webContentsId> <url>
+agent-electron cdp <winId|webContentsId> <method> [json_params]
+agent-electron screenshot <winId|webContentsId> [--out path]
+agent-electron snapshot <winId|webContentsId>
 agent-electron sysinfo
 
 agent-electron --client <client_id> ...
@@ -24,6 +27,14 @@ agent-electron tools
 ## Notes
 
 - The cicy-desktop host must be running and connected to cicy-code.
+- `accountIdx` = profile id = session id. They are the same numeric identifier;
+  for example, all three forms of id `1` map to `persist:sandbox-1`.
+- `BrowserWindow.id` and `webContents.id` may be the same number. A bare
+  number (for example `4`) remains a `winId`; use `tab:4` (or `wc:4`) for a
+  `webContentsId`. `tabs <accountIdx>` lists the live tab ids.
+- `close`, `window`, `url`, `cdp`, `screenshot`, and `snapshot` accept both
+  target kinds. Use `profiles`, `tabs`, and `webcontents` to discover and
+  inspect the hierarchy.
 - **Before `open`, check `windows` first.** If the target URL is already
   open in that session, don't open another window by default — activate it
   natively (desktop RPC `control_electron_BrowserWindow`, code
