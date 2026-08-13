@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+import { createHash } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
+const args = process.argv.slice(2);
+const help = `youtube-shorts-download — download a YouTube Short with the official yt-dlp release
+
+Usage:
+  youtube-shorts-download <url> [options]
+
+Options:
+  -d, --dir <path>              Output directory (default: current directory)
+  -o, --output <template>       yt-dlp output template
+      --audio                   Extract audio as MP3
+      --cookies-from-browser <browser[:profile]>
+      --force-update            Refresh the cached yt-dlp before downloading
+      --json                    Print a JSON result
+  -h, --help                    Show help
+
+The downloader does not bypass DRM, private-video access, paywalls, or account controls.
+Only download content you are allowed to save.
+`;
+
+if (!args.length || args.includes("-h") || args.includes("--help")) {
+  process.stdout.write(help);
+  process.exit(0);
+}
+
+let url = "";
+let outputDir = process.cwd();
+let outputTemplate = "%(title).120B [%(id)s].%(ext)s";
+let audioOnly = false;
+let cookiesBrowser = "";
+let forceUpdate = false;
+let jsonOutput = false;
+for (let index = 0; index < args.length; index += 1) {
+  const arg = args[index];
+  if (arg === "-d" || arg === "--dir") outputDir = resolve(args[++index] || "");
+  else if (arg === "-o" || arg === "--output") outputTemplate = args[++index] || "";
+  else if (arg === "--audio") audioOnly = true;
+  else if (arg === "--cookies-from-browser") cookiesBrowser = args[++index] || "";
+  else if (arg === "--force-update") forceUpdate = true;
+  else if (arg === "--json") jsonOutput = true;
+  else if (!arg.startsWith("-") && !url) url = arg;
+  else fail(`unknown argument: ${arg}`);
+}
+
+function fail(message, code = 2) {
+  if (jsonOutput) process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
+  else process.stderr.write(`youtube-shorts-download: ${message}\n`);
+  process.exit(code);
+}
+
+function validateUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    fail("a valid YouTube URL is required");
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  if (!["youtube.com", "m.youtube.com", "youtu.be"].includes(host)) {
+    fail("only youtube.com and youtu.be URLs are accepted");
+  }
+  if (parsed.protocol !== "https:") fail("the URL must use HTTPS");
+  return parsed.href;
+}
+
+url = validateUrl(url);
+if (!outputTemplate || outputTemplate.includes("\0")) fail("invalid output template");
+mkdirSync(outputDir, { recursive: true });
+
+const cacheDir = join(homedir(), ".cache", "cicy-skills", "youtube-shorts-download");
+mkdirSync(cacheDir, { recursive: true });
+const asset = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
+const toolPath = join(cacheDir, asset);
+const stampPath = join(cacheDir, "checked-at");
+
+async function download(urlValue, destination) {
+  const response = await fetch(urlValue, {
+    redirect: "follow",
+    headers: { "user-agent": "youtube-shorts-download/0.1.0" },
+  });
+  if (!response.ok || !response.body) throw new Error(`download HTTP ${response.status}`);
+  const temporary = `${destination}.part`;
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary, { mode: 0o755 }));
+  renameSync(temporary, destination);
+}
+
+async function installTool() {
+  const checksumsUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS";
+  const checksumsResponse = await fetch(checksumsUrl, { redirect: "follow" });
+  if (!checksumsResponse.ok) throw new Error(`checksum HTTP ${checksumsResponse.status}`);
+  const checksums = await checksumsResponse.text();
+  const match = checksums.split(/\r?\n/).map(line => line.trim().split(/\s+/))
+    .find(parts => parts.length >= 2 && parts.at(-1) === asset);
+  if (!match || !/^[0-9a-f]{64}$/i.test(match[0])) throw new Error(`checksum missing for ${asset}`);
+  await download(`https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}`, toolPath);
+  const actual = createHash("sha256").update(readFileSync(toolPath)).digest("hex");
+  if (actual.toLowerCase() !== match[0].toLowerCase()) fail("yt-dlp checksum verification failed");
+  if (process.platform !== "win32") chmodSync(toolPath, 0o755);
+  await BunlessWrite(stampPath, String(Date.now()));
+}
+
+async function BunlessWrite(path, value) {
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(path, value, { mode: 0o600 });
+}
+
+function toolIsStale() {
+  if (!existsSync(toolPath) || statSync(toolPath).size < 100_000) return true;
+  if (!existsSync(stampPath)) return true;
+  const checkedAt = Number(readFileSync(stampPath, "utf8"));
+  return !Number.isFinite(checkedAt) || Date.now() - checkedAt > 7 * 86400_000;
+}
+
+function hasCommand(command) {
+  const probe = spawnSync(command, ["-version"], { stdio: "ignore" });
+  return probe.status === 0;
+}
+
+function runTool(extra = []) {
+  const hasFfmpeg = hasCommand("ffmpeg");
+  const commandArgs = [
+    "--no-playlist",
+    "--newline",
+    "--no-progress",
+    "--print", "after_move:__CICY_FILE__:%(filepath)s",
+    "--js-runtimes", `node:${process.execPath}`,
+    "--remote-components", "ejs:github",
+    "--paths", outputDir,
+    "--output", outputTemplate,
+  ];
+  if (cookiesBrowser) commandArgs.push("--cookies-from-browser", cookiesBrowser);
+  if (audioOnly) {
+    if (!hasFfmpeg) fail("ffmpeg is required for --audio");
+    commandArgs.push("--extract-audio", "--audio-format", "mp3", "--audio-quality", "0");
+  } else if (hasFfmpeg) {
+    commandArgs.push("--format", "bv*+ba/b", "--merge-output-format", "mp4", "--remux-video", "mp4");
+  } else {
+    commandArgs.push("--format", "b[ext=mp4]/b");
+  }
+  commandArgs.push(...extra, url);
+  return new Promise(resolvePromise => {
+    const executable = process.platform === "win32" ? toolPath : "python3";
+    const executableArgs = process.platform === "win32"
+      ? commandArgs : [toolPath, ...commandArgs];
+    const child = spawn(executable, executableArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", chunk => {
+      const text = chunk.toString();
+      stdout += text;
+      if (jsonOutput) process.stderr.write(text);
+      else process.stdout.write(text);
+    });
+    child.stderr.on("data", chunk => {
+      const text = chunk.toString();
+      stderr += text;
+      process.stderr.write(text);
+    });
+    child.on("close", code => resolvePromise({ code, stdout, stderr }));
+  });
+}
+
+try {
+  if (forceUpdate || toolIsStale()) await installTool();
+  let result = await runTool();
+  if (result.code !== 0 && /403|challenge|signature|SABR/i.test(result.stderr + result.stdout)) {
+    await installTool();
+    result = await runTool();
+  }
+  if (result.code !== 0) fail(`yt-dlp failed with exit code ${result.code}`, result.code || 1);
+  const files = [...result.stdout.matchAll(/^__CICY_FILE__:(.+)$/gm)].map(match => match[1].trim());
+  if (jsonOutput) {
+    process.stdout.write(`${JSON.stringify({ ok: true, files, output_dir: outputDir })}\n`);
+  } else if (files.length) {
+    process.stdout.write(`Downloaded: ${files.map(file => basename(file)).join(", ")}\n`);
+  }
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error), 1);
+}

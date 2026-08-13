@@ -1,0 +1,41 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "youtube-shorts-download",
+  "version": "0.1.0",
+  "title": "YouTube Shorts Downloader",
+  "description": "Download permitted YouTube Shorts and videos as MP4 or MP3 with a verified current yt-dlp, JavaScript challenge support, ffmpeg merging, cookie profiles, and automatic 403 recovery.",
+  "category": "network",
+  "tags": ["youtube", "shorts", "video", "download", "yt-dlp"],
+  "author": "cicy",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/youtube-shorts-download",
+  "license": "MIT",
+  "runtime": {"node": ">=18"},
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/youtube-shorts-download",
+  "permissions": ["network", "filesystem:home", "process:spawn"],
+  "compatible_agents": ["*"],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "YouTube Shorts 下载",
+      "description": "使用经过校验的最新版 yt-dlp 下载有权保存的 YouTube Shorts/视频，支持 MP4、MP3、JS challenge、ffmpeg 合并、cookies 与 403 自动恢复。"
+    }
+  },
+  "tools": [
+    {
+      "name": "youtube-shorts-download",
+      "example": "youtube-shorts-download 'https://www.youtube.com/shorts/VIDEO_ID' --dir ./downloads",
+      "description": "Download a permitted YouTube Short or video"
+    }
+  ]
+}
