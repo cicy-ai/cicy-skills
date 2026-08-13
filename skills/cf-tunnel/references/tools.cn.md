@@ -21,14 +21,15 @@ DNS CNAME 始终指向 `<tunnel_id>.cfargotunnel.com` 并且是代理的。
 
 | 路径                          | 模式 | 机密字段                                         |
 |-------------------------------|------|---------------------------------------------------|
-| `~/cicy-ai/db/cf-tunnel.json` | 0600 | `api_token`, `account_id`, `zone_id`, `tunnels.*.token` |
+| `~/cicy-ai/db/cf-tunnel.json` | 0600 | `accounts.*.api_token`, `accounts.*.account_id`, `accounts.*.zone_id`, `accounts.*.tunnels.*.token` |
 | `~/cicy-ai/db/cf.json`        | 0600 | 注册表不存在时的凭据回退（只读）                     |
 
 注册表布局 (`sync` 重新生成 `tunnels`；`create` 追加到其中)：
 
 ```json
 {
-  "prod": {
+  "default": "main",
+  "accounts": { "main": {
     "api_token": "...", "account_id": "...", "domain": "...", "zone_id": "...",
     "tunnels": {
       "<name>": {
@@ -37,17 +38,17 @@ DNS CNAME 始终指向 `<tunnel_id>.cfargotunnel.com` 并且是代理的。
         "hostnames": [ { "hostname": "<fqdn>", "service": "http://localhost:<port>" } ]
       }
     }
-  },
-  "dev": { }
+  } }
 }
 ```
 
-传统的 `tunnel_id`（一个用于 `add`/`del`/`list` 端口路由、主机名 `<port>.<domain>` 的单个固定隧道）仍然有效，但对于命名隧道命令不再是必需的。包装器也接受一个顶级的扁平形式（不带 `prod`）以兼容 `cf` 技能，并将其视为 `prod` 块。
+传统的 `tunnel_id`（一个用于 `add`/`del`/`list` 端口路由、主机名 `<port>.<domain>` 的单个固定隧道）仍然有效，但对于命名隧道命令不再是必需的。旧版扁平 / `prod` 形式仍可读取；新写入统一使用 `accounts.<key>`。
 
 ## 环境变量
 
 - `CICY_CF_CONFIG` — 覆盖配置路径
-- `CF_ENV` — 环境块名称（默认 `prod`）
+- `CF_ACCOUNT` — 覆盖账号 key；默认使用顶层 `default`
+- `CF_ENV` — 旧版环境块选择器（默认 `prod`）
 
 ## JSON 输出
 

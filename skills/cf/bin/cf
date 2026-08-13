@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const CONFIG_PATH = process.env.CICY_CF_CONFIG || join(homedir(), 'cicy-ai', 'db', 'cf.json');
+const ACCOUNT = process.env.CF_ACCOUNT || '';
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
 const argv = process.argv.slice(2);
@@ -75,19 +76,40 @@ function readConfig() {
     err.exitCode = 1;
     throw err;
   }
-  if (!cfg.api_token || cfg.api_token.startsWith('<paste')) {
+  const selected = selectAccount(cfg);
+  if (!selected.config.api_token || selected.config.api_token.startsWith('<paste')) {
     const err = new Error(`api_token missing or placeholder in ${CONFIG_PATH} — run 'cf config'`);
     err.exitCode = 3;
     throw err;
   }
-  return cfg;
+  return selected;
+}
+
+// Primary shape: { default, accounts: { <key>: { api_token, account_id, ... } } }.
+// Flat and {prod:{...}} remain read-only compatibility paths for old installs.
+function selectAccount(raw) {
+  if (raw.accounts && typeof raw.accounts === 'object' && !Array.isArray(raw.accounts)) {
+    const account = ACCOUNT || raw.default;
+    if (!account) throw Object.assign(new Error(`config has accounts but no default — set default or CF_ACCOUNT`), { exitCode: 3 });
+    const config = raw.accounts[account];
+    if (!config || typeof config !== 'object') throw Object.assign(new Error(`config has no account '${account}'`), { exitCode: 3 });
+    return { account, config, format: 'accounts' };
+  }
+  if (raw.prod && typeof raw.prod === 'object') return { account: ACCOUNT || 'prod', config: raw.prod, format: 'legacy-prod' };
+  return { account: ACCOUNT || 'default', config: raw, format: 'legacy-flat' };
 }
 
 function writePlaceholder() {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true, mode: 0o700 });
+  const account = ACCOUNT || 'default';
   const tmpl = {
-    api_token:  '<paste-your-cloudflare-api-token-here>',
-    account_id: '<paste-your-cloudflare-account-id-here>',
+    default: account,
+    accounts: {
+      [account]: {
+        api_token:  '<paste-your-cloudflare-api-token-here>',
+        account_id: '<paste-your-cloudflare-account-id-here>',
+      },
+    },
   };
   writeFileSync(CONFIG_PATH, JSON.stringify(tmpl, null, 2) + '\n', { mode: 0o600 });
   try { chmodSync(CONFIG_PATH, 0o600); } catch {}
@@ -120,6 +142,7 @@ async function cmdStatus() {
     permissions: null,
     api_token_set: false,
     account_id_set: false,
+    account: null,
     api_token_masked: '',
   };
   if (status.exists) {
@@ -128,7 +151,10 @@ async function cmdStatus() {
       status.permissions = '0' + m.toString(8);
     } catch {}
     try {
-      const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+      const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+      const selected = selectAccount(raw);
+      const cfg = selected.config;
+      status.account = selected.account;
       const isPlaceholder = (v) => typeof v === 'string' && v.startsWith('<paste');
       status.api_token_set = !!(cfg.api_token && !isPlaceholder(cfg.api_token));
       status.account_id_set = !!(cfg.account_id && !isPlaceholder(cfg.account_id));
@@ -141,6 +167,7 @@ async function cmdStatus() {
     console.log(JSON.stringify({ ok: true, data: status }));
   } else {
     console.log(`config:      ${status.config_path}`);
+    console.log(`account:     ${status.account || ACCOUNT || '(none)'}`);
     console.log(`exists:      ${status.exists}`);
     console.log(`permissions: ${status.permissions || '(n/a)'}`);
     console.log(`api_token:   ${status.api_token_set ? status.api_token_masked : '(missing)'}`);
@@ -158,7 +185,7 @@ async function cmdCurl(args) {
   if (!path.startsWith('/')) path = '/' + path;
   const body = args[2];
 
-  const cfg = readConfig();
+  const { config: cfg } = readConfig();
   const url = CF_API + path;
 
   const headers = {
@@ -185,7 +212,7 @@ async function cmdCurl(args) {
 
 async function cmdExec(args) {
   if (args.length === 0) bail('usage: cf exec <command> [args...]', 2);
-  const cfg = readConfig();
+  const { config: cfg } = readConfig();
   const env = {
     ...process.env,
     CLOUDFLARE_API_TOKEN: cfg.api_token,

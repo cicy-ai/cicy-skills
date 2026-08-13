@@ -15,14 +15,22 @@ description: Secure Cloudflare API wrapper. Use cf curl to call any endpoint wit
 - Never construct a raw `curl` command with `-H "Authorization: Bearer ..."` using a token you read from the file. Use `cf curl` instead.
 - `cf status` masks the api_token — trust its output.
 
-## Config shape
+## Config shape (primary)
 
 ```json
 {
-  "api_token":  "<paste-your-cloudflare-api-token-here>",
-  "account_id": "<paste-your-cloudflare-account-id-here>"
+  "default": "main",
+  "accounts": {
+    "main": {
+      "api_token":  "<paste-your-cloudflare-api-token-here>",
+      "account_id": "<paste-your-cloudflare-account-id-here>"
+    }
+  }
 }
 ```
+
+Use `CF_ACCOUNT=<key>` to select another account. The flat legacy shape remains
+readable, but new configuration uses the account directory above.
 
 Create the token at https://dash.cloudflare.com/profile/api-tokens.
 

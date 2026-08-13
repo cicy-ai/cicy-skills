@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cf",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "title": "Cloudflare API",
   "description": "Secure Cloudflare API wrapper. Use cf curl to call any endpoint without exposing the api_token.",
   "category": "cloud",
@@ -23,8 +23,8 @@
     "path": "~/cicy-ai/db/cf.json",
     "permissions": "0600",
     "secret_fields": [
-      "api_token",
-      "account_id"
+      "accounts.*.api_token",
+      "accounts.*.account_id"
     ]
   },
   "permissions": [

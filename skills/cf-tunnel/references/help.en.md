@@ -6,7 +6,7 @@
 cf-tunnel config                          Open the config in $EDITOR
 cf-tunnel status  [--json]                Show config state + registered tunnels
 cf-tunnel tunnels [--json]                Tree: each tunnel → its hostnames (live, from CF API)
-cf-tunnel sync    [--json]                Regenerate <env>.tunnels in ~/cicy-ai/db/cf-tunnel.json
+cf-tunnel sync    [--json]                Regenerate accounts.<key>.tunnels in ~/cicy-ai/db/cf-tunnel.json
                                           from the CF API (id + connector token + hostname list)
 cf-tunnel create <name> [--host <h>] [--service <url>|--port <n>] [--json]
                                           Provision a NAMED tunnel end-to-end: create/reuse the
@@ -28,7 +28,8 @@ through it:
 
 ```json
 {
-  "prod": {
+  "default": "main",
+  "accounts": { "main": {
     "api_token": "...", "account_id": "...", "domain": "...", "zone_id": "...",
     "tunnels": {
       "cloudshell": {
@@ -39,7 +40,7 @@ through it:
         ]
       }
     }
-  }
+  } }
 }
 ```
 
@@ -59,14 +60,15 @@ cf-tunnel create web --host www.example.com --service http://localhost:3000
 cf-tunnel rm api
 
 # run a connector with a saved token (never print the token itself)
-cloudflared tunnel run --token "$(node -p "require(process.env.HOME+'/cicy-ai/db/cf-tunnel.json').prod.tunnels.cloudshell.token")"
+# The wrapper keeps connector tokens private. Start cloudflared through the
+# product integration that consumes accounts.<key>.tunnels.<name>.token.
 
 # legacy fixed-tunnel port routes (add 8080 → 8080.<domain> → localhost:8080)
 cf-tunnel list
 cf-tunnel add 8080
 cf-tunnel del 8080
 
-# environments
+# legacy environment-block config only
 CF_ENV=dev cf-tunnel sync
 ```
 
@@ -75,5 +77,6 @@ CF_ENV=dev cf-tunnel sync
 - `CICY_CF_CONFIG` — override config path (default `~/cicy-ai/db/cf-tunnel.json`,
   falling back to `~/cicy-ai/db/cf.json` for credentials if the registry is absent;
   writes always go to `~/cicy-ai/db/cf-tunnel.json`)
-- `CF_ENV`         — pick `prod` (default) or `dev` (or any other key in config)
+- `CF_ACCOUNT`     — select an `accounts` key (default: top-level `default`)
+- `CF_ENV`         — legacy env-block selector (default `prod`)
 - `EDITOR`/`VISUAL` — editor for `cf-tunnel config`

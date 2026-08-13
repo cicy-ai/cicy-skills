@@ -6,7 +6,7 @@
 cf-tunnel config                          在 $EDITOR 中打开配置
 cf-tunnel status  [--json]                显示配置状态 + 已注册隧道
 cf-tunnel tunnels [--json]                树形结构：每个隧道 → 其主机名（实时，来自 CF API）
-cf-tunnel sync    [--json]                从 CF API 重新生成 ~/cicy-ai/db/cf-tunnel.json 中的 <env>.tunnels
+cf-tunnel sync    [--json]                从 CF API 重新生成 ~/cicy-ai/db/cf-tunnel.json 中的 accounts.<key>.tunnels
                                           （包括 id + 连接器令牌 + 主机名列表）
 cf-tunnel create <name> [--host <h>] [--service <url>|--port <n>] [--json]
                                           端到端配置命名隧道：创建/复用隧道，
@@ -27,7 +27,8 @@ cf-tunnel --help / -h / help              打印此帮助
 
 ```json
 {
-  "prod": {
+  "default": "main",
+  "accounts": { "main": {
     "api_token": "...", "account_id": "...", "domain": "...", "zone_id": "...",
     "tunnels": {
       "cloudshell": {
@@ -38,7 +39,7 @@ cf-tunnel --help / -h / help              打印此帮助
         ]
       }
     }
-  }
+  } }
 }
 ```
 
@@ -58,14 +59,15 @@ cf-tunnel create web --host www.example.com --service http://localhost:3000
 cf-tunnel rm api
 
 # 使用保存的令牌运行连接器（切勿打印令牌本身）
-cloudflared tunnel run --token "$(node -p "require(process.env.HOME+'/cicy-ai/db/cf-tunnel.json').prod.tunnels.cloudshell.token")"
+# 包装器会保护连接器 Token。请通过产品集成读取
+# accounts.<key>.tunnels.<name>.token 并启动 cloudflared。
 
 # 旧版固定隧道端口路由（添加 8080 → 8080.<domain> → localhost:8080）
 cf-tunnel list
 cf-tunnel add 8080
 cf-tunnel del 8080
 
-# 环境
+# 仅旧版环境块配置
 CF_ENV=dev cf-tunnel sync
 ```
 
@@ -74,5 +76,6 @@ CF_ENV=dev cf-tunnel sync
 - `CICY_CF_CONFIG` — 覆盖配置路径（默认 `~/cicy-ai/db/cf-tunnel.json`，
   若注册表不存在则回退到 `~/cicy-ai/db/cf.json` 获取凭据；
   写入始终保存到 `~/cicy-ai/db/cf-tunnel.json`）
-- `CF_ENV`         — 选择 `prod`（默认）或 `dev`（或配置中的任何其他键）
+- `CF_ACCOUNT`     — 选择 `accounts` 下的账号 key（默认使用顶层 `default`）
+- `CF_ENV`         — 旧版环境块选择器（默认 `prod`）
 - `EDITOR`/`VISUAL` — 用于 `cf-tunnel config` 的编辑器

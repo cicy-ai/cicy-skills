@@ -23,6 +23,9 @@ cf config              # open editor
 cf curl GET /zones     # verify
 ```
 
+The primary config is an account directory: `{"default":"main","accounts":{"main":{...}}}`.
+Use `CF_ACCOUNT=<key>` to select a non-default account.
+
 ## Security
 
 The api_token lives in `~/cicy-ai/db/cf.json` at mode 0600. The wrapper reads

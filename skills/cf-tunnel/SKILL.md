@@ -23,33 +23,35 @@ One named tunnel = one connector token; under it, the list of hostnames it serve
 
 ```json
 {
-  "prod": {
-    "api_token":  "<cloudflare api token>",
-    "account_id": "<cloudflare account id>",
-    "domain":     "<zone apex, e.g. example.com>",
-    "zone_id":    "<cloudflare zone id>",
-    "tunnels": {
-      "cloudshell": {
-        "id": "<tunnel uuid>",
-        "token": "<connector token>",
-        "hostnames": [
-          { "hostname": "cloudshell.example.com", "service": "http://localhost:8008" }
-        ]
+  "default": "main",
+  "accounts": {
+    "main": {
+      "api_token":  "<cloudflare api token>",
+      "account_id": "<cloudflare account id>",
+      "domain":     "<zone apex, e.g. example.com>",
+      "zone_id":    "<cloudflare zone id>",
+      "tunnels": {
+        "cloudshell": {
+          "id": "<tunnel uuid>",
+          "token": "<connector token>",
+          "hostnames": [
+            { "hostname": "cloudshell.example.com", "service": "http://localhost:8008" }
+          ]
+        }
       }
     }
   }
 }
 ```
 
-A `dev` block is optional; use `CF_ENV=dev cf-tunnel ...` to target it.
-If only a flat `~/cicy-ai/db/cf.json` exists (from the `cf` skill), its
-credentials are used as fallback; writes always go to `cf-tunnel.json`.
+Use `CF_ACCOUNT=<key>` to select a non-default account. Legacy `prod` / flat
+config remains readable; writes are normalized to the account directory.
 
 ## Named tunnels (primary workflow)
 
 ```sh
 cf-tunnel tunnels                      # tree: each tunnel → its hostnames (live)
-cf-tunnel sync                         # regenerate <env>.tunnels in the registry from the CF API
+cf-tunnel sync                         # regenerate accounts.<key>.tunnels from the CF API
 cf-tunnel create cloudshell            # provision: tunnel + ingress + DNS + token → registry
 cf-tunnel create api --port 8009       # api.<domain> → http://localhost:8009
 cf-tunnel rm api                       # delete tunnel + DNS + registry entry
@@ -57,7 +59,7 @@ cf-tunnel rm api                       # delete tunnel + DNS + registry entry
 
 `create` is end-to-end: create/reuse tunnel by name → upsert ingress rule →
 upsert proxied DNS CNAME → fetch connector token → save
-`{id, token, hostnames}` under `<env>.tunnels.<name>`. Run the connector on the
+`{id, token, hostnames}` under `accounts.<key>.tunnels.<name>`. Run the connector on the
 target host with `cloudflared tunnel run --token <token from registry>` (or
 cicy-code's `--cft-token`).
 

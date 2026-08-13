@@ -38,4 +38,5 @@ cf exec npx wrangler kv namespace create FOO
 ## Environment
 
 - `CICY_CF_CONFIG` — override config path (default `~/cicy-ai/db/cf.json`)
+- `CF_ACCOUNT` — select a key under `accounts` (default: config `default`)
 - `EDITOR` / `VISUAL` — editor for `cf config`

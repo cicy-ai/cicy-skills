@@ -4,8 +4,8 @@
 //
 // Named-tunnel registry (the source of truth this tool maintains):
 //   ~/cicy-ai/db/cf-tunnel.json
-//   { "<env>": { api_token, account_id, domain, zone_id,
-//                tunnels: { "<name>": { id, token, hostnames: [{hostname, service}] } } } }
+//   { default, accounts: { "<key>": { api_token, account_id, domain, zone_id,
+//                tunnels: { "<name>": { id, token, hostnames: [{hostname, service}] } } } } }
 // One tunnel = one connector token; its hostnames list is the domains served
 // through it. `sync` regenerates the tunnels section from the CF API; `create`
 // provisions a new named tunnel (tunnel + ingress + DNS + token) and appends it.
@@ -71,7 +71,7 @@ function printHelp() {
   cf-tunnel list [--json]
   cf-tunnel add <port> [<port> ...]
   cf-tunnel del <port> [<port> ...]
-  CF_ENV=dev cf-tunnel ...
+  CF_ACCOUNT=<key> cf-tunnel ...
 `);
   }
 }
@@ -89,17 +89,25 @@ function readEnvCfg(fields = CORE_FIELDS) {
   // Accept v2 {default,accounts:{name:{...}}}, nested {prod:{...}}, or the
   // legacy flat {api_token,...} form.
   let block;
+  let accountKey = '';
+  let format = '';
   if (raw.accounts && typeof raw.accounts === 'object') {
     const accountName = ACCOUNT || raw.default;
     block = raw.accounts[accountName];
     if (!block || typeof block !== 'object') {
       throw Object.assign(new Error(`config has no account '${accountName || '(default)'}'`), { exitCode: 3 });
     }
+    accountKey = accountName;
+    format = 'accounts';
   } else if (raw[ENV] && typeof raw[ENV] === 'object') {
     block = raw[ENV];
+    accountKey = ENV;
+    format = 'legacy-env';
   } else if (ENV === 'prod' && raw.api_token) {
     // flat form (cf skill) — synthesize a prod block from top-level fields
     block = raw;
+    accountKey = 'default';
+    format = 'legacy-flat';
   } else {
     throw Object.assign(new Error(`config has no '${ENV}' block`), { exitCode: 3 });
   }
@@ -107,29 +115,36 @@ function readEnvCfg(fields = CORE_FIELDS) {
     const v = block[f];
     if (!v || (typeof v === 'string' && v.startsWith('<paste'))) {
       throw Object.assign(
-        new Error(`${ENV}.${f} missing or placeholder in ${CONFIG_PATH}`),
+        new Error(`accounts.${accountKey}.${f} missing or placeholder in ${CONFIG_PATH}`),
         { exitCode: 3 },
       );
     }
   }
-  return block;
+  return { ...block, __accountKey: accountKey, __format: format };
 }
 
 // ── registry (~/cicy-ai/db/cf-tunnel.json) ─────────────────────────────
 // Writes always target the registry file, whatever CONFIG_PATH resolved to.
-// Shape per env: { ...credentials, tunnels: { <name>: {id, token, hostnames} } }
+// Primary shape: { default, accounts: { <key>: { ...credentials, tunnels } } }.
 
 function writeRegistryTunnels(cfg, tunnels, { merge = false } = {}) {
   let raw = {};
   if (existsSync(REGISTRY_PATH)) {
     try { raw = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8')); } catch { raw = {}; }
   }
-  if (!raw[ENV] || typeof raw[ENV] !== 'object') raw[ENV] = {};
-  // seed credentials so the registry is self-contained even when they came from cf.json
-  for (const f of CORE_FIELDS) {
-    if (raw[ENV][f] === undefined && cfg[f] !== undefined) raw[ENV][f] = cfg[f];
+  // The account directory is the primary config model. Legacy config can be
+  // read, but all new registry writes are normalized into accounts[key].
+  if (!raw.accounts || typeof raw.accounts !== 'object' || Array.isArray(raw.accounts)) raw.accounts = {};
+  const accountKey = cfg.__accountKey || ACCOUNT || raw.default || ENV || 'default';
+  if (!raw.default) raw.default = accountKey;
+  if (!raw.accounts[accountKey] || typeof raw.accounts[accountKey] !== 'object') raw.accounts[accountKey] = {};
+  const block = raw.accounts[accountKey];
+  // Seed credentials and existing tunnel entries so normalization from a
+  // legacy block remains lossless when create performs a merge.
+  for (const f of [...CORE_FIELDS, 'tunnel_id']) {
+    if (block[f] === undefined && cfg[f] !== undefined) block[f] = cfg[f];
   }
-  raw[ENV].tunnels = merge ? { ...(raw[ENV].tunnels || {}), ...tunnels } : tunnels;
+  block.tunnels = merge ? { ...(cfg.tunnels || {}), ...(block.tunnels || {}), ...tunnels } : tunnels;
   mkdirSync(dirname(REGISTRY_PATH), { recursive: true, mode: 0o700 });
   writeFileSync(REGISTRY_PATH, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
   try { chmodSync(REGISTRY_PATH, 0o600); } catch {}
@@ -162,23 +177,22 @@ async function fetchTunnels(cfg, { withToken = false } = {}) {
 
 function ensurePlaceholderConfig() {
   if (existsSync(CONFIG_PATH)) {
-    // merge: keep existing, ensure prod block has all fields
+    // Merge: keep existing values and normalize legacy config to accounts.
     let raw;
     try {
       raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
     } catch {
       raw = {};
     }
-    if (!raw.prod || typeof raw.prod !== 'object') {
-      // promote flat form to nested if needed
-      if (raw.api_token) {
-        raw = { prod: { ...raw } };
-      } else {
-        raw.prod = {};
-      }
+    if (!raw.accounts || typeof raw.accounts !== 'object' || Array.isArray(raw.accounts)) {
+      const old = raw.prod && typeof raw.prod === 'object' ? raw.prod : (raw.api_token ? raw : {});
+      raw = { default: ACCOUNT || 'default', accounts: { [ACCOUNT || 'default']: { ...old } } };
     }
+    const accountName = ACCOUNT || raw.default || Object.keys(raw.accounts)[0] || 'default';
+    if (!raw.default) raw.default = accountName;
+    if (!raw.accounts[accountName] || typeof raw.accounts[accountName] !== 'object') raw.accounts[accountName] = {};
     for (const f of CORE_FIELDS) {
-      if (raw.prod[f] === undefined) raw.prod[f] = `<paste-your-${f.replace(/_/g, '-')}-here>`;
+      if (raw.accounts[accountName][f] === undefined) raw.accounts[accountName][f] = `<paste-your-${f.replace(/_/g, '-')}-here>`;
     }
     writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
     try { chmodSync(CONFIG_PATH, 0o600); } catch {}
@@ -186,7 +200,10 @@ function ensurePlaceholderConfig() {
   }
   mkdirSync(dirname(CONFIG_PATH), { recursive: true, mode: 0o700 });
   const tmpl = {
-    prod: Object.fromEntries(CORE_FIELDS.map((f) => [f, `<paste-your-${f.replace(/_/g, '-')}-here>`])),
+    default: ACCOUNT || 'default',
+    accounts: {
+      [ACCOUNT || 'default']: Object.fromEntries(CORE_FIELDS.map((f) => [f, `<paste-your-${f.replace(/_/g, '-')}-here>`])),
+    },
   };
   writeFileSync(CONFIG_PATH, JSON.stringify(tmpl, null, 2) + '\n', { mode: 0o600 });
   try { chmodSync(CONFIG_PATH, 0o600); } catch {}
@@ -221,7 +238,7 @@ async function cfFetch(path, init = {}, cfg) {
 
 async function cmdConfig() {
   const fresh = ensurePlaceholderConfig();
-  console.log(fresh ? `created placeholder: ${CONFIG_PATH}` : `ensured prod block in: ${CONFIG_PATH}`);
+  console.log(fresh ? `created placeholder: ${CONFIG_PATH}` : `ensured account config in: ${CONFIG_PATH}`);
   const editor = process.env.EDITOR || process.env.VISUAL || 'nano';
   console.log(`opening ${CONFIG_PATH} in ${editor} ...`);
   await runChild(editor, [CONFIG_PATH]);
@@ -254,6 +271,7 @@ async function cmdStatus() {
           const v = block[f];
           out.fields[f] = !!(v && !(typeof v === 'string' && v.startsWith('<paste')));
         }
+        out.account = accountName || ENV;
         out.tunnels = Object.keys(block.tunnels || {});
         if (out.fields.api_token) out.api_token_masked = maskToken(block.api_token);
       } else {
@@ -267,6 +285,7 @@ async function cmdStatus() {
     console.log(JSON.stringify({ ok: true, data: out }));
   } else {
     console.log(`env:          ${out.env}`);
+    console.log(`account:      ${out.account || ACCOUNT || '(none)'}`);
     console.log(`config:       ${out.config_path}`);
     console.log(`exists:       ${out.exists}`);
     console.log(`permissions:  ${out.permissions || '(n/a)'}`);
@@ -314,7 +333,7 @@ async function cmdSync() {
     }));
     return;
   }
-  console.log(`synced ${tunnels.length} tunnel(s) → ${REGISTRY_PATH} (${ENV}.tunnels)`);
+  console.log(`synced ${tunnels.length} tunnel(s) → ${REGISTRY_PATH} (accounts.${cfg.__accountKey}.tunnels)`);
   for (const t of tunnels) {
     console.log(`  ${t.name}: token=${maskToken(t.token || '')}, ${t.hostnames.length} hostname(s)`);
   }
@@ -401,7 +420,7 @@ async function cmdCreate(args) {
   }
   console.log(`✓ tunnel ${name} ${created ? 'created' : 'reused'} (${tunnel.id.slice(0, 8)}…)`);
   console.log(`✓ ${hostname} → ${service}  (dns: ${dnsState})`);
-  console.log(`✓ token saved to ${REGISTRY_PATH} (${ENV}.tunnels.${name}, masked: ${maskToken(tok.result)})`);
+  console.log(`✓ token saved to ${REGISTRY_PATH} (accounts.${cfg.__accountKey}.tunnels.${name}, masked: ${maskToken(tok.result)})`);
   console.log(`run the connector:  cloudflared tunnel run --token <token from registry>`);
 }
 
@@ -430,8 +449,9 @@ async function cmdRm(args) {
   if (existsSync(REGISTRY_PATH)) {
     try {
       const raw = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8'));
-      if (raw[ENV]?.tunnels?.[name]) {
-        delete raw[ENV].tunnels[name];
+      const accountKey = cfg.__accountKey || ACCOUNT || raw.default;
+      if (raw.accounts?.[accountKey]?.tunnels?.[name]) {
+        delete raw.accounts[accountKey].tunnels[name];
         writeFileSync(REGISTRY_PATH, JSON.stringify(raw, null, 2) + '\n', { mode: 0o600 });
       }
     } catch { /* registry unreadable — CF side already cleaned */ }
@@ -496,7 +516,7 @@ async function cmdList() {
   for (const r of routes) {
     console.log(`${r.hostname.padEnd(40)} ${r.service}`);
   }
-  console.log(`\n${routes.length} route(s) in ${ENV}.`);
+  console.log(`\n${routes.length} route(s) in account ${cfg.__accountKey}.`);
 }
 
 // ── add ────────────────────────────────────────────────────────────────

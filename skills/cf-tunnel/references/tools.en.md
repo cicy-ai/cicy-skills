@@ -21,14 +21,15 @@ DNS CNAMEs always point at `<tunnel_id>.cfargotunnel.com` and are proxied.
 
 | path                          | mode | secret_fields                                     |
 |-------------------------------|------|---------------------------------------------------|
-| `~/cicy-ai/db/cf-tunnel.json` | 0600 | `api_token`, `account_id`, `zone_id`, `tunnels.*.token` |
+| `~/cicy-ai/db/cf-tunnel.json` | 0600 | `accounts.*.api_token`, `accounts.*.account_id`, `accounts.*.zone_id`, `accounts.*.tunnels.*.token` |
 | `~/cicy-ai/db/cf.json`        | 0600 | credential fallback (read-only) when the registry is absent |
 
 Registry layout (`sync` regenerates `tunnels`; `create` appends to it):
 
 ```json
 {
-  "prod": {
+  "default": "main",
+  "accounts": { "main": {
     "api_token": "...", "account_id": "...", "domain": "...", "zone_id": "...",
     "tunnels": {
       "<name>": {
@@ -37,20 +38,19 @@ Registry layout (`sync` regenerates `tunnels`; `create` appends to it):
         "hostnames": [ { "hostname": "<fqdn>", "service": "http://localhost:<port>" } ]
       }
     }
-  },
-  "dev": { }
+  } }
 }
 ```
 
 Legacy `tunnel_id` (a single fixed tunnel for `add`/`del`/`list` port
 routes, hostname `<port>.<domain>`) is still honored but no longer required for the named-tunnel commands.
-The wrapper also accepts a flat top-level form (without `prod`) for
-compatibility with the `cf` skill, treating it as the `prod` block.
+Legacy flat / `prod` forms remain readable; new writes use `accounts.<key>`.
 
 ## Environment variables
 
 - `CICY_CF_CONFIG` — override config path
-- `CF_ENV` — env block name (default `prod`)
+- `CF_ACCOUNT` — account key override; otherwise use top-level `default`
+- `CF_ENV` — legacy env-block selector (default `prod`)
 
 ## JSON output
 

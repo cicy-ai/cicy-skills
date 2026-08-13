@@ -7,7 +7,7 @@
 Named tunnels (primary):
 
 - `cf-tunnel tunnels` — tree of tunnels → their hostnames (live from CF API)
-- `cf-tunnel sync`    — regenerate `<env>.tunnels` in `~/cicy-ai/db/cf-tunnel.json`
+- `cf-tunnel sync`    — regenerate `accounts.<key>.tunnels` in `~/cicy-ai/db/cf-tunnel.json`
   (`{id, token, hostnames:[{hostname, service}]}` per tunnel)
 - `cf-tunnel create <name> [--host <h>] [--service <url>|--port <n>]` — provision
   end-to-end: tunnel + ingress + proxied DNS CNAME + connector token → registry
@@ -38,7 +38,7 @@ cf-tunnel create myapp --port 3000
 
 ## Environments
 
-Set `CF_ENV=dev` to use a `dev` block in the config:
+Legacy environment-block configs remain readable with `CF_ENV`:
 
 ```bash
 CF_ENV=dev cf-tunnel sync

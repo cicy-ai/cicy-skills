@@ -8,7 +8,7 @@
 
 | path                       | mode | secret_fields           |
 |----------------------------|------|-------------------------|
-| `~/cicy-ai/db/cf.json`     | 0600 | `api_token`, `account_id` |
+| `~/cicy-ai/db/cf.json`     | 0600 | `accounts.*.api_token`, `accounts.*.account_id` |
 
 The wrapper auto-creates a placeholder file (with literal `<paste-...-here>`
 strings) at mode 0600 on `cf config` if missing.
@@ -16,6 +16,7 @@ strings) at mode 0600 on `cf config` if missing.
 ## Environment variables
 
 - `CICY_CF_CONFIG` — override config path
+- `CF_ACCOUNT` — account key override; otherwise use top-level `default`
 - `EDITOR`, `VISUAL` — editor for `cf config`
 
 When `cf exec` is invoked, the child process additionally sees:

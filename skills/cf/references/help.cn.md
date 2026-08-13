@@ -38,4 +38,5 @@ cf exec npx wrangler kv namespace create FOO
 ## 环境变量
 
 - `CICY_CF_CONFIG` — 覆盖配置文件路径（默认 `~/cicy-ai/db/cf.json`）
+- `CF_ACCOUNT` — 选择 `accounts` 下的账号 key（默认使用配置中的 `default`）
 - `EDITOR` / `VISUAL` — 用于 `cf config` 的编辑器
