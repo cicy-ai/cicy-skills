@@ -27,7 +27,7 @@ When `cf exec` is invoked, the child process additionally sees:
 
 `cf curl` prints the raw Cloudflare JSON response. Use `jq` to extract fields.
 
-`cf status` (text) prints 5 lines of config state. With `--json`:
+`cf status` (text) prints the config state. With `--json`:
 
 ```json
 {
@@ -35,7 +35,6 @@ When `cf exec` is invoked, the child process additionally sees:
   "data": {
     "config_path": "...",
     "exists": true,
-    "permissions": "0600",
     "api_token_set": true,
     "account_id_set": true,
     "api_token_masked": "abcd***wxyz"

@@ -26,7 +26,7 @@
 
 `cf curl` 输出原始 Cloudflare JSON 响应。可使用 `jq` 提取字段。
 
-`cf status`（文本模式）输出 5 行配置状态。使用 `--json` 参数时：
+`cf status`（文本模式）输出配置状态。使用 `--json` 参数时：
 
 ```json
 {
@@ -34,7 +34,6 @@
   "data": {
     "config_path": "...",
     "exists": true,
-    "permissions": "0600",
     "api_token_set": true,
     "account_id_set": true,
     "api_token_masked": "abcd***wxyz"

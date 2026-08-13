@@ -23,6 +23,7 @@ assert('status --json exits 0', status.status === 0);
 let s; try { s = JSON.parse(status.stdout); } catch {}
 assert('status --json is valid JSON', !!s);
 assert('status --json has ok field', 'ok' in (s || {}));
+assert('status --json omits permissions', !('permissions' in (s?.data || {})));
 
 const fixture = mkdtempSync(join(tmpdir(), 'cf-accounts-'));
 const config = join(fixture, 'cf.json');

@@ -2,7 +2,7 @@
 // cf — Cloudflare API wrapper. Subcommands: config / status / curl / exec.
 // Zero npm dependencies. Pure ESM. Node 18+.
 
-import { readFileSync, writeFileSync, existsSync, statSync, chmodSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, chmodSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -139,17 +139,12 @@ async function cmdStatus() {
   const status = {
     config_path: CONFIG_PATH,
     exists: existsSync(CONFIG_PATH),
-    permissions: null,
     api_token_set: false,
     account_id_set: false,
     account: null,
     api_token_masked: '',
   };
   if (status.exists) {
-    try {
-      const m = statSync(CONFIG_PATH).mode & 0o777;
-      status.permissions = '0' + m.toString(8);
-    } catch {}
     try {
       const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
       const selected = selectAccount(raw);
@@ -169,7 +164,6 @@ async function cmdStatus() {
     console.log(`config:      ${status.config_path}`);
     console.log(`account:     ${status.account || ACCOUNT || '(none)'}`);
     console.log(`exists:      ${status.exists}`);
-    console.log(`permissions: ${status.permissions || '(n/a)'}`);
     console.log(`api_token:   ${status.api_token_set ? status.api_token_masked : '(missing)'}`);
     console.log(`account_id:  ${status.account_id_set ? 'set' : '(missing)'}`);
     if (status.error) console.log(`error:       ${status.error}`);
