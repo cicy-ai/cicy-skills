@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-r2",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "title": "CiCy R2",
   "description": "Upload, download, list, and manage objects in the project Cloudflare R2 bucket (public CDN at r2.deepfetch.de5.net). Global-friendly replacement for the arrears-prone Tencent COS bucket.",
   "category": "cloud",
@@ -46,7 +46,7 @@
   "i18n": {
     "zh-CN": {
       "title": "CiCy R2",
-      "description": "上传、下载、列出和管理项目的 Cloudflare R2 存储桶对象（公网 CDN r2.deepfetch.de5.net）。面向全球分发，替代易欠费冻结的腾讯云 COS — 永久免费额度、无 ICP 屏蔽、CF 边缘缓存。"
+      "description": "上传、下载、列出和管理 Cloudflare R2 存储桶对象，支持通过已配置的自定义域名生成公开访问链接，并利用 Cloudflare 边缘网络分发静态资源。"
     }
   },
   "tools": [
