@@ -27,6 +27,9 @@ agent-electron tools
 ## 注意事项
 
 - cicy-desktop 主机必须运行并连接至 cicy-code。
+- Codex 通过 `~/.agents/skills/agent-electron` 发现已安装的 skill；
+  `~/.codex/skills/agent-electron` 仅用于兼容旧版 Codex。安装后请新建
+  Codex 会话或执行 `/clear`，再用 `@agent-electron` 显式调用。
 - `accountIdx` = profile id = session id，三者是同一个数字标识。例如三者的
   id 都为 `1` 时，均对应 `persist:sandbox-1`。
 - `BrowserWindow.id` 与 `webContents.id` 可能出现相同数字。裸数字（例如

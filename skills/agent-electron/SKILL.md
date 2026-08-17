@@ -32,6 +32,15 @@ Use this skill when the task involves:
 - making raw CDP calls (`Runtime.evaluate`, `Page.navigate`, etc.) against a BrowserWindow's webContents
 - taking screenshots / snapshots / loading new URLs in an existing window
 
+## Codex discovery
+
+After installation, cicy-code surfaces this skill at
+`~/.agents/skills/agent-electron`, the current Codex user-skill directory. It
+also maintains `~/.codex/skills/agent-electron` for compatibility with older
+Codex versions. Start a new Codex session (or run `/clear`) after installing or
+upgrading so the available-skills catalog is rebuilt. Invoke the skill as
+`@agent-electron`; the `@` mention is the explicit and recommended form.
+
 ## Rules
 
 1. **`accountIdx` = profile id = session id.** They are three names for the

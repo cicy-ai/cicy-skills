@@ -20,6 +20,12 @@ under that `accountIdx`.
 cicy-code skill install agent-electron
 ```
 
+For Codex, cicy-code exposes the installed skill at
+`~/.agents/skills/agent-electron` and keeps the legacy
+`~/.codex/skills/agent-electron` path for compatibility. Start a new session
+or run `/clear` after installation, then invoke it explicitly with
+`@agent-electron`.
+
 ## Quick usage
 
 ```bash

@@ -27,6 +27,10 @@ agent-electron tools
 ## Notes
 
 - The cicy-desktop host must be running and connected to cicy-code.
+- Codex discovers the installed skill through
+  `~/.agents/skills/agent-electron`; `~/.codex/skills/agent-electron` is kept
+  for legacy compatibility. Start a new Codex session or run `/clear` after
+  installation, then invoke the skill with `@agent-electron`.
 - `accountIdx` = profile id = session id. They are the same numeric identifier;
   for example, all three forms of id `1` map to `persist:sandbox-1`.
 - `BrowserWindow.id` and `webContents.id` may be the same number. A bare
