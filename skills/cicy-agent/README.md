@@ -22,6 +22,9 @@ cicy-agent reply w-1001         # last reply (parsed)
 cicy-agent reply w-1001 --full  # include tool_use entries
 cicy-agent reply team.w-1001    # structured Cloud reply (never capture)
 cicy-agent history team.w-1001 --index 0
+cicy-agent projects                       # all projects with nested agents
+cicy-agent projects --current             # current agent's project
+cicy-agent --json projects                # structured output
 
 cicy-agent msg w-10002 'do this'              # prints msg_id immediately, then waits for the
                                               # structured done/failed reply

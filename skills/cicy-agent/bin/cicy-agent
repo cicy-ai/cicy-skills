@@ -2,7 +2,7 @@
 // cicy-agent — tmux pane/window operations via cicy-code's /api/tmux/* endpoints.
 // Subcommands: list / ls / tree / windows / capture / reply / msg / msgs /
 //              broadcast / get_online_agents / get_offline_agents /
-//              get_all_agents / send-keys / restart / clear / fork / create /
+//              get_all_agents / projects / send-keys / restart / clear / fork / create /
 //              whoami / cloud
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -45,6 +45,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'get_online_agents': case 'get-online-agents':   await cmdAgents('online', node); break;
       case 'get_offline_agents': case 'get-offline-agents': await cmdAgents('offline', node); break;
       case 'get_all_agents': case 'get-all-agents':         await cmdAgents('all', node); break;
+      case 'projects': case 'project': await cmdProjects(r2, node); break;
       case 'send-keys':          await cmdSendKeys(r2, node); break;
       case 'restart':            await cmdRestart(r2, node); break;
       case 'clear':               await cmdClear(r2, node); break;
@@ -183,6 +184,69 @@ async function cmdLs(_args, node) {
   console.log('pane_id\tagent_type\ttitle');
   console.log('-------\t----------\t-----');
   for (const p of panes) console.log(`${p.pane_id}\t${p.agent_type || ''}\t${p.title || ''}`);
+}
+
+async function cmdProjects(args, node) {
+  const currentOnly = args.includes('--current');
+  const selectors = args.filter((arg) => arg !== '--current');
+  if (selectors.length > 1) throw Object.assign(new Error('Usage: cicy-agent projects [--current|<id|name>]'), { exitCode: 2 });
+
+  const [groupData, paneData] = await Promise.all([
+    api('GET', '/api/groups', undefined, node),
+    api('GET', '/api/tmux/panes', undefined, node),
+  ]);
+  const groups = groupData?.groups || groupData?.data?.groups || [];
+  const panes = paneData?.panes || paneData?.data?.panes || [];
+  const paneById = new Map();
+  for (const pane of panes) {
+    const id = String(pane?.pane_id || pane?.id || pane?.name || '').replace(/:.*$/, '');
+    if (id) paneById.set(id, pane);
+  }
+
+  let selected = groups;
+  if (currentOnly) {
+    const current = String(process.env.X_AGENT_SHORT_ID || '').replace(/:.*$/, '');
+    if (!current) throw Object.assign(new Error('X_AGENT_SHORT_ID is required for projects --current'), { exitCode: 3 });
+    selected = groups.filter((group) => (group?.pane_ids || []).some((id) => String(id).replace(/:.*$/, '') === current));
+  } else if (selectors.length === 1) {
+    const selector = String(selectors[0]).trim().toLowerCase();
+    selected = groups.filter((group) => String(group?.id) === selector || String(group?.name || '').toLowerCase() === selector);
+  }
+
+  const projects = selected.map((group) => {
+    const agents = (group?.pane_ids || []).map((rawId) => {
+      const id = String(rawId).replace(/:.*$/, '');
+      const pane = paneById.get(id) || {};
+      return {
+        id,
+        title: String(pane.title || ''),
+        agent_type: String(pane.agent_type || ''),
+        online: pane.online ?? null,
+      };
+    });
+    return {
+      id: group.id,
+      name: String(group.name || ''),
+      is_default: Boolean(group.is_default),
+      project_template: String(group.project_template || ''),
+      agents,
+    };
+  });
+
+  if (json) return ok({ projects });
+  if (projects.length === 0) {
+    console.log(currentOnly ? 'No project contains the current agent.' : 'No projects matched.');
+    return;
+  }
+  for (const [index, project] of projects.entries()) {
+    const flags = [project.is_default ? 'default' : '', project.project_template].filter(Boolean).join(', ');
+    console.log(`${project.name || '(unnamed)'} (#${project.id})${flags ? ` [${flags}]` : ''} — ${project.agents.length} agent${project.agents.length === 1 ? '' : 's'}`);
+    if (project.agents.length === 0) console.log('  (no agents)');
+    for (const agent of project.agents) {
+      console.log(`  ${agent.id}\t${agent.agent_type || '-'}\t${agent.title || '-'}`);
+    }
+    if (index < projects.length - 1) console.log('');
+  }
 }
 
 async function cmdTree(_args, node) {

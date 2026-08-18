@@ -43,6 +43,9 @@ cicy-agent get_all_agents                     名册：整个数据库（在线 
                                               idle 是启发式判断："思考中"或请求活动 <45秒前
                                               = 忙碌。
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
+cicy-agent projects                           列出所有 Project，并嵌套显示各自 Agents
+cicy-agent projects --current                 列出当前 Agent 所属的 Project
+cicy-agent projects <id|name>                 按 ID 或完整名称列出一个 Project
 cicy-agent restart                            重启所有面板
 cicy-agent clear <pane>                       清除面板
 cicy-agent fork <src> [--title T] [--master PANE]     复制代理以便新代理继承其上下文

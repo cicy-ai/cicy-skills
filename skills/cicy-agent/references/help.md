@@ -43,6 +43,9 @@ cicy-agent get_all_agents                     Roster: whole db (online ∪ offli
                                               idle is a heuristic: "thinking" or request
                                               activity <45s ago = busy.
 cicy-agent send-keys <pane> <keys...>         tmux send-keys
+cicy-agent projects                           List every project with its nested Agents
+cicy-agent projects --current                 List the project containing the current Agent
+cicy-agent projects <id|name>                 List one project by ID or exact name
 cicy-agent restart                            Restart all panes
 cicy-agent clear <pane>                       Clear pane
 cicy-agent fork <src> [--title T] [--master PANE]     Replicate an agent so a new one inherits its context

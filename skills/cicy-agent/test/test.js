@@ -33,6 +33,42 @@ const list = runSkill(D, ['list', '--json']);
 const listJson = (() => { try { JSON.parse(list.stdout); return true; } catch { return false; } })();
 assert('list --json is valid JSON or exits non-0', listJson || list.status !== 0);
 
+// projects joins /api/groups membership with pane metadata and supports both
+// all-project and current-project views.
+const projectsDir = mkdtempSync(join(tmpdir(), 'cicy-agent-projects-test-'));
+const projectsPortFile = join(projectsDir, 'port');
+const projectsServer = spawn(process.execPath, ['-e', `
+  const http = require('http'); const fs = require('fs');
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/groups') return res.end(JSON.stringify({groups:[
+      {id:1,name:'Default',is_default:true,project_template:'default',pane_ids:['w-101','w-102:main.0']},
+      {id:2,name:'Release',is_default:false,project_template:'release',pane_ids:['w-103']}
+    ]}));
+    if (req.url === '/api/tmux/panes') return res.end(JSON.stringify({panes:[
+      {pane_id:'w-101',title:'Architect',agent_type:'codex'},
+      {pane_id:'w-102:main.0',title:'Builder',agent_type:'claude'},
+      {pane_id:'w-103',title:'Publisher',agent_type:'cicy'}
+    ]}));
+    res.statusCode=404; res.end(JSON.stringify({error:'not_found'}));
+  });
+  server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port)));
+`, projectsPortFile], { stdio: 'ignore' });
+let projectsPort = '';
+for (let i = 0; i < 100 && !projectsPort; i++) {
+  try { projectsPort = readFileSync(projectsPortFile, 'utf8').trim(); } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }
+}
+const projectsGlobalFile = join(projectsDir, 'global.json');
+writeFileSync(projectsGlobalFile, JSON.stringify({api_token:'local-test-token'}));
+const projectsAll = runSkill(D, ['projects'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort });
+const projectsCurrent = runSkill(D, ['projects', '--current', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort, X_AGENT_SHORT_ID: 'w-102' });
+projectsServer.kill();
+rmSync(projectsDir, { recursive: true, force: true });
+assert('projects lists every project with nested agent metadata', projectsAll.status === 0 && projectsAll.stdout.includes('Default (#1)') && projectsAll.stdout.includes('w-102\tclaude\tBuilder') && projectsAll.stdout.includes('Release (#2)'));
+let currentProjects;
+try { currentProjects = JSON.parse(projectsCurrent.stdout); } catch { currentProjects = null; }
+assert('projects --current --json returns only the current agent project', projectsCurrent.status === 0 && currentProjects?.data?.projects?.length === 1 && currentProjects.data.projects[0].id === 1 && currentProjects.data.projects[0].agents.length === 2, projectsCurrent.stdout + projectsCurrent.stderr);
+
 // A Cloud send must become observable as soon as POST succeeds, rather than
 // remaining silent while the correlated reply poll is still pending.
 const fixtureDir = mkdtempSync(join(tmpdir(), 'cicy-agent-cloud-test-'));
