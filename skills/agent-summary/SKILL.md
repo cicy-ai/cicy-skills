@@ -26,6 +26,8 @@ agent-summary <path/to/current.json>     # explicit snapshot file
 ## Output shape
 
 ```
+Date: YYYY-MM-DD HH:mm:ss +08:00
+
 Q: <message>
 A (thinking): <reasoning>
 A (tool): Bash: npm run build …

@@ -3,7 +3,8 @@
 Dump the raw conversation of an agent: `text` + `thinking` in full, plus a
 compact trace per tool call (name + key argument, result truncated to its head;
 errors keep more), with the system prompt and `<system-reminder>` boilerplate
-stripped. Writes `<history>/summary/<conversation_id>.md`, repoints a `current.md`
+stripped. Each file starts with a `Date: YYYY-MM-DD HH:mm:ss +08:00` timestamp.
+Writes `<history>/summary/<conversation_id>.md`, repoints a `current.md`
 symlink at it, and prints that path. Hand it to a fork ("分身") or replay it to
 restore the conversation.
 

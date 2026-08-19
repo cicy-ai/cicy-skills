@@ -342,6 +342,19 @@ function getSummaryOutputPath(snapshotPath, data) {
   return join(summaryDir, `${conversationId}.md`);
 }
 
+// Timestamp each generated summary in China Standard Time (UTC+08:00),
+// independent of the host machine's timezone.
+function eastEightDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const value = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${value('year')}-${value('month')}-${value('day')} ${value('hour')}:${value('minute')}:${value('second')} +08:00`;
+}
+
 // --- entry ---------------------------------------------------------------
 
 function main() {
@@ -417,7 +430,7 @@ function main() {
     flush();
   }
 
-  const text = generateStructuredText(messages);
+  const text = `Date: ${eastEightDate()}\n\n${generateStructuredText(messages)}`;
 
   // Write <conversation_id>.md, then repoint `current.md` at it — matching the
   // original ln convention (current.<x>.md -> <conversation_id>.<x>.md).
