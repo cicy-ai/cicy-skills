@@ -178,12 +178,7 @@ async function cmdList(_args, node) {
 }
 
 async function cmdLs(_args, node) {
-  const data = await api('GET', '/api/tmux/panes', undefined, node);
-  const panes = data?.panes || data?.data?.panes || [];
-  if (json) return ok({ panes });
-  console.log('pane_id\tagent_type\ttitle');
-  console.log('-------\t----------\t-----');
-  for (const p of panes) console.log(`${p.pane_id}\t${p.agent_type || ''}\t${p.title || ''}`);
+  return cmdAgents('all', node);
 }
 
 async function cmdProjects(args, node) {
@@ -195,12 +190,13 @@ async function cmdProjects(args, node) {
   // explicit project selection is a detail query and includes nested Agents.
   const includeAgents = currentOnly || selectors.length === 1;
 
-  const [groupData, paneData] = await Promise.all([
+  const [groupData, agentSets] = await Promise.all([
     api('GET', '/api/groups', undefined, node),
-    includeAgents ? api('GET', '/api/tmux/panes', undefined, node) : Promise.resolve({ panes: [] }),
+    includeAgents ? fetchAgentSets(node) : Promise.resolve({ panes: [], online: [], offline: [] }),
   ]);
   const groups = groupData?.groups || groupData?.data?.groups || [];
-  const panes = paneData?.panes || paneData?.data?.panes || [];
+  const panes = agentSets.panes;
+  const liveSet = new Set(agentSets.online.map((pane) => sessionOf(pane.pane_id)));
   const paneById = new Map();
   for (const pane of panes) {
     const id = String(pane?.pane_id || pane?.id || pane?.name || '').replace(/:.*$/, '');
@@ -220,13 +216,8 @@ async function cmdProjects(args, node) {
   const projects = selected.map((group) => {
     const agents = (group?.pane_ids || []).map((rawId) => {
       const id = String(rawId).replace(/:.*$/, '');
-      const pane = paneById.get(id) || {};
-      return {
-        id,
-        title: String(pane.title || ''),
-        agent_type: String(pane.agent_type || ''),
-        online: pane.online ?? null,
-      };
+      const pane = paneById.get(id) || { pane_id: id };
+      return rosterRow(pane, liveSet, !!node);
     });
     return {
       id: group.id,
@@ -249,9 +240,11 @@ async function cmdProjects(args, node) {
     } else {
       console.log(`${project.name || '(unnamed)'} (#${project.id})${flags ? ` [${flags}]` : ''} — ${project.agents.length} agent${project.agents.length === 1 ? '' : 's'}`);
       if (project.agents.length === 0) console.log('  (no agents)');
-      for (const agent of project.agents) {
-        console.log(`  ${agent.id}\t${agent.agent_type || '-'}\t${agent.title || '-'}`);
+      if (project.agents.length) {
+        console.log('  id      \ton\tidle\tctx\tcost\tmodel\tgw\ttitle');
+        console.log('  --------\t--\t----\t---\t----\t-----\t--\t-----');
       }
+      for (const agent of project.agents) printRosterRow(agent, '  ');
     }
     if (index < projects.length - 1) console.log('');
   }
@@ -604,6 +597,11 @@ function rosterRow(p, liveSet, isRemote) {
 
 const na = (v) => (v === null || v === undefined || v === '' ? 'n/a' : v);
 
+function printRosterRow(agent, prefix = '') {
+  const idle = agent.idle === null ? 'n/a' : (agent.idle ? '✓' : 'busy');
+  console.log(`${prefix}${agent.id}\t${agent.online ? '✓' : '✗'}\t${idle}\t${na(agent.context_usage)}\t${na(agent.cost)}\t${na(agent.model)}\t${agent.local_gateway ? '✓' : '✗'}\t${agent.title}`);
+}
+
 async function cmdAgents(kind, node) {
   const { panes, online, offline } = await fetchAgentSets(node);
   const liveSet = new Set(online.map((p) => sessionOf(p.pane_id)));
@@ -613,10 +611,7 @@ async function cmdAgents(kind, node) {
   console.log(`${kind}: ${agents.length}  (online ${online.length} + offline ${offline.length} = all ${panes.length})`);
   console.log('id      \ton\tidle\tctx\tcost\tmodel\tgw\ttitle');
   console.log('--------\t--\t----\t---\t----\t-----\t--\t-----');
-  for (const a of agents) {
-    const idle = a.idle === null ? 'n/a' : (a.idle ? '✓' : 'busy');
-    console.log(`${a.id}\t${a.online ? '✓' : '✗'}\t${idle}\t${na(a.context_usage)}\t${na(a.cost)}\t${na(a.model)}\t${a.local_gateway ? '✓' : '✗'}\t${a.title}`);
-  }
+  for (const agent of agents) printRosterRow(agent);
 }
 
 // broadcast [--timeout <ms>] <text> — online-only by definition (主人定:

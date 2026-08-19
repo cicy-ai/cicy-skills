@@ -50,6 +50,9 @@ const projectsServer = spawn(process.execPath, ['-e', `
       {pane_id:'w-102:main.0',title:'Builder',agent_type:'claude'},
       {pane_id:'w-103',title:'Publisher',agent_type:'cicy'}
     ]}));
+    if (req.url === '/api/tmux/tree') return res.end(JSON.stringify({tree:[
+      {session:'w-102'}, {session:'w-103'}
+    ]}));
     res.statusCode=404; res.end(JSON.stringify({error:'not_found'}));
   });
   server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port)));
@@ -62,12 +65,19 @@ const projectsGlobalFile = join(projectsDir, 'global.json');
 writeFileSync(projectsGlobalFile, JSON.stringify({api_token:'local-test-token'}));
 const projectsAll = runSkill(D, ['projects'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort });
 const projectsCurrent = runSkill(D, ['projects', '--current', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort, X_AGENT_SHORT_ID: 'w-102' });
+const rosterLs = runSkill(D, ['ls', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort });
+const rosterAll = runSkill(D, ['get_all_agents', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort });
 projectsServer.kill();
 rmSync(projectsDir, { recursive: true, force: true });
 assert('projects lists every project without nested agents', projectsAll.status === 0 && projectsAll.stdout.includes('Default (#1)') && projectsAll.stdout.includes('Release (#2)') && !projectsAll.stdout.includes('w-102') && !projectsAll.stdout.includes('Builder'));
 let currentProjects;
 try { currentProjects = JSON.parse(projectsCurrent.stdout); } catch { currentProjects = null; }
 assert('projects --current --json returns only the current agent project', projectsCurrent.status === 0 && currentProjects?.data?.projects?.length === 1 && currentProjects.data.projects[0].id === 1 && currentProjects.data.projects[0].agents.length === 2, projectsCurrent.stdout + projectsCurrent.stderr);
+const projectAgent = currentProjects?.data?.projects?.[0]?.agents?.find((agent) => agent.id === 'w-102');
+assert('project agents return the full roster fields', projectAgent?.online === true && projectAgent?.pane_id === 'w-102:main.0' && 'model' in projectAgent && 'provider' in projectAgent && 'local_gateway' in projectAgent && 'context_usage' in projectAgent && 'cost' in projectAgent && 'idle' in projectAgent && 'workspace' in projectAgent, projectsCurrent.stdout);
+let rosterLsJson, rosterAllJson;
+try { rosterLsJson = JSON.parse(rosterLs.stdout); rosterAllJson = JSON.parse(rosterAll.stdout); } catch { rosterLsJson = rosterAllJson = null; }
+assert('ls and get_all_agents return identical data', rosterLs.status === 0 && rosterAll.status === 0 && JSON.stringify(rosterLsJson) === JSON.stringify(rosterAllJson), rosterLs.stdout + rosterLs.stderr + rosterAll.stdout + rosterAll.stderr);
 
 // A Cloud send must become observable as soon as POST succeeds, rather than
 // remaining silent while the correlated reply poll is still pending.

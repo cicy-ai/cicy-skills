@@ -3,7 +3,7 @@
 ## 命令
 
 ```
-cicy-agent ls                                 简短列表
+cicy-agent ls                                 完整 Agent 名册（等同 get_all_agents）
 cicy-agent capture <pane>                     捕获原始面板文本
 cicy-agent reply <pane|team.agent> [--full]   最后一条结构化回复；支持本地与 Cloud
 cicy-agent history <pane|team.agent>           历史回合（默认最新）

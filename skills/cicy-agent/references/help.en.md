@@ -3,7 +3,7 @@
 ## Commands
 
 ```
-cicy-agent ls                                 Short list
+cicy-agent ls                                 Full Agent roster (same as get_all_agents)
 cicy-agent capture <pane>                     Capture raw pane text
 cicy-agent reply <pane|team.agent> [--full]   Last structured reply; local and Cloud
 cicy-agent history <pane|team.agent>           Historical turn (latest by default)
