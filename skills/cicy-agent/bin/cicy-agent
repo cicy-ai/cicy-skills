@@ -810,7 +810,8 @@ async function cmdCloud(args) {
       throw Object.assign(new Error(`Cloud Instance not found: ${selector}`), { exitCode: 4 });
     }
     const selectedIDs = new Set(selectedInstances.map((instance) => instance.instanceId));
-    const rows = agents.filter((a) => selectedIDs.has(a.instanceId))
+    const directoryAgents = agents.filter((a) => selectedIDs.has(a.instanceId));
+    const fallbackRows = directoryAgents
       .filter((a) => showAll || isOnline(byID.get(a.instanceId) || {})).map((a) => {
         const status = String(a.status || '').toLowerCase();
         return {
@@ -828,8 +829,25 @@ async function cmdCloud(args) {
           workspace: a.workspace || '',
         };
       });
-    if (json) return ok({ kind: 'all', count: rows.length, agents: rows });
-    console.log(`all: ${rows.length}`);
+    const batches = await Promise.all(selectedInstances
+      .filter((instance) => showAll || isOnline(instance))
+      .map(async (instance) => {
+        const seed = directoryAgents.find((agent) => agent.instanceId === instance.instanceId);
+        if (!seed) return null;
+        try {
+          const target = await requireCloudAgent(`${instance.teamId}.${seed.agentId}`);
+          return await sendCloudRPC(target, { op: 'agent_roster' });
+        } catch {
+          return null; // Older remote runtime: retain the nullable directory fallback.
+        }
+      }));
+    const liveBatches = batches.filter((batch) => batch && Array.isArray(batch.agents));
+    const rows = liveBatches.length ? liveBatches.flatMap((batch) => batch.agents) : fallbackRows;
+    const onlineCount = rows.filter((row) => row.online === true).length;
+    const roster = { kind: 'all', count: rows.length, online: onlineCount,
+      offline: rows.length - onlineCount, all: rows.length, agents: rows };
+    if (json) return ok(roster);
+    console.log(`all: ${roster.all}  (online ${roster.online} + offline ${roster.offline} = all ${roster.all})`);
     console.log('id      \ton\tidle\tctx\tcost\tmodel\tgw\ttitle');
     console.log('--------\t--\t----\t---\t----\t-----\t--\t-----');
     for (const row of rows) printRosterRow(row);
