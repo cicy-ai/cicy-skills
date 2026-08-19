@@ -4,15 +4,13 @@
 
 | subcmd          | method | path                       |
 |-----------------|--------|----------------------------|
-| `list` / `ls`   | GET    | `/api/tmux/panes`          |
-| `tree`          | GET    | `/api/tmux/tree`           |
-| `windows`       | GET    | `/api/tmux/windows`        |
+| `ls`            | GET    | `/api/tmux/panes`          |
 | `capture`       | POST   | `/api/tmux/capture_pane`   |
 | `reply`         | POST   | `/api/tmux/reply_text`     |
 | `history`       | POST   | `/api/tmux/chat_history`   |
 | `msg`           | POST   | `/api/tmux/send`           |
 | `broadcast`     | GET ×2 + POST ×N | `/api/tmux/panes` + `/api/tmux/tree`, then `/api/tmux/send` per target (per-send timeout) |
-| `get_online_agents` / `get_offline_agents` / `get_all_agents` | GET | `/api/tmux/panes` + `/api/tmux/tree` (online = session present in live tree) |
+| `get_all_agents` | GET | `/api/tmux/panes` + `/api/tmux/tree` (online = session present in live tree) |
 | `send-keys`     | POST   | `/api/tmux/send-keys`      |
 | `restart`       | POST   | `/api/tmux/restart_all`    |
 | `clear`         | POST   | `/api/tmux/clear`          |

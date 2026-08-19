@@ -51,11 +51,6 @@
   },
   "tools": [
     {
-      "name": "tmux list",
-      "example": "cicy-agent list",
-      "description": "List all tmux panes and windows"
-    },
-    {
       "name": "tmux capture",
       "example": "cicy-agent capture <pane>",
       "description": "Capture tmux pane output"
@@ -79,11 +74,6 @@
       "name": "broadcast",
       "example": "cicy-agent broadcast <text>",
       "description": "Group-send a message to ONLINE agents only (offline cannot receive; no --all). Per-send timeout so dead panes cannot stall; prints delivered/failed stats; skips the sender."
-    },
-    {
-      "name": "agents online/offline/all",
-      "example": "cicy-agent get_online_agents --json",
-      "description": "Roster by liveness: get_online/offline/all_agents. Rows: id, title, agent_type, online, model, provider, local_gateway, context_usage, cost, idle. Runtime fields show n/a when unavailable."
     },
     {
       "name": "create",

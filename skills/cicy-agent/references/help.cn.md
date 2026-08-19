@@ -3,10 +3,7 @@
 ## 命令
 
 ```
-cicy-agent list                               列出所有面板（表格形式）
 cicy-agent ls                                 简短列表
-cicy-agent tree                               树形结构（JSON格式）
-cicy-agent windows                            窗口列表（JSON格式）
 cicy-agent capture <pane>                     捕获原始面板文本
 cicy-agent reply <pane|team.agent> [--full]   最后一条结构化回复；支持本地与 Cloud
 cicy-agent history <pane|team.agent>           历史回合（默认最新）
@@ -29,8 +26,6 @@ cicy-agent broadcast [--timeout <ms>] <text>  仅向在线代理群发（离线
                                               每次发送都有每面板超时（默认
                                               8000ms），以便卡死的面板不会阻塞运行。
                                               跳过发送者。打印已送达/失败状态。
-cicy-agent get_online_agents                  名册：拥有活跃 tmux 会话的代理
-cicy-agent get_offline_agents                 名册：数据库中存在但无活跃会话的代理
 cicy-agent get_all_agents                     名册：整个数据库（在线 ∪ 离线 = 全部）
                                               名册行包含 {id, title,
                                               agent_type, online, model, provider,

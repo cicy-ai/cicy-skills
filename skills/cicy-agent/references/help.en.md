@@ -3,10 +3,7 @@
 ## Commands
 
 ```
-cicy-agent list                               List all panes (table)
 cicy-agent ls                                 Short list
-cicy-agent tree                               Tree (JSON)
-cicy-agent windows                            Window list (JSON)
 cicy-agent capture <pane>                     Capture raw pane text
 cicy-agent reply <pane|team.agent> [--full]   Last structured reply; local and Cloud
 cicy-agent history <pane|team.agent>           Historical turn (latest by default)
@@ -29,8 +26,6 @@ cicy-agent broadcast [--timeout <ms>] <text>  Group-send to ONLINE agents only (
                                               Every send has a per-pane timeout (default
                                               8000ms) so dead panes can't stall the run.
                                               Skips the sender. Prints delivered/failed.
-cicy-agent get_online_agents                  Roster: agents with a live tmux session
-cicy-agent get_offline_agents                 Roster: in db but no live session
 cicy-agent get_all_agents                     Roster: whole db (online ∪ offline = all)
                                               Roster rows carry {id, title,
                                               agent_type, online, model, provider,

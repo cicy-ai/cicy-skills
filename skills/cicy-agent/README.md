@@ -13,10 +13,7 @@ cicy-code skill install cicy-agent
 ## Quick usage
 
 ```bash
-cicy-agent list                  # all panes (id, agent_type, title, workspace)
 cicy-agent ls                    # short variant
-cicy-agent tree                  # pane → window hierarchy (JSON)
-cicy-agent windows               # tmux window list (JSON)
 cicy-agent capture w-1001       # raw pane text
 cicy-agent reply w-1001         # last reply (parsed)
 cicy-agent reply w-1001 --full  # include tool_use entries
