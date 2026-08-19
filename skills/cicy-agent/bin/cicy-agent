@@ -800,18 +800,39 @@ async function cmdCloud(args) {
   };
 
   if (sub === 'agents') {
+    const selector = args.slice(1).find((arg) => !arg.startsWith('-')) || '';
     const { instances, agents } = await loadDirectory();
     const byID = new Map(instances.map((i) => [i.instanceId, i]));
-    const rows = agents.filter((a) => showAll || isOnline(byID.get(a.instanceId) || {})).map((a) => {
-      const instance = byID.get(a.instanceId) || {};
-      return { address: `${instance.teamId || a.instanceId}.${a.agentId}`, teamId: instance.teamId || '',
-        instanceId: a.instanceId, agentId: a.agentId, title: a.title || '', status: a.status || '',
-        instanceStatus: instance.status || a.instanceStatus || '' };
-    });
-    if (json) return ok({ agents: rows });
-    console.log('address\tstatus\ttitle');
-    console.log('-------\t------\t-----');
-    for (const row of rows) console.log(`${row.address}\t${row.instanceStatus || row.status}\t${row.title}`);
+    const selectedInstances = selector
+      ? instances.filter((instance) => String(instance.teamId) === selector || String(instance.instanceId) === selector)
+      : instances;
+    if (selector && selectedInstances.length === 0) {
+      throw Object.assign(new Error(`Cloud Instance not found: ${selector}`), { exitCode: 4 });
+    }
+    const selectedIDs = new Set(selectedInstances.map((instance) => instance.instanceId));
+    const rows = agents.filter((a) => selectedIDs.has(a.instanceId))
+      .filter((a) => showAll || isOnline(byID.get(a.instanceId) || {})).map((a) => {
+        const status = String(a.status || '').toLowerCase();
+        return {
+          id: a.agentId,
+          title: a.title || '',
+          agent_type: a.agentType || '',
+          online: ['online', 'running', 'busy', 'idle'].includes(status),
+          model: a.model || null,
+          provider: a.provider || null,
+          local_gateway: !!a.useCustomGateway,
+          context_usage: a.contextUsage || null,
+          cost: a.cost ?? null,
+          idle: status === 'idle' ? true : (status === 'busy' || status === 'running' ? false : null),
+          pane_id: a.paneId || `${a.agentId}:main.0`,
+          workspace: a.workspace || '',
+        };
+      });
+    if (json) return ok({ kind: 'all', count: rows.length, agents: rows });
+    console.log(`all: ${rows.length}`);
+    console.log('id      \ton\tidle\tctx\tcost\tmodel\tgw\ttitle');
+    console.log('--------\t--\t----\t---\t----\t-----\t--\t-----');
+    for (const row of rows) printRosterRow(row);
     return;
   }
 
@@ -834,7 +855,7 @@ async function cmdCloud(args) {
     return;
   }
 
-  throw Object.assign(new Error('Usage: cicy-agent cloud <ls|agents> [--all]'), { exitCode: 2 });
+  throw Object.assign(new Error('Usage: cicy-agent cloud <ls|agents [team|instance]> [--all]'), { exitCode: 2 });
 }
 
 async function loadCloudDirectory() {

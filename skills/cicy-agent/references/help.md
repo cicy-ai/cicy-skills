@@ -60,7 +60,8 @@ cicy-agent --json whoami                     Machine-readable identity for scrip
 
 cicy-agent cloud ls [--all]                  List Cloud teams with nested Agents. Online only
                                               by default; --all includes offline teams.
-cicy-agent cloud agents [--all]              Flat Cloud Agent address list.
+cicy-agent cloud agents [team|instance]       Remote Instance Agent roster; same fields as ls.
+            [--all]
 cicy-agent msg <team.agent> <text>            A team-qualified target automatically routes through
                                               CiCy Cloud; no target instance token is required.
                                               Prints msg_id + pending immediately, then waits by default

@@ -60,7 +60,8 @@ cicy-agent --json whoami                     供脚本使用的结构化身份�
 
 cicy-agent cloud ls [--all]                  按 Team 分组列出 Cloud Agents。默认仅在线 Team；
                                               --all 包含离线 Team。
-cicy-agent cloud agents [--all]              平铺列出 Cloud Agent 完整地址。
+cicy-agent cloud agents [team|instance]       远端 Instance Agent 名册；字段与 ls 相同。
+            [--all]
 cicy-agent msg <team.agent> <消息>            带 Team 前缀的目标自动通过 CiCy Cloud 路由；
                                               不需要目标 Instance Token；立即输出 msg_id + pending，
                                               默认继续等待并输出 msg → done 和关联回复。
