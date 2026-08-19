@@ -36,7 +36,7 @@ const TRANSLATIONS = {
     description: '管理本机的 Cloudflare Tunnel 路由和 DNS 记录。子命令：config / status / list / add / del。',
   },
   'cicy-agent': {
-    title: 'Cicy Agent (tmux)',
+    title: 'Cicy Agent',
     description: '通过 cicy-code /api/tmux/* 端点操作 tmux 面板和窗口（列表、capture、send-keys、msg、create、restart、clear），支持多节点。',
   },
   'cicy-mihomo': {

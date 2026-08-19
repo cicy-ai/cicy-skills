@@ -45,7 +45,7 @@
   },
   "i18n": {
     "zh-CN": {
-      "title": "Cicy Agent (tmux)",
+      "title": "Cicy Agent",
     "description": "操作本地 Agent，并通过 CiCy Cloud 自动发现和消息路由访问其他 Instance；无需目标 Token。"
     }
   },
