@@ -60,7 +60,7 @@ Details:
 - `msgs` — the local or Cloud cross-agent message link: who→who, status, and a q⟶answer
   summary of what the receiver actually did
 - restart all panes / clear one
-- `projects [--current|<id|name>]` — list all projects with their nested Agents, or filter to the current/specified project
+- `projects` — list all projects without expanding Agents; use `projects --current` or `projects <id|name>` for one project's Agent details
 - `cloud ls [--all]` / `cloud agents [--all]` — discover Cloud Instances and Agents
 - `whoami` — return this Agent, team, Instance, and fixed-domain identity
 - `msg <team.agent>` — route through CiCy Cloud and print the correlated reply

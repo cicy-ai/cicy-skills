@@ -191,9 +191,13 @@ async function cmdProjects(args, node) {
   const selectors = args.filter((arg) => arg !== '--current');
   if (selectors.length > 1) throw Object.assign(new Error('Usage: cicy-agent projects [--current|<id|name>]'), { exitCode: 2 });
 
+  // The unfiltered command is an index: list projects only. A current or
+  // explicit project selection is a detail query and includes nested Agents.
+  const includeAgents = currentOnly || selectors.length === 1;
+
   const [groupData, paneData] = await Promise.all([
     api('GET', '/api/groups', undefined, node),
-    api('GET', '/api/tmux/panes', undefined, node),
+    includeAgents ? api('GET', '/api/tmux/panes', undefined, node) : Promise.resolve({ panes: [] }),
   ]);
   const groups = groupData?.groups || groupData?.data?.groups || [];
   const panes = paneData?.panes || paneData?.data?.panes || [];
@@ -229,7 +233,7 @@ async function cmdProjects(args, node) {
       name: String(group.name || ''),
       is_default: Boolean(group.is_default),
       project_template: String(group.project_template || ''),
-      agents,
+      ...(includeAgents ? { agents } : {}),
     };
   });
 
@@ -240,10 +244,14 @@ async function cmdProjects(args, node) {
   }
   for (const [index, project] of projects.entries()) {
     const flags = [project.is_default ? 'default' : '', project.project_template].filter(Boolean).join(', ');
-    console.log(`${project.name || '(unnamed)'} (#${project.id})${flags ? ` [${flags}]` : ''} — ${project.agents.length} agent${project.agents.length === 1 ? '' : 's'}`);
-    if (project.agents.length === 0) console.log('  (no agents)');
-    for (const agent of project.agents) {
-      console.log(`  ${agent.id}\t${agent.agent_type || '-'}\t${agent.title || '-'}`);
+    if (!includeAgents) {
+      console.log(`${project.name || '(unnamed)'} (#${project.id})${flags ? ` [${flags}]` : ''}`);
+    } else {
+      console.log(`${project.name || '(unnamed)'} (#${project.id})${flags ? ` [${flags}]` : ''} — ${project.agents.length} agent${project.agents.length === 1 ? '' : 's'}`);
+      if (project.agents.length === 0) console.log('  (no agents)');
+      for (const agent of project.agents) {
+        console.log(`  ${agent.id}\t${agent.agent_type || '-'}\t${agent.title || '-'}`);
+      }
     }
     if (index < projects.length - 1) console.log('');
   }

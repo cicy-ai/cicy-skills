@@ -64,7 +64,7 @@ const projectsAll = runSkill(D, ['projects'], { CICY_GLOBAL_JSON: projectsGlobal
 const projectsCurrent = runSkill(D, ['projects', '--current', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort, X_AGENT_SHORT_ID: 'w-102' });
 projectsServer.kill();
 rmSync(projectsDir, { recursive: true, force: true });
-assert('projects lists every project with nested agent metadata', projectsAll.status === 0 && projectsAll.stdout.includes('Default (#1)') && projectsAll.stdout.includes('w-102\tclaude\tBuilder') && projectsAll.stdout.includes('Release (#2)'));
+assert('projects lists every project without nested agents', projectsAll.status === 0 && projectsAll.stdout.includes('Default (#1)') && projectsAll.stdout.includes('Release (#2)') && !projectsAll.stdout.includes('w-102') && !projectsAll.stdout.includes('Builder'));
 let currentProjects;
 try { currentProjects = JSON.parse(projectsCurrent.stdout); } catch { currentProjects = null; }
 assert('projects --current --json returns only the current agent project', projectsCurrent.status === 0 && currentProjects?.data?.projects?.length === 1 && currentProjects.data.projects[0].id === 1 && currentProjects.data.projects[0].agents.length === 2, projectsCurrent.stdout + projectsCurrent.stderr);
