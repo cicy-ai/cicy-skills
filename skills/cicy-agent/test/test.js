@@ -64,9 +64,9 @@ for (let i = 0; i < 100 && !projectsPort; i++) {
 const projectsGlobalFile = join(projectsDir, 'global.json');
 writeFileSync(projectsGlobalFile, JSON.stringify({api_token:'local-test-token'}));
 const projectsAll = runSkill(D, ['projects'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort });
-const projectsCurrent = runSkill(D, ['projects', '--current', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort, X_AGENT_SHORT_ID: 'w-102' });
-const rosterLs = runSkill(D, ['ls', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort });
-const rosterAll = runSkill(D, ['get_all_agents', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort });
+const projectsCurrent = runSkill(D, ['projects', '--current', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort, X_AGENT_SHORT_ID: 'w-102', CICY_AGENT_RUNNING_SESSIONS: 'w-102,w-103' });
+const rosterLs = runSkill(D, ['ls', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort, CICY_AGENT_RUNNING_SESSIONS: 'w-102,w-103' });
+const rosterAll = runSkill(D, ['get_all_agents', '--json'], { CICY_GLOBAL_JSON: projectsGlobalFile, CICY_API_PORT: projectsPort, CICY_AGENT_RUNNING_SESSIONS: 'w-102,w-103' });
 projectsServer.kill();
 rmSync(projectsDir, { recursive: true, force: true });
 assert('projects lists every project without nested agents', projectsAll.status === 0 && projectsAll.stdout.includes('Default (#1)') && projectsAll.stdout.includes('Release (#2)') && !projectsAll.stdout.includes('w-102') && !projectsAll.stdout.includes('Builder'));

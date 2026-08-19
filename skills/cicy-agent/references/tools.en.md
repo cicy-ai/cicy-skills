@@ -4,7 +4,7 @@
 
 | subcmd          | method | path                       |
 |-----------------|--------|----------------------------|
-| `ls` / `get_all_agents` | GET | `/api/tmux/panes` + `/api/tmux/tree` (same fields) |
+| `ls` / `get_all_agents` | GET + local tmux process check | `/api/tmux/panes` + `/api/tmux/tree` (`online=true` only while the foreground Agent process runs) |
 | `capture`       | POST   | `/api/tmux/capture_pane`   |
 | `reply`         | POST   | `/api/tmux/reply_text`     |
 | `history`       | POST   | `/api/tmux/chat_history`   |

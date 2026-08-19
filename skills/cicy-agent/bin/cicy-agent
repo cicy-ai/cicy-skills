@@ -8,6 +8,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const argv = process.argv.slice(2);
 
@@ -510,15 +511,33 @@ async function cmdMsgs(args, node) {
 
 // ── online / offline / broadcast (todo #81) ─────────────────────────────
 //
-// Online judgment: the master semantics is "managed under the w-1001 cluster",
-// but the real tmux topology is one session per agent (sessions are NOT nested
-// under w-1001). The executable criterion — equivalent in meaning — is:
-//   online  = the agent's session exists in the live tmux tree
-//   offline = present in the panes db but its session is gone from the tree
+// Online judgment means the Agent process is actually running, not merely that
+// its tmux session exists. A pane sitting at bash/zsh/sh/fish is stopped.
+//   online  = the tmux pane has a non-shell foreground command
+//   offline = present in the panes db but stopped or missing
 //   all     = the panes db, verbatim
 // online ∪ offline = all by construction (both sides filter the same db list).
 
 function sessionOf(paneId) { return String(paneId || '').split(':')[0]; }
+
+function localRunningSessions() {
+  // Deterministic override for tests and constrained runtimes without tmux.
+  if (process.env.CICY_AGENT_RUNNING_SESSIONS !== undefined) {
+    return new Set(process.env.CICY_AGENT_RUNNING_SESSIONS.split(',').map((s) => s.trim()).filter(Boolean));
+  }
+  try {
+    const output = execFileSync('tmux', ['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_command}'], { encoding: 'utf8' });
+    const shells = new Set(['bash', 'zsh', 'sh', 'fish', 'dash', 'ksh', 'tcsh']);
+    const running = new Set();
+    for (const line of output.split('\n')) {
+      const [session, command] = line.trim().split('\t');
+      if (session && command && !shells.has(command.toLowerCase())) running.add(session);
+    }
+    return running;
+  } catch {
+    return null;
+  }
+}
 
 async function fetchAgentSets(node) {
   const [panesData, treeData] = await Promise.all([
@@ -527,7 +546,8 @@ async function fetchAgentSets(node) {
   ]);
   const panes = panesData?.panes || panesData?.data?.panes || [];
   const tree = treeData?.tree || treeData?.data?.tree || [];
-  const live = new Set(tree.map((s) => s.session));
+  const sessionLive = new Set(tree.map((s) => s.session));
+  const live = node ? sessionLive : (localRunningSessions() || sessionLive);
   const online = panes.filter((p) => live.has(sessionOf(p.pane_id)));
   const offline = panes.filter((p) => !live.has(sessionOf(p.pane_id)));
   return { panes, online, offline };

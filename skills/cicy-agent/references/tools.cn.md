@@ -4,7 +4,7 @@
 
 | 子命令 | 方法 | 路径 |
 |-----------------|--------|----------------------------|
-| `ls` / `get_all_agents` | GET | `/api/tmux/panes` + `/api/tmux/tree`（返回相同字段） |
+| `ls` / `get_all_agents` | GET + 本地 tmux 进程检测 | `/api/tmux/panes` + `/api/tmux/tree`（仅前台 Agent 进程运行时 `online=true`） |
 | `capture` | POST | `/api/tmux/capture_pane` |
 | `reply` | POST | `/api/tmux/reply_text` |
 | `history` | POST | `/api/tmux/chat_history` |
