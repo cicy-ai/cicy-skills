@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import { buildInstallExpression, buildVerifyExpression } from '../lib/expressions.js';
+
+const VERSION = '0.1.0';
+
+function usage() {
+  return `Usage: tg-web-mirror-hook <status|install|verify> [options]
+
+Options:
+  --client <client_id>  Target a specific cicy-desktop client
+  --target <id>        Use a known winId/wc:<webContentsId>
+  --version <version>  Hook version (default: ${VERSION})
+  --json               Print machine-readable JSON
+  -h, --help           Show this help`;
+}
+
+function parseArgs(argv) {
+  const options = { command: 'status', version: VERSION, json: false, client: null, target: null };
+  const args = [...argv];
+  if (args[0] && !args[0].startsWith('-')) options.command = args.shift();
+  while (args.length) {
+    const arg = args.shift();
+    if (arg === '--json') options.json = true;
+    else if (arg === '-h' || arg === '--help') options.help = true;
+    else if (arg === '--client') options.client = args.shift();
+    else if (arg === '--target') options.target = args.shift();
+    else if (arg === '--version') options.version = args.shift();
+    else throw new Error(`unknown option: ${arg}`);
+    if ((arg === '--client' || arg === '--target' || arg === '--version') && !args.length && !options[arg.slice(2)]) {
+      throw new Error(`${arg} requires a value`);
+    }
+  }
+  if (!['status', 'install', 'verify'].includes(options.command)) throw new Error(`unknown command: ${options.command}`);
+  return options;
+}
+
+function transportArgs(options, rest) {
+  return options.client ? ['--client', options.client, ...rest] : rest;
+}
+
+function runAgent(options, args) {
+  const executable = process.env.AGENT_ELECTRON_BIN || 'agent-electron';
+  let stdout;
+  try {
+    stdout = execFileSync(executable, transportArgs(options, args), { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  } catch (error) {
+    const detail = error.stderr ? error.stderr.toString().trim() : error.message;
+    throw new Error(`agent-electron failed: ${detail}`);
+  }
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    throw new Error(`agent-electron returned invalid JSON: ${stdout.slice(0, 200)}`);
+  }
+}
+
+function discoverTarget(options) {
+  if (options.target) return options.target;
+  const response = runAgent(options, ['webcontents', '--json']);
+  if (!response.ok || !Array.isArray(response.data)) throw new Error('could not list Electron webContents');
+  const targets = response.data.filter((item) => /^https:\/\/web\.telegram\.org\/k\//.test(item.url || ''));
+  if (targets.length === 0) throw new Error('no Telegram Web K target found');
+  if (targets.length > 1) throw new Error(`multiple Telegram Web targets found (${targets.length}); pass --target wc:<id>`);
+  return `wc:${targets[0].webContentsId}`;
+}
+
+function evaluate(options, target, expression) {
+  const params = JSON.stringify({ expression, awaitPromise: true, returnByValue: true });
+  const response = runAgent(options, ['cdp', target, 'Runtime.evaluate', params]);
+  const result = response && response.result && response.result.result;
+  if (!response.success || !result) throw new Error('CDP Runtime.evaluate returned no result');
+  if (response.result.exceptionDetails) {
+    const description = result.description || response.result.exceptionDetails.text || 'browser evaluation failed';
+    throw new Error(description);
+  }
+  if (!Object.prototype.hasOwnProperty.call(result, 'value')) throw new Error('CDP result was not serializable by value');
+  return result.value;
+}
+
+function isVerified(value, version) {
+  return Boolean(
+    value && value.cache && value.cache.version === version && value.cache.markerCount === 1 &&
+    value.cache.endMarkerCount !== 0 && value.runtime && value.runtime.present &&
+    value.runtime.type === 'object' && value.runtime.keyCount > 0
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function verifyWithRetry(options, target, attempts = 20) {
+  let value;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    value = evaluate(options, target, buildVerifyExpression(options.version));
+    if (isVerified(value, options.version)) return value;
+    if (attempt < attempts) await delay(500);
+  }
+  return value;
+}
+
+function print(value, json) {
+  if (json) process.stdout.write(`${JSON.stringify(value)}\n`);
+  else process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
+  const target = discoverTarget(options);
+  if (options.command === 'status') {
+    const status = evaluate(options, target, buildVerifyExpression(options.version));
+    print({ target, version: options.version, verified: isVerified(status, options.version), ...status }, options.json);
+    return;
+  }
+  if (options.command === 'verify') {
+    const verification = await verifyWithRetry(options, target, 1);
+    const verified = isVerified(verification, options.version);
+    print({ target, version: options.version, verified, ...verification }, options.json);
+    if (!verified) process.exitCode = 2;
+    return;
+  }
+
+  const installed = evaluate(options, target, buildInstallExpression(options.version));
+  if (installed.changed) runAgent(options, ['cdp', target, 'Page.reload', JSON.stringify({ ignoreCache: false })]);
+  const verification = await verifyWithRetry(options, target);
+  const verified = isVerified(verification, options.version);
+  print({ target, changed: installed.changed, version: options.version, verified, install: installed, verification }, options.json);
+  if (!verified) process.exitCode = 2;
+}
+
+main().catch((error) => {
+  process.stderr.write(`tg-web-mirror-hook: ${error.message}\n`);
+  process.exitCode = 1;
+});

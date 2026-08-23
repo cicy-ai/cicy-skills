@@ -1,0 +1,32 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "tg-web-mirror-hook",
+  "version": "0.1.0",
+  "title": "TG Web Mirror Hook",
+  "description": "Use when Telegram Web K needs window.__mirrors exposed, its apiManagerProxy cache changed, or an existing mirror hook must be installed, upgraded, or verified through agent-electron.",
+  "category": "dev",
+  "tags": ["telegram", "electron", "cdp", "cache-storage", "hook"],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-web-mirror-hook",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=22"
+  },
+  "system_requirements": ["agent-electron"],
+  "npm_dependencies": false,
+  "entry": "bin/tg-web-mirror-hook",
+  "permissions": ["network"],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  }
+}
