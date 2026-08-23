@@ -80,8 +80,10 @@ upgrading so the available-skills catalog is rebuilt. Invoke the skill as
    checking page state / verifying renders, use `snapshot` (DOM structure,
    machine-readable) by default.
 7. **Injection installation is fixed-root.** Use `inject install <name>
-   --source <file>`; the Desktop writes only a safe `.js` basename beneath
-   `~/data/electron/extension/inject/`. Never use `file_write` as a substitute.
+   --source <file>`; the command resolves the Desktop host's home directory
+   and writes a safe lowercase `.js` basename beneath
+   `~/data/electron/extension/inject/` through `file_write`. This works on
+   both Windows and macOS, including Desktop versions without `electron_inject`.
 
 ## References
 

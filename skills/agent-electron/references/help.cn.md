@@ -30,7 +30,7 @@ agent-electron tools
 ## 注意事项
 
 - cicy-desktop 主机必须运行并连接至 cicy-code。
-- `inject install` 仅写入 Desktop 主机的 `~/data/electron/extension/inject/<name>`。源码只发送给受限的 `electron_inject` RPC，不会输出到终端。
+- `inject install` 会解析 Windows/macOS Desktop 用户主目录，并通过 `file_write` 仅保存到 `~/data/electron/extension/inject/<name>`，且不会输出源码。`status` 和 `uninstall` 仍使用 `electron_inject`。
 - Codex 通过 `~/.agents/skills/agent-electron` 发现已安装的 skill；
   `~/.codex/skills/agent-electron` 仅用于兼容旧版 Codex。安装后请新建
   Codex 会话或执行 `/clear`，再用 `@agent-electron` 显式调用。

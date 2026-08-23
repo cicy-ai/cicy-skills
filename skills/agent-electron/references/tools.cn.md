@@ -20,7 +20,8 @@
 | `screenshot <winId> --out P`    | `cdp_sendcmd Page.captureScreenshot` | `{ win_id, method, params:{format:"png"} }` |
 | `snapshot <winId\|webContentsId>` | `webpage_snapshot` / `electron_tab_snapshot` | 目标 ID                    |
 | `sysinfo`                       | `get_system_info`                 | `{}`                                       |
-| `inject install/status/uninstall` | `electron_inject`               | `{operation,name,content?}`                 |
+| `inject install` | `exec_shell`、`file_write` | 解析主目录后传入 `{path,content}` |
+| `inject status/uninstall` | `electron_inject` | `{operation,name}` |
 
 目标类型必须显式区分，因为 Electron 可能同时分配相同数字的
 `BrowserWindow.id` 和 `webContents.id`：裸 `4`（或 `win:4`）表示窗口，

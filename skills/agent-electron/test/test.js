@@ -55,13 +55,16 @@ const server = spawn(process.execPath, ['-e', `
   const server = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.method === 'GET' && req.url === '/api/chat/clients') {
-      return res.end(JSON.stringify({data:[{client_id:'desktop-1',isElectron:true,user_agent:'CiCyDesktop'}]}));
+      return res.end(JSON.stringify({data:[{client_id:'desktop-1',isElectron:true,user_agent:'CiCyDesktop',platform:'win32'}]}));
     }
     if (req.method === 'POST' && req.url === '/api/chat/push') {
       let body=''; req.on('data', c => body += c); req.on('end', () => {
         fs.appendFileSync(calls, body + '\\n');
         const parsed=JSON.parse(body); const operation=parsed.data.args.operation;
-        const value={operation,name:parsed.data.args.name,path:'/Users/test/data/electron/extension/inject/'+parsed.data.args.name,exists:operation!=='uninstall',size:21,sha256:'a'.repeat(64)};
+        let value;
+        if (parsed.data.tool === 'exec_shell') value={stdout:'C:\\\\Users\\\\test\\r\\n',stderr:'',exitCode:0};
+        else if (parsed.data.tool === 'file_write') value={success:true,path:parsed.data.args.path,size:21};
+        else value={operation,name:parsed.data.args.name,path:'C:\\\\Users\\\\test\\\\data\\\\electron\\\\extension\\\\inject\\\\'+parsed.data.args.name,exists:operation!=='uninstall',size:21,sha256:'a'.repeat(64)};
         res.end(JSON.stringify({data:{result:{content:[{type:'text',text:JSON.stringify(value)}]}}}));
       }); return;
     }
@@ -87,9 +90,10 @@ server.kill();
 const callText = readFileSync(callsFile, 'utf8').trim();
 const calls = callText ? callText.split('\n').map(JSON.parse) : [];
 rmSync(fixtureDir, { recursive: true, force: true });
-assert('inject install forwards source through the restricted desktop tool', install.status === 0 && calls[0]?.data?.tool === 'electron_inject' && calls[0]?.data?.args?.content === sentinel, install.stdout + install.stderr);
+assert('inject install resolves the Windows home directory', install.status === 0 && calls[0]?.data?.tool === 'exec_shell' && calls[0]?.data?.args?.command === 'echo %USERPROFILE%', install.stdout + install.stderr);
+assert('inject install saves source through agent-desktop file_write', calls[1]?.data?.tool === 'file_write' && calls[1]?.data?.args?.path === 'C:\\Users\\test\\data\\electron\\extension\\inject\\telegram.org.js' && calls[1]?.data?.args?.content === sentinel, install.stdout + install.stderr);
 assert('inject install never prints source content', !install.stdout.includes(sentinel) && !install.stderr.includes(sentinel));
-assert('inject status calls the restricted desktop tool without content', status.status === 0 && calls[1]?.data?.args?.operation === 'status' && !('content' in calls[1].data.args), status.stdout + status.stderr);
-assert('inject uninstall calls the restricted desktop tool', uninstall.status === 0 && calls[2]?.data?.args?.operation === 'uninstall', uninstall.stdout + uninstall.stderr);
+assert('inject status calls the restricted desktop tool without content', status.status === 0 && calls[2]?.data?.args?.operation === 'status' && !('content' in calls[2].data.args), status.stdout + status.stderr);
+assert('inject uninstall calls the restricted desktop tool', uninstall.status === 0 && calls[3]?.data?.args?.operation === 'uninstall', uninstall.stdout + uninstall.stderr);
 
 finish();

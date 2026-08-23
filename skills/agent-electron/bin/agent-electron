@@ -141,7 +141,7 @@ async function resolveDesktop() {
   if (clientID) {
     const c = clients.find((x) => x.client_id === clientID);
     if (!c) throw Object.assign(new Error(`client_id ${clientID} not found`), { exitCode: 4 });
-    return { clientID: c.client_id };
+    return { clientID: c.client_id, platform: desktopPlatform(c) };
   }
   const matches = clients.filter((c) => {
     const ua = String(c.user_agent || '').toLowerCase();
@@ -149,11 +149,18 @@ async function resolveDesktop() {
   });
   if (matches.length === 0) throw Object.assign(new Error('no cicy-desktop client connected'), { exitCode: 3 });
   if (matches.length > 1)  throw Object.assign(new Error('multiple cicy-desktop clients connected; pass --client <id>'), { exitCode: 2 });
-  return { clientID: matches[0].client_id };
+  return { clientID: matches[0].client_id, platform: desktopPlatform(matches[0]) };
 }
 
-async function rpc(tool, toolArgs) {
-  const target = await resolveDesktop();
+function desktopPlatform(client) {
+  const stated = String(client.platform || '').toLowerCase();
+  if (stated) return stated;
+  const ua = String(client.user_agent || '').toLowerCase();
+  return ua.includes('windows') ? 'win32' : ua.includes('macintosh') ? 'darwin' : 'linux';
+}
+
+async function rpc(tool, toolArgs, selectedTarget) {
+  const target = selectedTarget || await resolveDesktop();
   const rid = randomID('elec');
   const resp = await api('POST', '/api/chat/push', {
     client_id: target.clientID,
@@ -357,6 +364,9 @@ async function cmdInject(args) {
   if (!['install', 'status', 'uninstall'].includes(operation)) {
     throw Object.assign(new Error(`unknown inject operation: ${operation}`), { exitCode: 2 });
   }
+  if (!/^[a-z0-9][a-z0-9._-]*\.js$/.test(name)) {
+    throw Object.assign(new Error('inject name must be a safe lowercase .js basename'), { exitCode: 2 });
+  }
   const payload = { operation, name };
   if (operation === 'install') {
     const sourceIndex = args.indexOf('--source');
@@ -366,7 +376,19 @@ async function cmdInject(args) {
     if (Buffer.byteLength(content, 'utf8') > 1024 * 1024) {
       throw Object.assign(new Error('inject source exceeds 1048576 bytes'), { exitCode: 2 });
     }
-    payload.content = content;
+    const target = await resolveDesktop();
+    const windows = target.platform === 'win32' || target.platform === 'windows';
+    const homeResult = unwrap(await rpc('exec_shell', {
+      command: windows ? 'echo %USERPROFILE%' : 'printf %s "$HOME"',
+    }, target));
+    const home = String(homeResult?.stdout || '').trim().replace(/[\\/]+$/, '');
+    if (!home || homeResult?.exitCode !== 0) {
+      throw Object.assign(new Error('could not resolve Desktop user home directory'), { exitCode: 4 });
+    }
+    const separator = windows ? '\\' : '/';
+    const remotePath = [home, 'data', 'electron', 'extension', 'inject', name].join(separator);
+    emit(unwrap(await rpc('file_write', { path: remotePath, content }, target)));
+    return;
   }
   emit(unwrap(await rpc('electron_inject', payload)));
 }

@@ -30,7 +30,7 @@ agent-electron tools
 ## Notes
 
 - The cicy-desktop host must be running and connected to cicy-code.
-- `inject install` writes only to `~/data/electron/extension/inject/<name>` on the Desktop host. It sends source content to the restricted `electron_inject` RPC but never prints it.
+- `inject install` resolves the Windows/macOS Desktop user's home directory and saves only to `~/data/electron/extension/inject/<name>` through `file_write`. It never prints source content. `status` and `uninstall` use `electron_inject`.
 - Codex discovers the installed skill through
   `~/.agents/skills/agent-electron`; `~/.codex/skills/agent-electron` is kept
   for legacy compatibility. Start a new Codex session or run `/clear` after

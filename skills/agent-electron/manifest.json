@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-electron",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "title": "Agent Electron",
   "description": "Use when controlling cicy-desktop Electron BrowserWindows, sandbox sessions, CDP targets, or host-side Electron injection scripts through desktop_event RPC.",
   "category": "dev",
