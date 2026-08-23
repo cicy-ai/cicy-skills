@@ -3,6 +3,7 @@
 A private, zero-dependency Node CLI for normalized Telegram Web A/K inspection and controlled operations through `agent-electron`.
 
 ```sh
+telegram-web open-url https://web.telegram.org/k/ --profile 3 --apply
 telegram-web status --target wc:5 --json
 telegram-web patch --target wc:5 --json
 telegram-web chats --target wc:5 --json

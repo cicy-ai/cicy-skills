@@ -7,6 +7,7 @@
 命令：
 
 - `login [--from-profile N] [--to-account N] [--proxy URL|--no-proxy] [--url URL] [--from-client ID] --apply`：把 Chrome Telegram localStorage 临时复制到新建或复用的 Electron profile 并安装 hook。默认来源 profile `0`、目标账户 `99`、不使用代理、URL `https://web.telegram.org/a/`；需要代理时必须显式传入 `--proxy URL`，`--from-client` 是保留元数据。
+- `open-url [URL] [--profile N] --apply`：在指定 Electron profile 中打开 Telegram Web；默认 URL 为 `https://web.telegram.org/k/`、profile 为 `1`。若相同网址已打开，则恢复、显示并激活原窗口，不重复创建。
 - `status`：报告 hook/会话就绪状态。
 - `patch`：安装或刷新自动识别的后端 hook。
 - `account`：返回标准化的当前账户。

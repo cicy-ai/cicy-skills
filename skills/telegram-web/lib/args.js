@@ -2,7 +2,7 @@ import { usageError } from './errors.js';
 
 const COMMANDS = [
   'login', 'status', 'patch', 'account', 'chats', 'dialogs',
-  'users', 'messages', 'open', 'send', 'eval', 'close',
+  'users', 'messages', 'open', 'open-url', 'send', 'eval', 'close',
 ];
 const COMMAND_SET = new Set(COMMANDS);
 
@@ -43,6 +43,7 @@ function parseArgs(argv) {
       if (!COMMAND_SET.has(arg)) throw usageError(`unknown command: ${arg}`);
       result.command = arg;
       if (arg === 'login') result.options = { ...loginDefaults };
+      if (arg === 'open-url') result.options.profile = 1;
       if (arg === 'messages') result.options.limit = 30;
       if (arg === 'dialogs') Object.assign(result.options, { limit: 50, folder: 'active' });
       continue;
@@ -66,6 +67,7 @@ function parseArgs(argv) {
       if (!['a', 'k'].includes(value)) throw usageError('--backend must be a or k');
       result.backend = value;
     } else if (arg === '--from-profile') result.options.fromProfile = integer(value, arg);
+    else if (arg === '--profile') result.options.profile = integer(value, arg);
     else if (arg === '--to-account') result.options.toAccount = integer(value, arg);
     else if (arg === '--proxy') result.options.proxy = value;
     else if (arg === '--url') result.options.url = value;

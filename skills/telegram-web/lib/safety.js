@@ -1,6 +1,6 @@
 import { TelegramWebError } from './errors.js';
 
-const MUTATING_COMMANDS = new Set(['login', 'open', 'send', 'close']);
+const MUTATING_COMMANDS = new Set(['login', 'open', 'open-url', 'send', 'close']);
 const UNSAFE_PATTERNS = [
   /(?:^|[^=!<>])=(?!=|>)/,
   /\+\+|--/,

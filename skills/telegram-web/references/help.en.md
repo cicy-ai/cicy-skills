@@ -7,6 +7,7 @@ Shared options: `--client ID` selects an agent client; `--target winId|wc:id` se
 Commands:
 
 - `login [--from-profile N] [--to-account N] [--proxy URL|--no-proxy] [--url URL] [--from-client ID] --apply`: copy Chrome Telegram localStorage into a new/reused Electron profile and patch it. Defaults: source profile `0`, account `99`, no proxy, URL `https://web.telegram.org/a/`. Pass `--proxy URL` explicitly when required; `--from-client` is reserved metadata.
+- `open-url [URL] [--profile N] --apply`: open Telegram Web in the selected Electron profile; defaults to `https://web.telegram.org/k/` and profile `1`. If the same URL is already open, restore, show, and activate its existing window instead of creating a duplicate.
 - `status`: report patch/session readiness.
 - `patch`: install/refresh the detected backend hook.
 - `account`: return the current normalized account.

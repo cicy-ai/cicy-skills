@@ -16,7 +16,7 @@ const SESSION_PATH = process.env.CICY_TELEGRAM_WEB_SESSION || path.join(os.homed
 function help() {
   return `Usage: telegram-web [shared options] <command> [command options]
 
-Commands: login status patch account chats dialogs users messages open send eval close
+Commands: login status patch account chats dialogs users messages open open-url send eval close
 Shared: --client ID --target winId|wc:id --win N --backend a|k --json --apply
 Run references/help.cn.md for the full command reference.`;
 }
@@ -73,6 +73,22 @@ async function main(argv) {
     const evalText = parsed.command === 'eval' ? parsed.positional.join(' ') : '';
     requireApply(parsed.command, parsed.apply, evalText);
     const transport = createTransport({ client: parsed.client });
+
+    if (parsed.command === 'open-url') {
+      const rawUrl = parsed.positional[0] || 'https://web.telegram.org/k/';
+      let url;
+      try { url = new URL(rawUrl); }
+      catch { throw new TelegramWebError('INVALID_URL', 'open-url requires a valid Telegram Web URL', 2); }
+      if (url.protocol !== 'https:' || url.hostname !== 'web.telegram.org' || !/^\/(?:a|k)(?:\/|$)/.test(url.pathname)) {
+        throw new TelegramWebError('INVALID_URL', 'open-url only accepts https://web.telegram.org/a/ or /k/ URLs', 2);
+      }
+      const profile = parsed.options.profile;
+      const response = transport.electron(['open', url.href, '--idx', String(profile), '--json']);
+      if (response?.ok === false) throw new TelegramWebError('TOOL_FAILED', response.error?.message || 'agent-electron open failed', 4);
+      const opened = response?.data ?? response;
+      emitSuccess({ ...opened, accountIdx: profile, profileId: profile, url: url.href }, parsed.json);
+      return;
+    }
 
     if (parsed.command === 'login') {
       const data = await login({

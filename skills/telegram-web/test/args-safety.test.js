@@ -7,7 +7,7 @@ import { TelegramWebError } from '../lib/errors.js';
 test('preserves every recovered command name', () => {
   assert.deepEqual(COMMANDS, [
     'login', 'status', 'patch', 'account', 'chats', 'dialogs',
-    'users', 'messages', 'open', 'send', 'eval', 'close',
+    'users', 'messages', 'open', 'open-url', 'send', 'eval', 'close',
   ]);
   for (const command of COMMANDS) assert.equal(parseArgs([command]).command, command);
 });
@@ -47,7 +47,7 @@ test('rejects unknown commands, flags, backend, folder, and missing values', () 
 });
 
 test('requires apply for account-changing commands', () => {
-  for (const command of ['login', 'open', 'send', 'close']) {
+  for (const command of ['login', 'open', 'open-url', 'send', 'close']) {
     assert.throws(() => requireApply(command, false), (error) => error.code === 'APPLY_REQUIRED' && error.exitCode === 2);
     assert.doesNotThrow(() => requireApply(command, true));
   }
@@ -72,4 +72,10 @@ test('parses send text and messages defaults', () => {
   assert.deepEqual(send.positional, ['777000', 'hello', 'world']);
   assert.equal(send.apply, true);
   assert.equal(parseArgs(['messages', '777000']).options.limit, 30);
+});
+
+test('open-url parses a profile and defaults to profile one', () => {
+  assert.equal(parseArgs(['open-url']).options.profile, 1);
+  assert.equal(parseArgs(['open-url', '--profile', '3']).options.profile, 3);
+  assert.throws(() => parseArgs(['open-url', '--profile', 'x']), TelegramWebError);
 });
