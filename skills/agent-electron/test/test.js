@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { runSkill, assert, finish } from '../../../tools/test-helper.js';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const D = new URL('..', import.meta.url).pathname;
 
 // no args → shows help (exit 0)
@@ -18,6 +22,7 @@ assert('--help explains account/profile/session identity', help.stdout.includes(
 assert('--help marks dual-id commands', help.stdout.includes('close <winId|webContentsId>'));
 assert('--help marks dual-id CDP', help.stdout.includes('cdp <winId|webContentsId>'));
 assert('--help marks dual-id snapshot', help.stdout.includes('snapshot <winId|webContentsId>'));
+assert('--help lists inject installation', help.stdout.includes('inject install <name> --source <file>'));
 
 // unknown subcommand → non-0
 const bad = runSkill(D, ['badcmd']);
@@ -40,5 +45,51 @@ assert('cdp without method exits non-0', cdpBad.status !== 0);
 const tabBad = runSkill(D, ['window', 'tab:nope', '--json']);
 assert('malformed webContentsId exits non-0', tabBad.status !== 0);
 assert('malformed webContentsId reports numeric target', tabBad.stdout.includes('must be a number'));
+
+const fixtureDir = mkdtempSync(join(tmpdir(), 'agent-electron-inject-'));
+const portFile = join(fixtureDir, 'port');
+const callsFile = join(fixtureDir, 'calls.jsonl');
+const server = spawn(process.execPath, ['-e', `
+  const http = require('http'); const fs = require('fs');
+  const calls = process.argv[1]; const portFile = process.argv[2];
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.method === 'GET' && req.url === '/api/chat/clients') {
+      return res.end(JSON.stringify({data:[{client_id:'desktop-1',isElectron:true,user_agent:'CiCyDesktop'}]}));
+    }
+    if (req.method === 'POST' && req.url === '/api/chat/push') {
+      let body=''; req.on('data', c => body += c); req.on('end', () => {
+        fs.appendFileSync(calls, body + '\\n');
+        const parsed=JSON.parse(body); const operation=parsed.data.args.operation;
+        const value={operation,name:parsed.data.args.name,path:'/Users/test/data/electron/extension/inject/'+parsed.data.args.name,exists:operation!=='uninstall',size:21,sha256:'a'.repeat(64)};
+        res.end(JSON.stringify({data:{result:{content:[{type:'text',text:JSON.stringify(value)}]}}}));
+      }); return;
+    }
+    res.statusCode=404; res.end(JSON.stringify({error:'not_found'}));
+  });
+  server.listen(0,'127.0.0.1',()=>fs.writeFileSync(portFile,String(server.address().port)));
+`, callsFile, portFile], { stdio: 'ignore' });
+let port = '';
+for (let i = 0; i < 100 && !port; i++) {
+  try { port = readFileSync(portFile, 'utf8').trim(); } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }
+}
+const globalFile = join(fixtureDir, 'global.json');
+const sourceFile = join(fixtureDir, 'telegram.org.js');
+const sentinel = 'window.__private_inject_sentinel__ = true;';
+writeFileSync(globalFile, JSON.stringify({ api_token: 'test-token' }));
+writeFileSync(sourceFile, sentinel);
+writeFileSync(callsFile, '');
+const injectEnv = { CICY_GLOBAL_JSON: globalFile, CICY_API_PORT: port };
+const install = runSkill(D, ['inject', 'install', 'telegram.org.js', '--source', sourceFile, '--json'], injectEnv);
+const status = runSkill(D, ['inject', 'status', 'telegram.org.js', '--json'], injectEnv);
+const uninstall = runSkill(D, ['inject', 'uninstall', 'telegram.org.js', '--json'], injectEnv);
+server.kill();
+const callText = readFileSync(callsFile, 'utf8').trim();
+const calls = callText ? callText.split('\n').map(JSON.parse) : [];
+rmSync(fixtureDir, { recursive: true, force: true });
+assert('inject install forwards source through the restricted desktop tool', install.status === 0 && calls[0]?.data?.tool === 'electron_inject' && calls[0]?.data?.args?.content === sentinel, install.stdout + install.stderr);
+assert('inject install never prints source content', !install.stdout.includes(sentinel) && !install.stderr.includes(sentinel));
+assert('inject status calls the restricted desktop tool without content', status.status === 0 && calls[1]?.data?.args?.operation === 'status' && !('content' in calls[1].data.args), status.stdout + status.stderr);
+assert('inject uninstall calls the restricted desktop tool', uninstall.status === 0 && calls[2]?.data?.args?.operation === 'uninstall', uninstall.stdout + uninstall.stderr);
 
 finish();

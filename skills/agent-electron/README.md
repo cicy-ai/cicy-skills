@@ -65,6 +65,11 @@ agent-electron snapshot tab:4
 
 # Multi-host: pick a specific cicy-desktop client
 agent-electron --client web-w-1001-... windows
+
+# Install a persistent host-side Electron injection script
+agent-electron inject install telegram.org.js --source ./telegram.org.js
+agent-electron inject status telegram.org.js
+agent-electron inject uninstall telegram.org.js
 ```
 
 ## License

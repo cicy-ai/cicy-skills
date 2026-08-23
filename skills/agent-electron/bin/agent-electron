@@ -55,6 +55,7 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 60000);
       case 'screenshot': await cmdScreenshot(rest); return;
       case 'snapshot':   await cmdSnapshot(rest); return;
       case 'sysinfo':    await cmdSysinfo(rest); return;
+      case 'inject':     await cmdInject(rest); return;
       default: bail(`unknown command: ${cmd}. Try agent-electron --help.`, 2);
     }
   } catch (e) {
@@ -347,4 +348,25 @@ async function cmdSnapshot(args) {
 
 async function cmdSysinfo(_args) {
   emit(unwrap(await rpc('get_system_info', {})));
+}
+
+async function cmdInject(args) {
+  if (args.length < 2) throw Object.assign(new Error('usage: agent-electron inject <install|status|uninstall> <name> [--source file]'), { exitCode: 2 });
+  const operation = args[0];
+  const name = args[1];
+  if (!['install', 'status', 'uninstall'].includes(operation)) {
+    throw Object.assign(new Error(`unknown inject operation: ${operation}`), { exitCode: 2 });
+  }
+  const payload = { operation, name };
+  if (operation === 'install') {
+    const sourceIndex = args.indexOf('--source');
+    const source = sourceIndex === -1 ? '' : args[sourceIndex + 1];
+    if (!source) throw Object.assign(new Error('usage: agent-electron inject install <name> --source <file>'), { exitCode: 2 });
+    const content = readFileSync(source, 'utf8');
+    if (Buffer.byteLength(content, 'utf8') > 1024 * 1024) {
+      throw Object.assign(new Error('inject source exceeds 1048576 bytes'), { exitCode: 2 });
+    }
+    payload.content = content;
+  }
+  emit(unwrap(await rpc('electron_inject', payload)));
 }

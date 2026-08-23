@@ -18,6 +18,9 @@ agent-electron cdp <winId|webContentsId> <method> [json_params]
 agent-electron screenshot <winId|webContentsId> [--out path]
 agent-electron snapshot <winId|webContentsId>
 agent-electron sysinfo
+agent-electron inject install <name> --source <file>
+agent-electron inject status <name>
+agent-electron inject uninstall <name>
 
 agent-electron --client <client_id> ...
 agent-electron --help / -h / help
@@ -27,6 +30,7 @@ agent-electron tools
 ## 注意事项
 
 - cicy-desktop 主机必须运行并连接至 cicy-code。
+- `inject install` 仅写入 Desktop 主机的 `~/data/electron/extension/inject/<name>`。源码只发送给受限的 `electron_inject` RPC，不会输出到终端。
 - Codex 通过 `~/.agents/skills/agent-electron` 发现已安装的 skill；
   `~/.codex/skills/agent-electron` 仅用于兼容旧版 Codex。安装后请新建
   Codex 会话或执行 `/clear`，再用 `@agent-electron` 显式调用。

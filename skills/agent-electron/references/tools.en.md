@@ -20,6 +20,7 @@
 | `screenshot <winId> --out P`    | `cdp_sendcmd Page.captureScreenshot` | `{ win_id, method, params:{format:"png"} }` |
 | `snapshot <winId\|webContentsId>` | `webpage_snapshot` / `electron_tab_snapshot` | target id                    |
 | `sysinfo`                       | `get_system_info`                 | `{}`                                       |
+| `inject install/status/uninstall` | `electron_inject`               | `{operation,name,content?}`                 |
 
 Target syntax is intentionally explicit because Electron may assign the same
 number to a `BrowserWindow.id` and a `webContents.id`: bare `4` (or `win:4`)

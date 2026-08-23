@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "agent-electron",
-  "version": "1.0.17",
+  "version": "1.1.0",
   "title": "Agent Electron",
-  "description": "Drive cicy-desktop Electron BrowserWindows and per-account sandbox sessions via desktop_event RPC. Each accountIdx = its own session.fromPartition() with proxy. Electron analog of agent-chrome.",
+  "description": "Use when controlling cicy-desktop Electron BrowserWindows, sandbox sessions, CDP targets, or host-side Electron injection scripts through desktop_event RPC.",
   "category": "dev",
   "tags": [
     "electron",
@@ -126,6 +126,11 @@
       "name": "sysinfo",
       "example": "agent-electron sysinfo",
       "description": "Host system info (platform, electron/chrome versions, screens)"
+    },
+    {
+      "name": "inject",
+      "example": "agent-electron inject install telegram.org.js --source ./telegram.org.js",
+      "description": "Install, inspect, or uninstall a JavaScript file in the Desktop host's fixed Electron injection directory"
     }
   ]
 }

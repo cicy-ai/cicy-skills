@@ -1,6 +1,6 @@
 ---
 name: agent-electron
-description: Drive cicy-desktop Electron BrowserWindows and per-account sandbox sessions via desktop_event RPC. Each accountIdx = its own session.fromPartition() with proxy. Electron analog of agent-chrome.
+description: Use when controlling cicy-desktop Electron BrowserWindows, sandbox sessions, CDP targets, or host-side Electron injection scripts through desktop_event RPC.
 ---
 
 # Agent Electron
@@ -31,6 +31,7 @@ Use this skill when the task involves:
 - closing a BrowserWindow by id
 - making raw CDP calls (`Runtime.evaluate`, `Page.navigate`, etc.) against a BrowserWindow's webContents
 - taking screenshots / snapshots / loading new URLs in an existing window
+- installing, inspecting, or uninstalling a host-side script under `~/data/electron/extension/inject/`
 
 ## Codex discovery
 
@@ -78,6 +79,9 @@ upgrading so the available-skills catalog is rebuilt. Invoke the skill as
    screen — only take one when the user has explicitly allowed it. For
    checking page state / verifying renders, use `snapshot` (DOM structure,
    machine-readable) by default.
+7. **Injection installation is fixed-root.** Use `inject install <name>
+   --source <file>`; the Desktop writes only a safe `.js` basename beneath
+   `~/data/electron/extension/inject/`. Never use `file_write` as a substitute.
 
 ## References
 

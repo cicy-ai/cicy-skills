@@ -18,6 +18,9 @@ agent-electron cdp <winId|webContentsId> <method> [json_params]
 agent-electron screenshot <winId|webContentsId> [--out path]
 agent-electron snapshot <winId|webContentsId>
 agent-electron sysinfo
+agent-electron inject install <name> --source <file>
+agent-electron inject status <name>
+agent-electron inject uninstall <name>
 
 agent-electron --client <client_id> ...
 agent-electron --help / -h / help
@@ -27,6 +30,7 @@ agent-electron tools
 ## Notes
 
 - The cicy-desktop host must be running and connected to cicy-code.
+- `inject install` writes only to `~/data/electron/extension/inject/<name>` on the Desktop host. It sends source content to the restricted `electron_inject` RPC but never prints it.
 - `accountIdx` = profile id = session id. They are the same numeric identifier;
   for example, all three forms of id `1` map to `persist:sandbox-1`.
 - `BrowserWindow.id` and `webContents.id` may be the same number. A bare

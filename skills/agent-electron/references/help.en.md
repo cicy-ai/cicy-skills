@@ -18,6 +18,9 @@ agent-electron cdp <winId|webContentsId> <method> [json_params]
 agent-electron screenshot <winId|webContentsId> [--out path]
 agent-electron snapshot <winId|webContentsId>
 agent-electron sysinfo
+agent-electron inject install <name> --source <file>
+agent-electron inject status <name>
+agent-electron inject uninstall <name>
 
 agent-electron --client <client_id> ...
 agent-electron --help / -h / help
@@ -27,6 +30,7 @@ agent-electron tools
 ## Notes
 
 - The cicy-desktop host must be running and connected to cicy-code.
+- `inject install` writes only to `~/data/electron/extension/inject/<name>` on the Desktop host. It sends source content to the restricted `electron_inject` RPC but never prints it.
 - Codex discovers the installed skill through
   `~/.agents/skills/agent-electron`; `~/.codex/skills/agent-electron` is kept
   for legacy compatibility. Start a new Codex session or run `/clear` after
