@@ -1,11 +1,13 @@
 # TG Web Mirror Hook 帮助
 
 ```sh
+tg-web-mirror-hook host-install [--client ID] [--json]
 tg-web-mirror-hook status [--client ID] [--target wc:ID] [--json]
 tg-web-mirror-hook install [--client ID] [--target wc:ID] [--version X.Y.Z] [--json]
 tg-web-mirror-hook verify [--client ID] [--target wc:ID] [--version X.Y.Z] [--json]
 ```
 
+- `host-install`：通过 `agent-desktop` 将 Skill 内置的可读版脚本保存到 Desktop 主机的 `~/data/electron/extension/inject/telegram.org.js`，兼容 Windows 和 macOS。
 - `status`：只读检查缓存补丁和运行态 `window.__mirrors`。
 - `install`：安全写入或升级缓存，仅在内容变化后刷新页面，再自动验证。
 - `verify`：只读验证指定版本；失败时退出码为 `2`。

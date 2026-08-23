@@ -1,6 +1,6 @@
 ---
 name: tg-web-mirror-hook
-description: Use when Telegram Web K needs window.__mirrors exposed, its apiManagerProxy cache changed, or an existing mirror hook must be installed, upgraded, or verified through agent-electron.
+description: Use when Telegram Web K needs window.__mirrors exposed, its host injection script installed, or its apiManagerProxy cache changed and verified.
 ---
 
 # TG Web Mirror Hook
@@ -8,6 +8,9 @@ description: Use when Telegram Web K needs window.__mirrors exposed, its apiMana
 Safely expose Telegram Web K's internal mirror registry from its cached `apiManagerProxy-*.js` bundle. Use the bundled command; do not recreate the cache rewrite ad hoc.
 
 **REQUIRED SUB-SKILL:** Use `agent-electron` for target selection and Electron/CDP safety rules.
+
+Use `agent-desktop` for `host-install`, which saves the bundled readable
+`telegram.org.js` to the connected Desktop user's fixed injection directory.
 
 ## Workflow
 
@@ -22,11 +25,16 @@ The command preserves Response status, status text, and headers. It upgrades mar
 ## Commands
 
 ```sh
+tg-web-mirror-hook host-install --client <client_id>
 tg-web-mirror-hook status --client <client_id>
 tg-web-mirror-hook install --client <client_id>
 tg-web-mirror-hook verify --client <client_id>
 tg-web-mirror-hook install --client <client_id> --target wc:5 --json
 ```
+
+Run `host-install` when provisioning a Desktop host. It resolves that host's
+Windows or macOS home directory and writes only
+`~/data/electron/extension/inject/telegram.org.js` through `file_write`.
 
 Stop and report the exact invariant error if the bundle is missing, targets are ambiguous, markers are malformed, or the generated bundle fails JavaScript parsing. Do not weaken anchor checks to force an install.
 

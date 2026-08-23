@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { buildInstallExpression, buildVerifyExpression } from '../lib/expressions.js';
 
 const VERSION = '0.1.0';
 
 function usage() {
-  return `Usage: tg-web-mirror-hook <status|install|verify> [options]
+  return `Usage: tg-web-mirror-hook <status|install|verify|host-install> [options]
 
 Options:
   --client <client_id>  Target a specific cicy-desktop client
@@ -31,7 +32,7 @@ function parseArgs(argv) {
       throw new Error(`${arg} requires a value`);
     }
   }
-  if (!['status', 'install', 'verify'].includes(options.command)) throw new Error(`unknown command: ${options.command}`);
+  if (!['status', 'install', 'verify', 'host-install'].includes(options.command)) throw new Error(`unknown command: ${options.command}`);
   return options;
 }
 
@@ -53,6 +54,42 @@ function runAgent(options, args) {
   } catch {
     throw new Error(`agent-electron returned invalid JSON: ${stdout.slice(0, 200)}`);
   }
+}
+
+function runDesktop(args) {
+  const executable = process.env.AGENT_DESKTOP_BIN || 'agent-desktop';
+  let stdout;
+  try {
+    stdout = execFileSync(executable, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  } catch (error) {
+    const detail = error.stderr ? error.stderr.toString().trim() : error.message;
+    throw new Error(`agent-desktop failed: ${detail}`);
+  }
+  let response;
+  try { response = JSON.parse(stdout); }
+  catch { throw new Error(`agent-desktop returned invalid JSON: ${stdout.slice(0, 200)}`); }
+  if (!response.ok) throw new Error(`agent-desktop failed: ${response.error?.message || 'unknown error'}`);
+  if (typeof response.data === 'string') {
+    try { return JSON.parse(response.data); } catch { return response.data; }
+  }
+  return response.data;
+}
+
+function hostInstall(options) {
+  const clients = runDesktop(['clients', '--json']);
+  const desktops = (Array.isArray(clients) ? clients : []).filter((client) => client.is_cicy_desktop || /cicydesktop|electronmcp/i.test(client.user_agent || ''));
+  const target = options.client ? desktops.find((client) => client.client_id === options.client) : desktops.length === 1 ? desktops[0] : null;
+  if (!target) throw new Error(options.client ? `Desktop client not found: ${options.client}` : 'select one Desktop with --client <client_id>');
+  const windows = /^(win32|windows)$/i.test(target.platform || '');
+  const command = windows ? 'echo %USERPROFILE%' : 'printf %s "$HOME"';
+  const homeResult = runDesktop(['rpc', 'exec_shell', JSON.stringify({ command }), '--client', target.client_id, '--json']);
+  const home = String(homeResult?.stdout || '').trim().replace(/[\\/]+$/, '');
+  if (!home || homeResult?.exitCode !== 0) throw new Error('could not resolve Desktop user home directory');
+  const separator = windows ? '\\' : '/';
+  const remotePath = [home, 'data', 'electron', 'extension', 'inject', 'telegram.org.js'].join(separator);
+  const content = readFileSync(new URL('../assets/telegram.org.js', import.meta.url), 'utf8');
+  const saved = runDesktop(['rpc', 'file_write', JSON.stringify({ path: remotePath, content }), '--client', target.client_id, '--json']);
+  return { installed: Boolean(saved?.success), path: remotePath, size: saved?.size ?? Buffer.byteLength(content) };
 }
 
 function discoverTarget(options) {
@@ -109,6 +146,10 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     process.stdout.write(`${usage()}\n`);
+    return;
+  }
+  if (options.command === 'host-install') {
+    print(hostInstall(options), options.json);
     return;
   }
   const target = discoverTarget(options);

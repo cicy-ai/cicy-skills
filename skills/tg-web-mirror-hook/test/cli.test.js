@@ -64,3 +64,27 @@ if(a.includes('webcontents')) process.stdout.write(JSON.stringify({ok:true,data:
     (error) => /multiple Telegram Web targets/.test(error.stderr.toString()),
   );
 });
+
+test('host-install saves the bundled hook through agent-desktop on Windows', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-hook-host-install-'));
+  const fake = path.join(dir, 'agent-desktop');
+  const calls = path.join(dir, 'calls.jsonl');
+  fs.writeFileSync(fake, `#!/usr/bin/env node
+const fs=require('node:fs');
+const a=process.argv.slice(2); fs.appendFileSync(process.env.FAKE_CALLS,JSON.stringify(a)+'\\n');
+if(a[0]==='clients') process.stdout.write(JSON.stringify({ok:true,data:[{client_id:'desktop-win',platform:'win32',is_cicy_desktop:true}]}));
+else if(a[0]==='rpc'&&a[1]==='exec_shell') process.stdout.write(JSON.stringify({ok:true,data:JSON.stringify({stdout:'C:\\\\Users\\\\test\\r\\n',stderr:'',exitCode:0})}));
+else if(a[0]==='rpc'&&a[1]==='file_write') { const p=JSON.parse(a[2]); process.stdout.write(JSON.stringify({ok:true,data:JSON.stringify({success:true,path:p.path,size:p.content.length})})); }
+else process.exit(9);
+`);
+  fs.chmodSync(fake, 0o755);
+  const env = { ...process.env, AGENT_DESKTOP_BIN: fake, FAKE_CALLS: calls };
+  const result = JSON.parse(execFileSync(cli, ['host-install', '--client', 'desktop-win', '--json'], { env, encoding: 'utf8' }));
+  const invoked = fs.readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
+  const write = invoked.find((call) => call[0] === 'rpc' && call[1] === 'file_write');
+  const payload = JSON.parse(write[2]);
+  assert.equal(result.path, 'C:\\Users\\test\\data\\electron\\extension\\inject\\telegram.org.js');
+  assert.equal(payload.path, result.path);
+  assert.match(payload.content, /__cicyTelegramMirrorsPatch/);
+  assert.match(payload.content, /window\.__mirrors=this\.mirrors/);
+});
