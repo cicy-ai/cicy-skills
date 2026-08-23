@@ -16,7 +16,7 @@
 - Use no default proxy; require `--proxy URL` when a proxy is needed.
 - Keep Web K `open` and `send` disabled until verified action support exists.
 - Require `--apply` for login, open, send, close, and mutating evaluation.
-- Publish `tg-web-mirror-hook@0.1.0` before `telegram-web@1.1.0`.
+- Publish `tg-web-mirror-hook@0.1.0` before `telegram-web@2.0.0`; the major bump reflects the new mandatory `--apply` mutation gate.
 - Never run `tools/publish.js` manually; publish only through immutable tags.
 - Complete, verify, commit, rebase, push, and release one skill before starting the next release.
 
@@ -189,14 +189,14 @@ const DEFAULT_PROXY = null;
 
 Ensure `login.js` calls proxy configuration only when `options.proxy` is a non-empty string, while `--no-proxy` also resolves to `null`. Preserve argv-array subprocess calls, `--apply` mutation gates, frozen read-only evaluation, platform target validation, and secret-like session-key rejection.
 
-- [ ] **Step 4: Upgrade public manifest to `1.1.0`**
+- [ ] **Step 4: Upgrade public manifest to `2.0.0`**
 
 Set:
 
 ```json
 {
   "name": "telegram-web",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "category": "productivity",
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/telegram-web",
@@ -236,17 +236,17 @@ git status --short --branch
 
 Expected: clean `main` aligned with `origin/main`.
 
-- [ ] **Step 7: Release and monitor `telegram-web@1.1.0`**
+- [ ] **Step 7: Release and monitor `telegram-web@2.0.0`**
 
 Run:
 
 ```bash
-git tag -a telegram-web-v1.1.0 -m "telegram-web v1.1.0"
-git push origin refs/tags/telegram-web-v1.1.0
+git tag -a telegram-web-v2.0.0 -m "telegram-web v2.0.0"
+git push origin refs/tags/telegram-web-v2.0.0
 github gh --account cicy-ai run list --repo cicy-ai/cicy-skills --workflow publish.yml --limit 5
 ```
 
-Wait for success, then confirm the release asset and public registry version are `1.1.0`.
+Wait for success, then confirm the release asset and public registry version are `2.0.0`.
 
 ### Task 3: Final cross-package verification
 
@@ -275,4 +275,4 @@ Expected: all tests and validators pass; worktree is clean and aligned with `ori
 
 - [ ] **Step 2: Confirm remote publication state**
 
-Use `github gh --account cicy-ai` to verify both tag workflow runs succeeded and both GitHub releases contain their zip assets. Query the public registry without authentication and verify exact versions `0.1.0` and `1.1.0`. Report any unavailable live Mac Electron verification separately from the completed package tests.
+Use `github gh --account cicy-ai` to verify both tag workflow runs succeeded and both GitHub releases contain their zip assets. Query the public registry without authentication and verify exact versions `0.1.0` and `2.0.0`. Report any unavailable live Mac Electron verification separately from the completed package tests.

@@ -1,72 +1,30 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "telegram-web",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "title": "Telegram Web",
-  "description": "Drive Telegram Web A inside a cicy-desktop BrowserWindow. Sync localStorage from system Chrome to login, then read/dispatch via webpack-extracted typify() — no inject file required.",
+  "description": "Use when inspecting or operating an authenticated Telegram Web A or K session through agent-electron.",
   "category": "productivity",
-  "tags": [
-    "telegram",
-    "automation",
-    "cicy-desktop",
-    "webpack-extract",
-    "agent-bridge"
-  ],
+  "tags": ["telegram", "electron", "automation"],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/telegram-web",
   "license": "MIT",
   "runtime": {
     "node": ">=22"
   },
-  "system_requirements": [],
+  "system_requirements": ["agent-electron", "agent-chrome", "tg-web-mirror-hook"],
   "npm_dependencies": false,
   "entry": "bin/telegram-web",
-  "permissions": [
-    "network",
-    "filesystem:home"
-  ],
-  "compatible_agents": [
-    "*"
-  ],
-  "config": {
-    "path": "~/cicy-ai/global.json",
-    "secret_fields": [
-      "api_token"
-    ]
-  },
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": ["*"],
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
     "readme": "README.md",
     "help_en_md": "references/help.en.md",
-    "help_cn_md": "references/help.cn.md"
-  },
-  "i18n": {
-    "zh-CN": {
-      "title": "Telegram Web",
-      "description": "在 cicy-desktop BrowserWindow 里跑 Telegram Web A。从 system Chrome profile 复制 localStorage 完成登录，通过 webpack 提取 typify() 直接读 GlobalState、派发 actions。"
-    }
-  },
-  "tools": [
-    {
-      "name": "login",
-      "example": "telegram-web login --from-profile 0",
-      "description": "Sync localStorage from a logged-in Chrome profile into an Electron BrowserWindow"
-    },
-    {
-      "name": "dialogs",
-      "example": "telegram-web dialogs --limit 20",
-      "description": "List recent chat dialogs (sorted by listIds.active order)"
-    },
-    {
-      "name": "messages",
-      "example": "telegram-web messages 7943234085 --limit 30",
-      "description": "Read messages from a specific chat by id"
-    },
-    {
-      "name": "send",
-      "example": "telegram-web send 7943234085 'hello from agent'",
-      "description": "Send a text message to a chat — dispatches openChat then sendMessage"
-    }
-  ]
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  }
 }

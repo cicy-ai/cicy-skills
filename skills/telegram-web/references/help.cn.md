@@ -1,80 +1,22 @@
-# telegram-web — 帮助
+# telegram-web — 命令参考
 
-## 命令
+语法：`telegram-web [共用选项] <命令> [命令选项]`
 
-```
-telegram-web login [--from-profile N] [--to-account M] [--proxy URL|--no-proxy] [--url URL] [--from-client ID]
-telegram-web status
-telegram-web patch
-telegram-web account
-telegram-web chats
-telegram-web dialogs [--limit N] [--folder active|archived]
-telegram-web users
-telegram-web messages <chatId> [--limit N]
-telegram-web open <chatId>
-telegram-web send <chatId> <text...>
-telegram-web eval <jsExpression>
-telegram-web close
+共用选项：`--client ID` 选择 agent 客户端；`--target winId|wc:id` 选择目标；`--win N` 是数字窗口别名；`--backend a|k` 覆盖自动判断；`--json` 输出紧凑 JSON；`--apply` 授权修改操作。
 
-telegram-web --client <client_id> ...
-telegram-web --win <winId> ...
-telegram-web --help / -h / help
-```
+命令：
 
-## 流程
+- `login [--from-profile N] [--to-account N] [--proxy URL|--no-proxy] [--url URL] [--from-client ID] --apply`：把 Chrome Telegram localStorage 临时复制到新建或复用的 Electron profile 并安装 hook。默认来源 profile `0`、目标账户 `99`、不使用代理、URL `https://web.telegram.org/a/`；需要代理时必须显式传入 `--proxy URL`，`--from-client` 是保留元数据。
+- `status`：报告 hook/会话就绪状态。
+- `patch`：安装或刷新自动识别的后端 hook。
+- `account`：返回标准化的当前账户。
+- `chats`：列出标准化聊天。
+- `dialogs [--folder active|archived] [--limit N]`：列出有序对话；默认 `active`、`50` 条。
+- `users`：列出标准化用户。
+- `messages <chatId> [--limit N]`：列出消息；默认 `30` 条。
+- `open <chatId> --apply`：打开 Web A 聊天；Web K 返回 `UNSUPPORTED_BACKEND_ACTION`。
+- `send <chatId> <text...> --apply`：发送 Web A 文本；Web K 返回 `UNSUPPORTED_BACKEND_ACTION`。
+- `eval <expression> [--apply]`：默认只对冻结的只读快照求值；可能修改状态的表达式必须加 `--apply`。
+- `close --apply`：只关闭选定目标，并且只清除与其匹配的已保存会话。
 
-```
-登录流程：
-  1. 从系统 Chrome 配置文件 N 读取 localStorage（通过 chrome_cdp_call）
-  2. 设置账户代理 set_account_proxy <目标账户> <代理地址>
-  3. 打开窗口 url=https://web.telegram.org/a/ accountIdx=<目标账户>
-  4. 等待 DOM 就绪（轮询 get_window_info，最长 45 秒）
-  5. 注入约 20 个 localStorage 键值
-  6. 页面重新加载
-  7. 轮询等待 .chat-list 元素出现（最长 60 秒）
-  8. 执行 webpack 补丁 → 获取 window.__tt / __getGlobal / __getActions
-  9. 将会话持久化至 ~/cicy-ai/db/telegram-web.json
-
-后续命令流程：
-  - 从会话文件（或通过 --win 参数）解析窗口 ID
-  - 确保已应用补丁（ensurePatched() → 如页面已重新加载则重新附加）
-  - 读取操作：window.__getGlobal() → JSON 路径表达式
-  - 写入操作：window.__getActions()[name](payload)
-```
-
-## 默认值
-
-| 标志             | 默认值                       |
-|------------------|------------------------------|
-| `--from-profile` | `0`                          |
-| `--to-account`   | `99`                         |
-| `--proxy`        | `socks5://127.0.0.1:9001`    |
-| `--url`          | `https://web.telegram.org/a/` |
-
-`accountIdx=99` 是为了避免与 cicy-code 的主账户 0 冲突。如果 99 已被占用，请修改此值。
-
-## `eval` 示例（扩展接口）
-
-`eval` 暴露了三个快捷方式：`g`（全局状态）、`actions`（动作分发器）、`tt`（类型化访问器）：
-
-```bash
-telegram-web eval 'Object.keys(g).filter(k => k.startsWith("auth"))'
-telegram-web eval 'g.chats.listIds.archived'
-telegram-web eval 'g.messages.byChatId[g.currentUserId]?.byId'
-telegram-web eval 'actions.openChat({id: "777000"})'
-telegram-web eval 'actions.markMessageListRead({chatId: "777000"})'
-```
-
-## 环境变量
-
-- `CICY_API_TOKEN`              — 用于覆盖 bearer token
-- `CICY_API_PORT`               — 服务端口（默认 8008）
-- `CICY_GLOBAL_JSON`            — 覆盖 global.json 路径
-- `CICY_TELEGRAM_WEB_SESSION`   — 覆盖会话文件路径（默认 `~/cicy-ai/db/telegram-web.json`）
-- `CICY_AGENT_TIMEOUT_MS`       — RPC 超时时间（默认 90000 — Web A 启动可能较慢）
-
-## 相关技能
-
-- `agent-chrome` — 读取源配置文件的 `localStorage`（通过 `chrome_cdp_call`）
-- `agent-electron` — 管理此技能所操控的目标 Electron 会话/窗口
-- `agent-desktop` — 与 cicy-desktop 通信的底层 RPC 总线
+成功 JSON：`{"ok":true,"data":...}`。错误 JSON：`{"ok":false,"error":{"code":"...","message":"..."}}`。用法错误退出码为 `2`，目标/认证错误通常为 `4`，传输/运行时错误通常为 `5`。

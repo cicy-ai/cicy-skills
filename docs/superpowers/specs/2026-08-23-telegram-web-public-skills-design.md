@@ -17,7 +17,7 @@ Add a new public skill that installs, verifies, and upgrades the Telegram Web K 
 - Never read or emit Telegram authentication storage.
 - Depend only on the public `agent-electron` skill and Node.js 22 or newer.
 
-### `telegram-web` `1.1.0`
+### `telegram-web` `2.0.0`
 
 Replace the public `1.0.2` implementation with the tested private implementation while preserving the public skill name.
 
@@ -61,7 +61,7 @@ Work on one skill at a time.
 ## Release sequence
 
 1. Publish `tg-web-mirror-hook` first with tag `tg-web-mirror-hook-v0.1.0`.
-2. After its workflow succeeds, publish `telegram-web` with tag `telegram-web-v1.1.0`.
+2. After its workflow succeeds, publish `telegram-web` with tag `telegram-web-v2.0.0`. The major bump reflects the new mandatory `--apply` safety gate for mutations.
 3. Monitor both GitHub Actions runs and confirm registry versions and release artifacts.
 
 Each version is immutable. If a tagged publication fails after registry acceptance or its artifact changes, bump the affected version instead of overwriting or force-pushing.
