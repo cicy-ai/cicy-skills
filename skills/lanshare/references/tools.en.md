@@ -10,7 +10,7 @@
 
 ## Files
 
-- `~/cicy-ai/db/lanshare.json` — daemon state per mode (`serve`, `note`). `CICY_HOME` overrides `~/cicy-ai`.
+- `~/cicy-ai/db/lanshare.json` — daemon state per mode (`serve`, `note`). `CICY_HOME` overrides `~` (state lives in `$CICY_HOME/cicy-ai/db`).
 - `~/cicy-ai/db/lanshare-note.txt` — default notebook file.
 
 ## Related
