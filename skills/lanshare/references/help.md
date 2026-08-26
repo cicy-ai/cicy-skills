@@ -3,7 +3,7 @@
 ## Commands
 
 ```
-lanshare serve <dir> [options]   Share <dir> over HTTP with a directory index
+lanshare serve [dir] [options]   Share [dir] (default: current directory) over HTTP with a directory index
 lanshare note [file] [options]   Shared LAN notebook: one full-page textarea autosaved to [file]
 lanshare ip [--json]             Print LAN (private IPv4) addresses
 lanshare status [--json]         Show background servers started with --daemon

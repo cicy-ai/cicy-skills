@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "lanshare",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "LAN Share",
   "description": "Share a directory over HTTP on the LAN with a file index, or host a shared full-page notebook; optional HTTP Basic auth and LAN IP discovery.",
   "category": "network",
@@ -50,8 +50,8 @@
   "tools": [
     {
       "name": "lanshare serve",
-      "example": "lanshare serve ~/Downloads -p 8080 -a user:pass",
-      "description": "Share a directory over HTTP with a browsable index; optional Basic auth; add --daemon to run in the background"
+      "example": "lanshare serve -a user:pass",
+      "description": "Share a directory (default: current directory) over HTTP with a browsable index; optional Basic auth; add --daemon to run in the background"
     },
     {
       "name": "lanshare note",

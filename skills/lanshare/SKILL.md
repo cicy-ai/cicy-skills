@@ -24,7 +24,8 @@ downloads), and prints the LAN URLs to open from a phone or another PC.
 ## Usage
 
 ```sh
-lanshare serve ~/Downloads                     # foreground, port 8080, no auth
+lanshare serve                                 # share current directory, port 8080, no auth
+lanshare serve ~/Downloads                     # explicit directory
 lanshare serve ./dist -p 9000 -a admin:secret  # custom port + Basic auth
 lanshare serve /data --daemon --json           # background; prints urls + pid
 lanshare status                                # daemon info

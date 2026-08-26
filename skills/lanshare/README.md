@@ -14,6 +14,7 @@ cicy-code skill install lanshare
 ## Usage
 
 ```bash
+lanshare serve                 # current directory
 lanshare serve ~/Downloads
 # Sharing /home/me/Downloads
 # Listening on 0.0.0.0:8080

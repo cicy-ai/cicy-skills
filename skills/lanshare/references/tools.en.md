@@ -2,7 +2,7 @@
 
 | Tool | Example | Description |
 |------|---------|-------------|
-| `lanshare serve` | `lanshare serve ~/Downloads -p 8080 -a user:pass` | Share a directory with a browsable index; optional Basic auth; `--daemon` to background |
+| `lanshare serve` | `lanshare serve -a user:pass` | Share a directory (default: current) with a browsable index; optional Basic auth; `--daemon` to background |
 | `lanshare note` | `lanshare note ~/notes/lan.md -p 8081 -a team:pass` | Shared LAN notebook: full-page textarea autosaved to a file; optional Basic auth; `--daemon` |
 | `lanshare ip` | `lanshare ip --json` | Print LAN IPv4 addresses (private ranges first) |
 | `lanshare status` | `lanshare status --json` | Show running daemons (root/file, port, urls, pid) |
