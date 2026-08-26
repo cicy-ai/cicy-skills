@@ -1,0 +1,77 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "lanshare",
+  "version": "1.0.0",
+  "title": "LAN Share",
+  "description": "Share a directory over HTTP on the LAN with a file index, or host a shared full-page notebook; optional HTTP Basic auth and LAN IP discovery.",
+  "category": "network",
+  "tags": [
+    "http",
+    "share",
+    "lan",
+    "file-server",
+    "notebook",
+    "network"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/lanshare",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/lanshare",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "filesystem:db",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "局域网共享",
+      "description": "在局域网通过 HTTP 共享目录（自动索引页）或托管一个共享的全页记事本；可选 Basic 认证，并打印局域网 IP。"
+    }
+  },
+  "tools": [
+    {
+      "name": "lanshare serve",
+      "example": "lanshare serve ~/Downloads -p 8080 -a user:pass",
+      "description": "Share a directory over HTTP with a browsable index; optional Basic auth; add --daemon to run in the background"
+    },
+    {
+      "name": "lanshare note",
+      "example": "lanshare note ~/notes/lan.md -p 8081 -a team:pass",
+      "description": "Host a shared LAN notebook (one full-page textarea, autosaved to a file); optional Basic auth; --daemon to background"
+    },
+    {
+      "name": "lanshare ip",
+      "example": "lanshare ip",
+      "description": "Print the host's LAN IPv4 addresses"
+    },
+    {
+      "name": "lanshare status",
+      "example": "lanshare status --json",
+      "description": "Show the background share started with --daemon"
+    },
+    {
+      "name": "lanshare stop",
+      "example": "lanshare stop note",
+      "description": "Stop background server(s): all, or just serve / note"
+    }
+  ]
+}
