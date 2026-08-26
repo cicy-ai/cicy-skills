@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: MIT
+//
+// claude-auth — move this host's Claude credential between the live file and a
+// base64 text blob, so it can be backed up or carried to another machine.
+//
+// The credential itself is NEVER written to stdout unless you ask for it with
+// --stdout. Command output, logs and screenshots are public surfaces; `export`
+// therefore writes to a file and prints only the path and byte count.
+
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, copyFileSync, chmodSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname, resolve } from 'node:path';
+
+const SKILL = 'claude-auth';
+const AGENT = 'Claude';
+const REL = ['.claude', '.credentials.json'];          // path segments under $HOME
+const ENV_OVERRIDE = 'CLAUDE_AUTH_PATH'; // absolute path override, for tests and odd layouts
+
+function authPath() {
+  const override = (process.env[ENV_OVERRIDE] || '').trim();
+  if (override) return resolve(override);
+  return join(homedir(), ...REL);
+}
+
+function die(msg, code = 1) {
+  process.stderr.write(`${SKILL}: ${msg}\n`);
+  process.exit(code);
+}
+
+function stamp() {
+  // Local time, filename-safe: 20260826-013000
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// A credential file must decode to a JSON object. Validating before writing
+// stops a truncated paste or a base64 of the wrong file from clobbering a good
+// credential with garbage.
+function parseAuthJSON(buf, what) {
+  let value;
+  try {
+    value = JSON.parse(buf.toString('utf8'));
+  } catch {
+    die(`${what} is not valid JSON — refusing to continue`);
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    die(`${what} must be a JSON object — refusing to continue`);
+  }
+  return value;
+}
+
+function readArg(argv, ...names) {
+  for (const name of names) {
+    const i = argv.indexOf(name);
+    if (i >= 0) {
+      const v = argv[i + 1];
+      if (!v || v.startsWith('-')) die(`${name} needs a value`);
+      return v;
+    }
+  }
+  return '';
+}
+
+function has(argv, ...names) {
+  return names.some((n) => argv.includes(n));
+}
+
+function cmdPath() {
+  process.stdout.write(authPath() + '\n');
+}
+
+function cmdStatus(argv) {
+  const p = authPath();
+  const ok = existsSync(p);
+  let info = { path: p, exists: ok };
+  if (ok) {
+    const st = statSync(p);
+    // Size / mtime / mode only. Never the contents.
+    info = { ...info, bytes: st.size, mode: '0' + (st.mode & 0o777).toString(8), modified: new Date(st.mtimeMs).toISOString() };
+    try {
+      parseAuthJSON(readFileSync(p), 'the credential file');
+      info.valid_json = true;
+    } catch { info.valid_json = false; }
+  }
+  if (has(argv, '--json')) {
+    process.stdout.write(JSON.stringify(info, null, 2) + '\n');
+    return;
+  }
+  if (!ok) {
+    process.stdout.write(`${AGENT} credential not found: ${p}\n`);
+    process.exit(2);
+  }
+  process.stdout.write(`${AGENT} credential: ${p}\n  ${info.bytes} bytes, mode ${info.mode}, modified ${info.modified}\n`);
+}
+
+function cmdExport(argv) {
+  const p = authPath();
+  if (!existsSync(p)) die(`credential not found: ${p}`, 2);
+  const raw = readFileSync(p);
+  parseAuthJSON(raw, 'the credential file'); // fail before producing a useless blob
+  const b64 = raw.toString('base64');
+
+  if (has(argv, '--stdout')) {
+    // Explicitly requested. Anything reading this terminal now sees the secret.
+    process.stdout.write(b64 + '\n');
+    return;
+  }
+  let out = readArg(argv, '--out', '-o');
+  if (!out) out = join(homedir(), 'cicy-ai', 'assets', `${SKILL}-${stamp()}.b64`);
+  out = resolve(out);
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, b64 + '\n', { mode: 0o600 });
+  try { chmodSync(out, 0o600); } catch { /* best effort on exotic filesystems */ }
+  process.stdout.write(`wrote ${b64.length} base64 chars (${raw.length} bytes decoded) to ${out}\n`);
+  process.stdout.write(`mode 0600 — treat this file as the credential itself\n`);
+}
+
+function readImportInput(argv) {
+  const file = readArg(argv, '--file', '-f');
+  if (file) {
+    const p = resolve(file);
+    if (!existsSync(p)) die(`no such file: ${p}`, 2);
+    return readFileSync(p, 'utf8');
+  }
+  const inline = readArg(argv, '--base64', '-b');
+  if (inline) return inline;
+  if (argv.includes('-')) {
+    try { return readFileSync(0, 'utf8'); } catch { die('failed to read stdin'); }
+  }
+  die('need --file <path>, --base64 <value>, or - to read stdin');
+}
+
+function cmdImport(argv) {
+  const b64 = readImportInput(argv).replace(/\s+/g, '');
+  if (!b64) die('empty base64 input');
+  let decoded;
+  try {
+    decoded = Buffer.from(b64, 'base64');
+    // Node's base64 decoder is lenient; round-trip to catch a truncated or
+    // mistyped blob instead of writing a half-credential.
+    if (decoded.toString('base64').replace(/=+$/, '') !== b64.replace(/=+$/, '')) {
+      die('input is not valid base64');
+    }
+  } catch {
+    die('input is not valid base64');
+  }
+  parseAuthJSON(decoded, 'the decoded value');
+
+  const p = authPath();
+  mkdirSync(dirname(p), { recursive: true });
+  let backup = '';
+  if (existsSync(p)) {
+    backup = `${p}.bak-${stamp()}`;
+    copyFileSync(p, backup);
+  }
+  const mode = existsSync(p) ? (statSync(p).mode & 0o777) : 0o600;
+  writeFileSync(p, decoded);
+  try { chmodSync(p, mode); } catch { /* keep going: content is what matters */ }
+  process.stdout.write(`restored ${decoded.length} bytes to ${p}\n`);
+  if (backup) process.stdout.write(`previous credential kept at ${backup}\n`);
+  process.stdout.write(`already-running ${AGENT} processes keep their old credential; new ones pick this up\n`);
+}
+
+const HELP = `${SKILL} — back up and restore this host's ${AGENT} credential as base64
+
+Usage:
+  ${SKILL} export [--out <file>]      write base64 of the credential to a file (0600)
+  ${SKILL} export --stdout           print base64 to stdout (only when you mean it)
+  ${SKILL} import --file <file>      restore from a base64 file
+  ${SKILL} import --base64 <value>   restore from an inline base64 value
+  ${SKILL} import -                  restore from stdin
+  ${SKILL} status [--json]           show path, size, mode, mtime (never contents)
+  ${SKILL} path                      print the credential path
+  ${SKILL} help
+
+Credential file: ${authPath()}
+Override with ${ENV_OVERRIDE}=<absolute path>.
+
+export writes to ~/cicy-ai/assets/${SKILL}-<timestamp>.b64 unless --out is given.
+import validates the decoded value is a JSON object, backs up the existing file
+to <path>.bak-<timestamp>, and preserves the file's current mode.
+`;
+
+function main() {
+  const argv = process.argv.slice(2);
+  const cmd = argv[0] || 'help';
+  switch (cmd) {
+    case 'export': return cmdExport(argv.slice(1));
+    case 'import': return cmdImport(argv.slice(1));
+    case 'status': return cmdStatus(argv.slice(1));
+    case 'path': return cmdPath();
+    case 'help': case '--help': case '-h': return process.stdout.write(HELP);
+    default:
+      process.stderr.write(HELP);
+      process.exit(1);
+  }
+}
+
+main();
