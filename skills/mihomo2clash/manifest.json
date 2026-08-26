@@ -1,0 +1,59 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "mihomo2clash",
+  "version": "1.0.0",
+  "title": "Mihomo → Clash Config",
+  "description": "Convert the cicy mihomo.yaml into a standard Clash config (drops listeners, IN-* rules and auth, rewrites default-deny) and save it to ~/projects for local or remote import.",
+  "category": "network",
+  "tags": [
+    "clash",
+    "mihomo",
+    "proxy",
+    "config",
+    "export"
+  ],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/mihomo2clash",
+  "permissions": [
+    "filesystem:home",
+    "filesystem:db"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/mihomo2clash",
+  "i18n": {
+    "zh-CN": {
+      "title": "Mihomo 转 Clash 配置",
+      "description": "把 cicy 的 mihomo.yaml 转成标准 Clash 配置（去掉 listeners、IN-* 规则和认证，改写默认拒绝规则），保存到 ~/projects 供本地或远程导入。"
+    }
+  },
+  "tools": [
+    {
+      "name": "mihomo2clash convert",
+      "example": "mihomo2clash convert",
+      "description": "Write ~/projects/clash-config.yaml from ~/cicy-ai/db/mihomo.yaml; -o/-i override paths, --cn-direct, --strict"
+    },
+    {
+      "name": "mihomo2clash check",
+      "example": "mihomo2clash check --json",
+      "description": "Dry run: report kept / dropped / rewritten items without writing"
+    }
+  ]
+}

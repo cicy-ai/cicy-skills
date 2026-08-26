@@ -1,0 +1,373 @@
+#!/usr/bin/env node
+// mihomo2clash — convert the cicy mihomo.yaml into a standard Clash config.
+// Zero dependencies (Node >= 18). Ships a small YAML-subset parser/emitter that
+// covers the shapes used by mihomo/clash configs (block + flow maps/sequences,
+// quoted/plain scalars, comments).
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const argv = process.argv.slice(2);
+const HOME = os.homedir();
+const DEFAULT_IN = process.env.MIHOMO_CONFIG || path.join(HOME, 'cicy-ai', 'db', 'mihomo.yaml');
+const DEFAULT_OUT = path.join(process.env.CICY_PROJECTS || path.join(HOME, 'projects'), 'clash-config.yaml');
+
+const HELP = `Usage:
+  mihomo2clash convert [options]   Convert mihomo.yaml → standard Clash config (default: ~/projects/clash-config.yaml)
+  mihomo2clash check [--json]      Report what would be kept / dropped / rewritten without writing
+  mihomo2clash --help
+
+Options:
+  -i, --in <file>        Source (default: ~/cicy-ai/db/mihomo.yaml or $MIHOMO_CONFIG)
+  -o, --out <file>       Destination (default: ~/projects/clash-config.yaml); "-" = stdout
+      --group <name>     Group that replaces the default-deny MATCH,REJECT (default: default_proxy_group)
+      --cn-direct        Append GEOIP,CN,DIRECT before the final MATCH rule
+      --strict           Drop proxy types classic Clash cannot load (vless, hysteria*, tuic, wireguard, ...)
+      --port <n>         HTTP port in the output (default 7890)
+      --socks-port <n>   SOCKS port in the output (default 7891)
+      --allow-lan        Set allow-lan: true (default false)
+      --json             Machine-readable summary
+
+What changes:
+  drop     listeners, authentication, skip-auth-prefixes, external-ui, bind-address, mihomo-only proxies (type: direct)
+  drop     IN-NAME / IN-USER / IN-USER-PREFIX / IN-TYPE / IN-PORT rules and groups only they reference
+  rewrite  MATCH,REJECT → MATCH,<group>;  references to dropped proxies → DIRECT
+  set      port/socks-port/allow-lan/mode/log-level/external-controller to standard values
+`;
+
+// ── args ───────────────────────────────────────────────────────────────────
+function parseArgs(a) {
+  const o = { _: [], in: DEFAULT_IN, out: DEFAULT_OUT, group: 'default_proxy_group', cnDirect: false, strict: false, port: 7890, socksPort: 7891, allowLan: false, json: false };
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const next = () => { if (i + 1 >= a.length) fail(`${x} needs a value`); return a[++i]; };
+    if (x === '-i' || x === '--in') o.in = next();
+    else if (x === '-o' || x === '--out') o.out = next();
+    else if (x === '--group') o.group = next();
+    else if (x === '--cn-direct') o.cnDirect = true;
+    else if (x === '--strict') o.strict = true;
+    else if (x === '--port') o.port = Number(next());
+    else if (x === '--socks-port') o.socksPort = Number(next());
+    else if (x === '--allow-lan') o.allowLan = true;
+    else if (x === '--json') o.json = true;
+    else if (x === '-h' || x === '--help') { process.stdout.write(HELP); process.exit(0); }
+    else if (x.startsWith('-')) fail(`unknown option ${x}`);
+    else o._.push(x);
+  }
+  return o;
+}
+function fail(msg, code = 2) { process.stderr.write(`mihomo2clash: ${msg}\n`); process.exit(code); }
+
+// ── YAML subset parser ─────────────────────────────────────────────────────
+function parseScalar(s) {
+  s = s.trim();
+  if (s === '' || s === '~' || s === 'null') return null;
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  if (/^-?\d+$/.test(s)) return Number(s);
+  if (/^-?\d+\.\d+$/.test(s)) return Number(s);
+  if (s[0] === '"') return JSON.parse(s.replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16))));
+  if (s[0] === "'") return s.slice(1, -1).replace(/''/g, "'");
+  return s;
+}
+function stripComment(line) {
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === q && line[i - 1] !== '\\') q = null; continue; }
+    if (c === '"' || c === "'") q = c;
+    else if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+}
+// flow: { a: 1, b: [x, y] } / [a, b]
+function parseFlow(str) {
+  let i = 0;
+  const ws = () => { while (i < str.length && /\s/.test(str[i])) i++; };
+  const scalarUntil = (stops) => {
+    const start = i;
+    if (str[i] === '"' || str[i] === "'") { const q = str[i++]; while (i < str.length && (str[i] !== q || (q === '"' && str[i - 1] === '\\'))) i++; i++; return parseScalar(str.slice(start, i)); }
+    while (i < str.length && !stops.includes(str[i])) i++;
+    return parseScalar(str.slice(start, i));
+  };
+  const value = () => {
+    ws();
+    if (str[i] === '{') {
+      i++; const obj = {};
+      for (;;) {
+        ws(); if (str[i] === '}') { i++; return obj; }
+        const key = scalarUntil([':', '}', ',']); ws();
+        if (str[i] === ':') i++;
+        ws();
+        obj[key] = (str[i] === ',' || str[i] === '}') ? null : value();
+        ws(); if (str[i] === ',') i++;
+      }
+    }
+    if (str[i] === '[') {
+      i++; const arr = [];
+      for (;;) {
+        ws(); if (str[i] === ']') { i++; return arr; }
+        arr.push(value()); ws(); if (str[i] === ',') i++;
+      }
+    }
+    return scalarUntil([',', '}', ']']);
+  };
+  const v = value();
+  return v;
+}
+function parseYaml(text) {
+  const lines = text.split(/\r?\n/).map((raw) => {
+    const noComment = stripComment(raw);
+    return { indent: noComment.search(/\S|$/), text: noComment.trim(), raw };
+  }).filter((l) => l.text !== '' && l.text !== '---');
+  let pos = 0;
+  function parseBlock(indent) {
+    if (pos >= lines.length) return null;
+    const first = lines[pos];
+    if (first.indent < indent) return null;
+    if (first.text.startsWith('- ')|| first.text === '-') return parseSeq(first.indent);
+    return parseMap(first.indent);
+  }
+  function parseSeq(indent) {
+    const arr = [];
+    while (pos < lines.length && lines[pos].indent === indent && (lines[pos].text.startsWith('- ') || lines[pos].text === '-')) {
+      const body = lines[pos].text.slice(1).trim();
+      if (body === '') { pos++; arr.push(parseBlock(indent + 1)); continue; }
+      if (body[0] === '{' || body[0] === '[') { pos++; arr.push(parseFlow(body)); continue; }
+      const kv = splitKey(body);
+      if (kv) {
+        // "- key: value" starts an inline map whose further keys are indented by 2
+        const mapIndent = indent + 2;
+        lines[pos] = { indent: mapIndent, text: body, raw: lines[pos].raw };
+        arr.push(parseMap(mapIndent));
+        continue;
+      }
+      pos++; arr.push(parseScalar(body));
+    }
+    return arr;
+  }
+  function splitKey(text) {
+    if (text[0] === '"' || text[0] === "'") {
+      const q = text[0]; const end = text.indexOf(q, 1);
+      if (end > 0 && text[end + 1] === ':' && (text[end + 2] === undefined || /\s/.test(text[end + 2]))) return [parseScalar(text.slice(0, end + 1)), text.slice(end + 2).trim()];
+      return null;
+    }
+    const m = /^([^\s:#][^:]*?):(\s+(.*))?$/.exec(text);
+    if (!m) return null;
+    return [m[1].trim(), (m[3] || '').trim()];
+  }
+  function parseMap(indent) {
+    const obj = {};
+    while (pos < lines.length && lines[pos].indent === indent) {
+      const kv = splitKey(lines[pos].text);
+      if (!kv) break;
+      const [key, rest] = kv;
+      pos++;
+      if (rest === '') {
+        const nxt = lines[pos];
+        if (nxt && (nxt.indent > indent || (nxt.indent === indent && nxt.text.startsWith('- ')))) obj[key] = parseBlock(nxt.indent);
+        else obj[key] = null;
+      } else if (rest[0] === '{' || rest[0] === '[') obj[key] = parseFlow(rest);
+      else if (rest === '|' || rest === '>') {
+        const buf = []; const base = lines[pos]?.indent ?? indent + 1;
+        while (pos < lines.length && lines[pos].indent >= base) buf.push(lines[pos++].raw.slice(base));
+        obj[key] = buf.join(rest === '|' ? '\n' : ' ');
+      } else obj[key] = parseScalar(rest);
+    }
+    return obj;
+  }
+  return parseBlock(0) ?? {};
+}
+
+// ── YAML emitter ───────────────────────────────────────────────────────────
+function needsQuote(s) {
+  return s === '' || /^[\s\-?:,\[\]{}#&*!|>'"%@`]/.test(s) || /[:#]\s|\s$/.test(s) || /^(true|false|null|~|yes|no|on|off)$/i.test(s) || /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s) || /[\n\r\t]/.test(s);
+}
+function scalar(v) {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'boolean' || typeof v === 'number') return String(v);
+  const s = String(v);
+  return needsQuote(s) ? JSON.stringify(s) : s;
+}
+function emit(v, indent = 0) {
+  const pad = ' '.repeat(indent);
+  if (Array.isArray(v)) {
+    if (!v.length) return pad + '[]\n';
+    return v.map((it) => {
+      if (it && typeof it === 'object' && !Array.isArray(it)) {
+        const body = emit(it, indent + 2).slice(indent + 2);
+        return pad + '- ' + body;
+      }
+      if (Array.isArray(it)) return pad + '-\n' + emit(it, indent + 2);
+      return pad + '- ' + scalar(it) + '\n';
+    }).join('');
+  }
+  if (v && typeof v === 'object') {
+    const keys = Object.keys(v);
+    if (!keys.length) return pad + '{}\n';
+    return keys.map((k) => {
+      const val = v[k];
+      if (val && typeof val === 'object') {
+        const empty = Array.isArray(val) ? !val.length : !Object.keys(val).length;
+        return `${pad}${scalar(k)}:${empty ? ' ' + (Array.isArray(val) ? '[]' : '{}') + '\n' : '\n' + emit(val, indent + 2)}`;
+      }
+      return `${pad}${scalar(k)}: ${scalar(val)}\n`;
+    }).join('');
+  }
+  return pad + scalar(v) + '\n';
+}
+
+// ── conversion ─────────────────────────────────────────────────────────────
+const MIHOMO_ONLY_RULES = new Set(['IN-NAME', 'IN-USER', 'IN-USER-PREFIX', 'IN-TYPE', 'IN-PORT', 'SUB-RULE', 'AND', 'OR', 'NOT', 'RULE-SET', 'DSCP']);
+const CLASSIC_PROXY_TYPES = new Set(['ss', 'ssr', 'vmess', 'trojan', 'socks5', 'http', 'snell']);
+const BUILTIN = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'GLOBAL']);
+
+function convert(src, o) {
+  const report = { dropped: { topLevel: [], proxies: [], groups: [], rules: [] }, rewritten: { rules: [], groupRefs: [] }, kept: {} };
+  const out = {};
+  out.port = o.port;
+  out['socks-port'] = o.socksPort;
+  out['allow-lan'] = o.allowLan;
+  out.mode = src.mode || 'rule';
+  out['log-level'] = src['log-level'] || 'info';
+  out['external-controller'] = '127.0.0.1:9090';
+  if (src.dns) {
+    const dns = { ...src.dns };
+    if (dns.listen && !/^(0\.0\.0\.0|127\.0\.0\.1):\d+$/.test(dns.listen)) dns.listen = '0.0.0.0:1053';
+    if (dns.listen === '127.0.0.1:53') dns.listen = '0.0.0.0:1053';
+    out.dns = dns;
+  }
+  const DROP_KEYS = ['listeners', 'authentication', 'skip-auth-prefixes', 'external-ui', 'bind-address', 'mixed-port', 'tproxy-port', 'redir-port', 'unified-delay', 'tcp-concurrent', 'geodata-mode', 'geox-url', 'find-process-mode', 'global-client-fingerprint', 'sniffer', 'tun'];
+  for (const k of DROP_KEYS) if (k in src) report.dropped.topLevel.push(k);
+  const HANDLED = new Set([...DROP_KEYS, 'external-controller', 'port', 'socks-port', 'allow-lan', 'mode', 'log-level', 'dns', 'proxies', 'proxy-groups', 'rules', 'proxy-providers', 'rule-providers']);
+  for (const [k, v] of Object.entries(src)) {
+    if (HANDLED.has(k)) continue;
+    out[k] = v; // passthrough (e.g. tun, profile, hosts) — standard enough to keep
+  }
+
+  // proxies
+  const proxies = [];
+  const droppedProxyNames = new Set();
+  for (const p of src.proxies || []) {
+    if (!p || typeof p !== 'object') continue;
+    const type = String(p.type || '');
+    if (type === 'direct' || type === 'reject' || type === 'dns') { droppedProxyNames.add(p.name); report.dropped.proxies.push({ name: p.name, type, reason: 'mihomo-only proxy type' }); continue; }
+    if (o.strict && !CLASSIC_PROXY_TYPES.has(type)) { droppedProxyNames.add(p.name); report.dropped.proxies.push({ name: p.name, type, reason: 'not supported by classic Clash (--strict)' }); continue; }
+    proxies.push(p);
+  }
+  const proxyNames = new Set(proxies.map((p) => p.name));
+
+  // rules → find groups referenced by rules that survive
+  const inRules = src.rules || [];
+  const groupsRemovedByRules = new Set();
+  const rules = [];
+  for (const r of inRules) {
+    const parts = String(r).split(',');
+    const kind = parts[0].trim();
+    if (MIHOMO_ONLY_RULES.has(kind)) {
+      report.dropped.rules.push(r);
+      if (/^IN-/.test(kind)) groupsRemovedByRules.add(parts[2]?.trim());
+      continue;
+    }
+    if (kind === 'MATCH' && parts[1]?.trim() === 'REJECT') {
+      const nr = `MATCH,${o.group}`;
+      report.rewritten.rules.push({ from: r, to: nr });
+      rules.push(nr); continue;
+    }
+    rules.push(String(r));
+  }
+  if (!rules.some((r) => r.startsWith('MATCH,'))) rules.push(`MATCH,${o.group}`);
+  if (o.cnDirect) {
+    const idx = rules.findIndex((r) => r.startsWith('MATCH,'));
+    rules.splice(idx, 0, 'GEOIP,CN,DIRECT');
+  }
+
+  // groups: keep those referenced by rules / other kept groups; drop the ones only IN-* rules pointed at
+  const srcGroups = (src['proxy-groups'] || []).filter((g) => g && typeof g === 'object');
+  const groupByName = new Map(srcGroups.map((g) => [g.name, g]));
+  const referenced = new Set();
+  for (const r of rules) { const t = r.split(',').map((s) => s.trim()); const target = t[t.length - 1] === 'no-resolve' ? t[t.length - 2] : t[t.length - 1]; if (groupByName.has(target)) referenced.add(target); }
+  referenced.add(o.group);
+  const queue = [...referenced];
+  while (queue.length) { const g = groupByName.get(queue.shift()); for (const n of g?.proxies || []) if (groupByName.has(n) && !referenced.has(n)) { referenced.add(n); queue.push(n); } }
+  const groups = [];
+  for (const g of srcGroups) {
+    if (!referenced.has(g.name)) { report.dropped.groups.push({ name: g.name, reason: groupsRemovedByRules.has(g.name) ? 'only referenced by dropped IN-* rules' : 'unreferenced' }); continue; }
+    const members = [];
+    for (const n of g.proxies || []) {
+      if (droppedProxyNames.has(n)) { if (!members.includes('DIRECT')) members.push('DIRECT'); report.rewritten.groupRefs.push({ group: g.name, from: n, to: 'DIRECT' }); continue; }
+      if (members.includes(n)) continue;
+      if (proxyNames.has(n) || groupByName.has(n) || BUILTIN.has(n)) members.push(n);
+      else report.rewritten.groupRefs.push({ group: g.name, from: n, to: '(removed: unknown proxy)' });
+    }
+    if (!members.length) members.push('DIRECT');
+    groups.push({ ...g, proxies: members });
+  }
+  if (!groupByName.has(o.group)) {
+    groups.unshift({ name: o.group, type: 'select', proxies: [...proxyNames, 'DIRECT'] });
+    report.rewritten.groupRefs.push({ group: o.group, from: '(missing)', to: 'created select over all proxies' });
+  }
+
+  out.proxies = proxies;
+  out['proxy-groups'] = groups;
+  out.rules = rules;
+  report.kept = { proxies: proxies.length, groups: groups.length, rules: rules.length };
+  report.nonClassicProxies = proxies.filter((p) => !CLASSIC_PROXY_TYPES.has(String(p.type))).map((p) => ({ name: p.name, type: p.type }));
+  return { out, report };
+}
+
+function loadSource(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { fail(`cannot read ${file}: ${e.message}`, 1); }
+  const src = parseYaml(text);
+  if (!src || typeof src !== 'object' || !Array.isArray(src.proxies)) fail(`${file} does not look like a mihomo/clash config (no proxies list)`, 1);
+  return src;
+}
+
+function printReport(report, o, outPath) {
+  const d = report.dropped, w = report.rewritten;
+  const lines = [];
+  if (outPath) lines.push(`Wrote ${outPath}`);
+  lines.push(`Kept: ${report.kept.proxies} proxies, ${report.kept.groups} groups, ${report.kept.rules} rules`);
+  if (d.topLevel.length) lines.push(`Dropped top-level keys: ${d.topLevel.join(', ')}`);
+  for (const p of d.proxies) lines.push(`Dropped proxy: ${p.name} (${p.type}; ${p.reason})`);
+  for (const g of d.groups) lines.push(`Dropped group: ${g.name} (${g.reason})`);
+  for (const r of d.rules) lines.push(`Dropped rule: ${r}`);
+  for (const r of w.rules) lines.push(`Rewrote rule: ${r.from} → ${r.to}`);
+  for (const g of w.groupRefs) lines.push(`Group ${g.group}: ${g.from} → ${g.to}`);
+  if (report.nonClassicProxies.length) lines.push(`Note: ${report.nonClassicProxies.map((p) => `${p.name} (${p.type})`).join(', ')} need a Meta-core client (Clash Verge / ClashX Meta / Stash); use --strict to drop them.`);
+  if (outPath) {
+    lines.push(`Import (local):  pick ${outPath} as a local profile in your Clash client.`);
+    lines.push(`Import (remote): lanshare serve ${path.dirname(outPath)} -a user:pass --daemon  →  http://user:pass@<LAN-IP>:8080/${path.basename(outPath)}`);
+  }
+  process.stderr.write(lines.join('\n') + '\n');
+}
+
+// ── main ───────────────────────────────────────────────────────────────────
+const o = parseArgs(argv);
+const cmd = o._[0];
+if (!cmd || cmd === 'help') { process.stdout.write(HELP); process.exit(cmd ? 0 : 2); }
+if (cmd !== 'convert' && cmd !== 'check') fail(`unknown command "${cmd}"\n` + HELP);
+if (!Number.isInteger(o.port) || !Number.isInteger(o.socksPort)) fail('ports must be integers');
+
+const src = loadSource(o.in);
+const { out, report } = convert(src, o);
+const header = `# Standard Clash config generated by mihomo2clash from ${o.in}\n# Contains proxy credentials — keep private.\n`;
+const yaml = header + emit(out);
+
+if (cmd === 'check') {
+  if (o.json) console.log(JSON.stringify({ ok: true, data: { in: o.in, out: o.out, report } }, null, 2));
+  else printReport(report, o, null);
+  process.exit(0);
+}
+if (o.out === '-') {
+  process.stdout.write(yaml);
+  if (!o.json) printReport(report, o, null);
+  process.exit(0);
+}
+const outPath = path.resolve(o.out);
+fs.mkdirSync(path.dirname(outPath), { recursive: true });
+fs.writeFileSync(outPath, yaml, { mode: 0o600 });
+try { fs.chmodSync(outPath, 0o600); } catch {}
+if (o.json) console.log(JSON.stringify({ ok: true, data: { in: o.in, out: outPath, report } }));
+else printReport(report, o, outPath);

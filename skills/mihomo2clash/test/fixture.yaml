@@ -1,0 +1,55 @@
+# fixture: cicy-style mihomo config with fake credentials
+mixed-port: 9001
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:19001
+external-ui: ""
+dns:
+  enable: true
+  listen: 127.0.0.1:53
+  enhanced-mode: fake-ip
+  nameserver:
+    - 119.29.29.29
+authentication: []
+skip-auth-prefixes:
+  - 127.0.0.1/32
+listeners:
+  - name: chrome-profile-1
+    type: mixed
+    port: 20001
+    listen: 127.0.0.1
+proxies:
+  - name: "节点-主"
+    type: vless
+    server: example.com
+    port: 8443
+    uuid: 00000000-0000-0000-0000-000000000000
+    network: tcp
+    udp: false
+    tls: true
+    servername: www.apple.com   # sni
+    reality-opts:
+      public-key: FAKEKEY
+      short-id: "0123"
+  - { name: default_proxy, type: direct }
+  - { name: us_proxy, type: socks5, server: 1.2.3.4, port: 8075, username: u, password: "p#w: d", udp: true }
+  # - { name: commented, type: ss }
+proxy-groups:
+  - name: default_proxy_group
+    type: select
+    proxies:
+      - 节点-主
+      - default_proxy
+      - us_proxy
+      - DIRECT
+  - name: chrome-profile-1-group
+    type: select
+    proxies: [节点-主, DIRECT]
+rules:
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IN-NAME,chrome-profile-1,chrome-profile-1-group
+  - DOMAIN-SUFFIX,trycloudflare.com,节点-主
+  - IN-USER-PREFIX,w-,default_proxy_group
+  - MATCH,REJECT
