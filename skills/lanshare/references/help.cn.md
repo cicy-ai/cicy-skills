@@ -3,7 +3,7 @@
 ## 命令
 
 ```
-lanshare serve <dir> [选项]     通过 HTTP 共享 <dir>，自动生成目录索引
+lanshare serve [dir] [选项]     通过 HTTP 共享 [dir]（默认当前目录），自动生成目录索引
 lanshare note [file] [选项]     局域网共享记事本：一个全页 textarea，自动保存到 [file]
 lanshare ip [--json]            打印局域网（内网 IPv4）地址
 lanshare status [--json]        查看 --daemon 启动的后台服务

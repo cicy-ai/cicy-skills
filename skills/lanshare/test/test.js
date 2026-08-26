@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { runSkill, assert, finish } from '../../../tools/test-helper.js';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,10 @@ assert('--help exits 0', help.status === 0);
 assert('--help mentions serve', help.stdout.includes('serve'));
 assert('no args exits 2', runSkill(D, []).status === 2);
 assert('unknown command exits 2', runSkill(D, ['nope']).status === 2);
+const cwdRun = spawnSync('node', [BIN, 'serve', '--port', '0', '--host', '127.0.0.1', '--json', '--daemon'], { cwd: D, encoding: 'utf8', env: { ...process.env, CICY_HOME: mkdtempSync(join(tmpdir(), 'lanshare-cwd-')) } });
+let cwdInfo = null; try { cwdInfo = JSON.parse(cwdRun.stdout).data; } catch {}
+assert('serve without dir uses cwd', cwdInfo?.root === D.replace(/\/$/, ''), cwdRun.stderr);
+if (cwdInfo?.pid) try { process.kill(cwdInfo.pid, 'SIGTERM'); } catch {}
 assert('bad --auth exits 2', runSkill(D, ['serve', D, '--auth', 'nocolon']).status === 2);
 
 const ip = runSkill(D, ['ip', '--json']);
