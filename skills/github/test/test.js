@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -37,6 +37,28 @@ result = spawnSync(bin, ['gh', '--account', 'work', 'run', 'list', '--repo', 'ow
 assert.equal(result.status, 0, result.stderr);
 assert.equal(result.stdout.includes(token) || result.stderr.includes(token), false);
 assert.deepEqual(JSON.parse(readFileSync(ghCapture, 'utf8')), { token, githubToken: '', args: ['run', 'list', '--repo', 'owner/repo'] });
+
+// gh missing from PATH → fall back to the runtime dir (no network needed when the binary already exists)
+const runtime = join(dir, 'runtime');
+const runtimeBin = join(runtime, '9.9.9', 'gh');
+mkdirSync(join(runtime, '9.9.9'), { recursive: true });
+writeFileSync(runtimeBin, `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+if (process.argv[2] === '--version') { console.log('gh version 9.9.9 (fake)'); process.exit(0); }
+writeFileSync(process.env.TEST_GH_CAPTURE, JSON.stringify({ from: 'runtime', args: process.argv.slice(2) }));
+`);
+chmodSync(runtimeBin, 0o755);
+const noGhPath = process.env.PATH.split(':').filter((p) => !existsSync(join(p, 'gh'))).join(':');
+result = spawnSync(bin, ['gh', '--account', 'work', 'pr', 'list'], {
+  env: { ...env, PATH: noGhPath, CICY_GH_RUNTIME: runtime, CICY_GH_VERSION: '9.9.9', TEST_GH_CAPTURE: ghCapture }, encoding: 'utf8',
+});
+assert.equal(result.status, 0, result.stderr);
+assert.deepEqual(JSON.parse(readFileSync(ghCapture, 'utf8')), { from: 'runtime', args: ['pr', 'list'] });
+
+// gh-setup reports the resolved binary
+result = spawnSync(bin, ['gh-setup'], { env: { ...env, PATH: noGhPath, CICY_GH_RUNTIME: runtime, CICY_GH_VERSION: '9.9.9' }, encoding: 'utf8' });
+assert.equal(result.status, 0, result.stderr);
+assert.equal(result.stdout.split('\n')[0], runtimeBin);
 
 result = spawnSync(bin, ['gh', '--account', 'work', 'auth', 'token'], { env, encoding: 'utf8' });
 assert.notEqual(result.status, 0);

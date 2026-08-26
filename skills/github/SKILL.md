@@ -25,6 +25,6 @@ Use the bundled `github` command for GitHub operations whenever multiple identit
 3. Use `github repos --account <name>` to list repositories visible to that identity.
 4. Use `github clone --account <name> owner/repo [directory]` to clone and bind future HTTPS pull/push to that account.
 5. For an existing HTTPS clone, run `github configure --account <name> [directory]` once.
-6. For Actions, releases, PRs, and other GitHub CLI operations, run `github gh --account <name> ...`.
+6. For Actions, releases, PRs, and other GitHub CLI operations, run `github gh --account <name> ...`. `gh` does not need to be preinstalled: it is picked from `PATH` or auto-downloaded into `~/cicy-ai/runtime/gh/` (run `github gh-setup` to prefetch).
 
 Read [help.md](./references/help.md) for commands and [tools.md](./references/tools.md) for configuration, security behavior, and exit codes.

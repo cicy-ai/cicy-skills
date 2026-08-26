@@ -1,20 +1,36 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "github",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "title": "GitHub Multi-Account",
   "description": "Secure multi-account GitHub operations for identity verification, repository discovery, cloning, and persistent per-repository account binding without exposing tokens.",
   "category": "dev",
-  "tags": ["github", "git", "multi-account", "repository", "security"],
+  "tags": [
+    "github",
+    "git",
+    "multi-account",
+    "repository",
+    "security"
+  ],
   "author": "cicy-ai",
   "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/github",
   "license": "MIT",
-  "runtime": { "node": ">=18" },
-  "system_requirements": ["git"],
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "git"
+  ],
   "npm_dependencies": false,
   "entry": "bin/github",
-  "permissions": ["network", "filesystem:home", "process:spawn"],
-  "compatible_agents": ["*"],
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
   "files": {
     "skill_md": "SKILL.md",
     "help_md": "references/help.md",
@@ -32,10 +48,35 @@
     }
   },
   "tools": [
-    { "name": "List accounts", "example": "github accounts", "description": "List configured identities without displaying tokens" },
-    { "name": "List repositories", "example": "github repos --account work", "description": "List repositories accessible to one identity" },
-    { "name": "Clone repository", "example": "github clone --account work owner/repo", "description": "Clone and bind future HTTPS pull/push to the selected account" },
-    { "name": "Configure repository", "example": "github configure --account work .", "description": "Bind an existing HTTPS clone to one configured account" },
-    { "name": "Run GitHub CLI", "example": "github gh --account work run list --repo owner/repo", "description": "Run gh with one selected account without changing global authentication" }
+    {
+      "name": "List accounts",
+      "example": "github accounts",
+      "description": "List configured identities without displaying tokens"
+    },
+    {
+      "name": "List repositories",
+      "example": "github repos --account work",
+      "description": "List repositories accessible to one identity"
+    },
+    {
+      "name": "Clone repository",
+      "example": "github clone --account work owner/repo",
+      "description": "Clone and bind future HTTPS pull/push to the selected account"
+    },
+    {
+      "name": "Configure repository",
+      "example": "github configure --account work .",
+      "description": "Bind an existing HTTPS clone to one configured account"
+    },
+    {
+      "name": "Run GitHub CLI",
+      "example": "github gh --account work run list --repo owner/repo",
+      "description": "Run gh with one selected account without changing global authentication"
+    },
+    {
+      "name": "Set up GitHub CLI",
+      "example": "github gh-setup",
+      "description": "Download the pinned gh release into ~/cicy-ai/runtime/gh when gh is not on PATH (done automatically by github gh)"
+    }
   ]
 }
