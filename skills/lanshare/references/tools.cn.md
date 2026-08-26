@@ -10,7 +10,7 @@
 
 ## 文件
 
-- `~/cicy-ai/db/lanshare.json` — 按模式（`serve`、`note`）记录后台状态。`CICY_HOME` 可覆盖 `~/cicy-ai`。
+- `~/cicy-ai/db/lanshare.json` — 按模式（`serve`、`note`）记录后台状态。`CICY_HOME` 可覆盖 `~`（状态位于 `$CICY_HOME/cicy-ai/db`）。
 - `~/cicy-ai/db/lanshare-note.txt` — 默认记事本文件。
 
 ## 相关
