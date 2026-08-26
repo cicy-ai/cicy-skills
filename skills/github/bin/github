@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 // Multi-account GitHub CLI for CiCy. Zero dependencies; Node.js 18+.
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
+import { arch, homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const args = process.argv.slice(2);
 const configPath = process.env.CICY_GITHUB_CONFIG || join(homedir(), 'cicy-ai', 'db', 'github.json');
 const accountPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
+const GH_VERSION = process.env.CICY_GH_VERSION || process.env.GH_VERSION || '2.98.0';
+const ghRuntimeRoot = process.env.CICY_GH_RUNTIME || join(process.env.CICY_HOME || join(homedir(), 'cicy-ai'), 'runtime', 'gh');
+const ghRuntimeBin = join(ghRuntimeRoot, GH_VERSION, 'gh');
 
 try {
   if (process.env.CICY_GITHUB_ASKPASS === '1') askpass();
@@ -20,6 +26,7 @@ try {
   else if (args[0] === 'clone') await clone();
   else if (args[0] === 'configure') await configure();
   else if (args[0] === 'gh') await gh();
+  else if (args[0] === 'gh-setup') await ghSetup();
   else if (args[0] === 'credential') await credential();
   else fail(`unknown command: ${args[0]}. Try github --help.`, 2);
 } catch (error) {
@@ -38,7 +45,9 @@ Usage:
   github clone --account <account> <owner/repo> [directory]
   github configure --account <account> [directory]
   github gh --account <account> <gh arguments...>
+  github gh-setup [--force]           # pre-download the GitHub CLI (gh) into ~/cicy-ai/runtime/gh
 
+github gh uses gh from PATH, or auto-downloads a pinned release (CICY_GH_VERSION overrides).
 Account selection: --account, then CICY_GITHUB_ACCOUNT, or the only configured account.
 Tokens are read only from stdin/config, never accepted as command arguments or printed.
 Config: ${configPath}
@@ -203,7 +212,88 @@ async function gh() {
     GH_HOST: 'github.com',
   };
   delete env.GITHUB_TOKEN;
-  await run('gh', ghArgs, env);
+  const ghBin = await ensureGh();
+  await run(ghBin, ghArgs, env);
+}
+
+// ── GitHub CLI bootstrap ──────────────────────────────────────────────────
+// `gh` is not shipped by cicy-code. Resolution order: PATH → ~/cicy-ai/runtime/gh/<ver>/gh
+// → download the official release (direct, then gh-proxy mirrors) into that runtime dir.
+
+function ghOnPath() {
+  const exe = platform() === 'win32' ? 'gh.exe' : 'gh';
+  for (const dir of (process.env.PATH || '').split(platform() === 'win32' ? ';' : ':')) {
+    if (!dir) continue;
+    const candidate = join(dir, exe);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+async function ensureGh({ force = false, quiet = false } = {}) {
+  if (!force) {
+    const onPath = ghOnPath();
+    if (onPath) return onPath;
+    if (existsSync(ghRuntimeBin)) return ghRuntimeBin;
+  }
+  return downloadGh(quiet);
+}
+
+async function ghSetup() {
+  const force = args.includes('--force');
+  const bin = await ensureGh({ force });
+  const version = (await runCapture(bin, ['--version'], process.env)).split('\n')[0].trim();
+  process.stdout.write(`${bin}\n${version}\n`);
+}
+
+async function downloadGh(quiet) {
+  const os = platform();
+  const cpu = { x64: 'amd64', arm64: 'arm64' }[arch()];
+  if (!cpu || !['linux', 'darwin'].includes(os)) {
+    throw new Error(`gh is not on PATH and auto-download is unsupported on ${os}/${arch()}; install GitHub CLI manually: https://cli.github.com`);
+  }
+  const ext = os === 'darwin' ? 'zip' : 'tar.gz';
+  const dirName = `gh_${GH_VERSION}_${os === 'darwin' ? 'macOS' : 'linux'}_${cpu}`;
+  const asset = `${dirName}.${ext}`;
+  const direct = `https://github.com/cli/cli/releases/download/v${GH_VERSION}/${asset}`;
+  const sources = [direct, `https://ghproxy.net/${direct}`, `https://gh-proxy.com/${direct}`];
+  const tmp = mkdtempSync(join(tmpdir(), 'cicy-gh-'));
+  const archive = join(tmp, asset);
+  const log = (m) => { if (!quiet) process.stderr.write(`github: ${m}\n`); };
+  // Each source gets a time budget; a slow/stalled one falls through to the next mirror.
+  // The last mirror gets a generous budget so a slow-but-working link still completes.
+  const budgets = [90000, 120000, 600000];
+  let ok = false, lastError = '';
+  for (let i = 0; i < sources.length; i++) {
+    const url = sources[i];
+    log(`downloading gh ${GH_VERSION} from ${url}`);
+    try {
+      await downloadToFile(url, archive, budgets[i] ?? 600000);
+      ok = true; break;
+    } catch (e) { lastError = e?.message || String(e); log(`source failed (${lastError}), trying next`); }
+  }
+  if (!ok) { rmSync(tmp, { recursive: true, force: true }); throw new Error(`could not download gh ${GH_VERSION}: ${lastError}`); }
+  const extracted = join(tmp, dirName, 'bin', 'gh');
+  if (ext === 'zip') await runCapture('unzip', ['-q', archive, '-d', tmp], process.env);
+  else await runCapture('tar', ['xzf', archive, '-C', tmp], process.env);
+  if (!existsSync(extracted)) { rmSync(tmp, { recursive: true, force: true }); throw new Error('gh archive did not contain bin/gh'); }
+  mkdirSync(dirname(ghRuntimeBin), { recursive: true });
+  renameSync(extracted, ghRuntimeBin);
+  chmodSync(ghRuntimeBin, 0o755);
+  rmSync(tmp, { recursive: true, force: true });
+  log(`installed gh ${GH_VERSION} → ${ghRuntimeBin}`);
+  return ghRuntimeBin;
+}
+
+async function downloadToFile(url, dest, budgetMs) {
+  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(budgetMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const out = createWriteStream(dest);
+  try {
+    await pipeline(Readable.fromWeb(res.body), out);
+  } catch (e) {
+    throw new Error(e?.name === 'TimeoutError' || /abort|terminated/i.test(e?.message || '') ? `timed out after ${Math.round(budgetMs / 1000)}s` : e?.message || String(e));
+  }
 }
 
 async function configureRepository(directory, account) {
