@@ -94,6 +94,11 @@
       "description": "Per-cell helper agents known to the panel"
     },
     {
+      "name": "cells",
+      "example": "telegram-matrix cells --json",
+      "description": "Map every open profile to its Telegram Web webContentsId (with load state); use the id with agent-electron tab:<id> or eval/url/snapshot/cdp <idx>"
+    },
+    {
       "name": "select",
       "example": "telegram-matrix select 2",
       "description": "Open the profile in the panel preview (creates its Telegram Web cell)"

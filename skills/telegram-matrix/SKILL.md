@@ -39,6 +39,7 @@ telegram-matrix --help
 | `probe-ip` | `telegram-matrix probe-ip 2` | Egress IP + region through the profile's proxy |
 | `states` | `telegram-matrix states --json` | Load state of every open cell (loaded / failed + error) |
 | `agents` | `telegram-matrix agents --json` | Per-cell helper agents known to the panel |
+| `cells` | `telegram-matrix cells --json` | Map every open profile to its Telegram Web webContentsId + load state |
 | `select` | `telegram-matrix select 2` | Open the profile in the panel preview (creates its Telegram Web cell) |
 | `reload` | `telegram-matrix reload 2` | Reload the profile's cell |
 | `cell` | `telegram-matrix cell 2` | Find (opening if needed) the cell's webContentsId |

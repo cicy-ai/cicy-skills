@@ -50,6 +50,7 @@ Profiles (accountIdx = profile id = session persist:sandbox-N)
   telegram-matrix agents                       panel's agent list (per-cell helper agents)
 
 Cells (the Telegram Web view of one profile)
+  telegram-matrix cells [--json]               every profile <-> its webContentsId (open cells only) + load state
   telegram-matrix select <idx>                 open the profile in the panel preview (creates the cell)
   telegram-matrix reload <idx>                 reload the profile's cell
   telegram-matrix cell <idx>                   find the cell's webContentsId (opens it if needed)
@@ -147,6 +148,12 @@ try {
     case 'probe-ip': { const i = idxOf(rest[0]); print(panelCall('probeIp', i)); break; }
     case 'states': print(panelCall('states')); break;
     case 'agents': print(panelCall('agents')); break;
+    case 'cells': {
+      const states = panelCall('states');
+      const list = states.map((s) => { const m = /^telegram-preview-(\d+)$/.exec(s.id || ''); return { accountIdx: m ? Number(m[1]) : null, webContentsId: s.wcId, url: s.url, title: s.title, loading: !!s.loading, failed: !!s.failed, error: (s.error && (s.error.description || s.error.code)) || '' }; }).filter((c) => c.accountIdx);
+      if (json) print(list); else if (!list.length) print('no open cells (use select <idx>)'); else for (const c of list) print(`#${c.accountIdx} wc=${c.webContentsId} ${c.failed ? 'FAILED' : c.loading ? 'loading' : 'loaded'} ${c.url}${c.error ? ' - ' + c.error : ''}`);
+      break;
+    }
     case 'select': { const i = idxOf(rest[0]); const c = ensureCell(i); print(json ? c : `profile #${i} selected, cell webContentsId=${c.webContentsId}`); break; }
     case 'reload': { const i = idxOf(rest[0]); const c = findCell(i); if (!c) fail(`profile #${i} has no open cell (use select first)`); electron(['cdp', `tab:${c.webContentsId}`, 'Page.reload', '{}']); print('reloading'); break; }
     case 'cell': { const i = idxOf(rest[0]); const c = ensureCell(i); print(json ? c : `${c.webContentsId} ${c.url}`); break; }
