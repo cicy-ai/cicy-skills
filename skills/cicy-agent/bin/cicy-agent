@@ -795,7 +795,9 @@ async function cmdCloud(args) {
   const loadDirectory = loadCloudDirectory;
 
   const isOnline = (instance) => {
-    const seen = Date.parse(String(instance.lastSeenAt || '').replace(' ', 'T') + 'Z');
+    // cloud: "YYYY-MM-DD HH:MM:SS" (UTC, no zone); hub: RFC3339 with Z — don't double the Z
+    const raw = String(instance.lastSeenAt || '').trim();
+    const seen = Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z');
     return instance.status === 'online' && Number.isFinite(seen) && Date.now() - seen < 90000;
   };
 
@@ -878,7 +880,9 @@ async function cmdCloud(args) {
 
 async function loadCloudDirectory() {
   const [instanceData, agentData] = await Promise.all([
-    cloudAPI('GET', '/api/code/instances'), cloudAPI('GET', '/api/code/agents'),
+    // via the local cicy-code, which proxies to whichever control plane this
+    // instance is signed in to (cicy-cloud worker or CiCy Hub); the hub has no /api/code/*
+    api('GET', '/api/im/cicy-cloud/instances'), api('GET', '/api/im/cicy-cloud/agents'),
   ]);
   return { instances: instanceData.instances || [], agents: agentData.agents || [] };
 }

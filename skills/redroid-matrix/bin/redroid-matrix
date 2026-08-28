@@ -1,0 +1,138 @@
+#!/usr/bin/env node
+// redroid-matrix — open and control the cicy-desktop "Redroid 矩阵" panel:
+// docker+adb driven Android (redroid) devices running in the host's WSL.
+//
+// Transport: the panel page exposes `window.redroidAPI` (list/create/start/
+// stop/restart/remove/screenshot/input/proxy/probe-ip/frida/apps/launch/
+// uninstall/shell). We call it with CDP Runtime.evaluate on the panel tab via
+// the public `agent-electron` / `agent-desktop` skills. Zero deps, ESM, Node 18+.
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+
+const PRESET = 'redroid-matrix';
+process.stdout.on('error', (e) => { if (e && e.code === 'EPIPE') process.exit(0); });
+const argv = process.argv.slice(2);
+
+let clientID = '';
+let json = false;
+let yes = false;
+let out = '';
+const opts = {};
+const args = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--client' || a === '-c') { clientID = argv[++i] || ''; continue; }
+  if (a === '--json') { json = true; continue; }
+  if (a === '--yes' || a === '-y') { yes = true; continue; }
+  if (a === '--out') { out = argv[++i] || ''; continue; }
+  if (a === '--purge') { opts.purge = true; continue; }
+  if (a.startsWith('--') && i + 1 < argv.length && !argv[i + 1].startsWith('--')) { opts[a.slice(2)] = argv[++i]; continue; }
+  args.push(a);
+}
+const cmd = args[0];
+const rest = args.slice(1);
+
+function help() {
+  process.stdout.write(`redroid-matrix — control the cicy-desktop Redroid 矩阵 panel (Android devices in WSL docker)
+
+Panel
+  redroid-matrix open                          open (or find) the Redroid 矩阵 panel tab → webContentsId
+  redroid-matrix close                         close the panel tab
+  redroid-matrix defaults                      images / default spec / proxy hint / frida server path
+  redroid-matrix panel-eval <js>               run JS in the panel page (window.redroidAPI available)
+
+Devices (name = the device name shown in the panel)
+  redroid-matrix list [--json]                 all devices: state, port, version, proxy, IP grade
+  redroid-matrix create --name N [--version 11|13|14] [--width 720] [--height 1280] [--dpi 320] [--proxy host:port]
+  redroid-matrix start <name> | stop <name> | restart <name>
+  redroid-matrix remove <name> --yes [--purge] delete the container (--purge also deletes its data dir)
+  redroid-matrix screenshot <name> --out p.png PNG screenshot of the Android screen
+  redroid-matrix tap <name> <x> <y>
+  redroid-matrix swipe <name> <x1> <y1> <x2> <y2> [ms]
+  redroid-matrix key <name> <KEY|code>         e.g. HOME BACK ENTER 3
+  redroid-matrix text <name> <ascii text>
+  redroid-matrix set-proxy <name> <host:port|"">  device-wide proxy (mihomo listener etc.)
+  redroid-matrix probe-ip <name>               egress IP, region, cleanliness grade (A-D)
+  redroid-matrix frida <name> on|off           start/stop frida-server on the device
+  redroid-matrix apps <name>                   installed packages
+  redroid-matrix launch <name> <pkg>
+  redroid-matrix uninstall <name> <pkg>
+  redroid-matrix install <name>                pick APK/XAPK files on the host (native file dialog)
+  redroid-matrix shell <name> <cmd...>         adb shell
+
+Options
+  --client <id>   target a specific cicy-desktop client
+  --json          machine-readable output
+  --yes           confirm destructive actions (remove)
+`);
+}
+
+function fail(msg, code = 2) { process.stderr.write(`redroid-matrix: ${msg}\n`); process.exit(code); }
+function print(v) { process.stdout.write((json || typeof v !== 'string' ? JSON.stringify(v, null, json ? 0 : 2) : v) + '\n'); }
+function run(bin, a) {
+  const full = clientID ? ['--client', clientID, ...a] : a;
+  try { return execFileSync(bin, full, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (e) { throw new Error(`${bin} ${a[0]} failed: ${(e.stderr || e.stdout || e.message || '').toString().trim().slice(0, 400)}`); }
+}
+const electron = (a) => run('agent-electron', a);
+function rpc(tool, params) { const t = run('agent-desktop', ['rpc', tool, JSON.stringify(params), '--json']); try { return JSON.parse(t); } catch { return t; } }
+function webcontents() { const arr = JSON.parse(electron(['webcontents', '--json'])); return Array.isArray(arr) ? arr : (arr.data || arr.result || []); }
+function findPanel() { return webcontents().find((w) => /^cicyui:\/\/panel\//.test(w.url || '') && (w.url || '').includes(`preset=${PRESET}`)) || null; }
+function sleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function ensurePanel() {
+  let p = findPanel();
+  if (p) return p;
+  rpc('electron_tab_open', { accountIdx: 0, url: `cicyui://panel/${Math.random().toString(36).slice(2, 10)}?preset=${PRESET}`, trusted: true, activate: false });
+  for (let i = 0; i < 20 && !p; i++) { sleep(500); p = findPanel(); }
+  if (!p) throw new Error('panel tab did not appear');
+  sleep(1500);
+  return p;
+}
+function cdpEval(wc, expression) {
+  const txt = electron(['cdp', `tab:${wc}`, 'Runtime.evaluate', JSON.stringify({ expression, awaitPromise: true, returnByValue: true })]);
+  let obj; try { obj = JSON.parse(txt); } catch { throw new Error(`bad cdp reply: ${txt.slice(0, 200)}`); }
+  if (obj.result && obj.result.exceptionDetails) throw new Error(`page threw: ${JSON.stringify(obj.result.exceptionDetails).slice(0, 300)}`);
+  const r = obj.result && obj.result.result ? obj.result.result : (obj.result || obj);
+  return r && 'value' in r ? r.value : r;
+}
+function api(fn, ...a) {
+  const p = ensurePanel();
+  const expr = `Promise.resolve(window.redroidAPI.${fn}(${a.map((x) => JSON.stringify(x)).join(',')})).then(r=>JSON.stringify(r===undefined?null:r)).catch(e=>JSON.stringify({error:String(e&&e.message||e)}))`;
+  const v = cdpEval(p.webContentsId, expr);
+  let r; try { r = JSON.parse(v); } catch { return v; }
+  if (r && r.error) throw new Error(r.error);
+  return r;
+}
+const need = (v, what) => { if (!v) fail(`missing ${what} (see --help)`); return v; };
+
+try {
+  switch (cmd) {
+    case undefined: case '--help': case '-h': case 'help': help(); break;
+    case 'open': { const p = ensurePanel(); print(json ? { webContentsId: p.webContentsId, url: p.url } : `panel webContentsId=${p.webContentsId}`); break; }
+    case 'close': { const p = findPanel(); if (!p) { print('panel not open'); break; } electron(['close', `tab:${p.webContentsId}`]); print('closed'); break; }
+    case 'panel-eval': { const p = ensurePanel(); print(cdpEval(p.webContentsId, need(rest.join(' '), '<js>'))); break; }
+    case 'defaults': print(api('defaults')); break;
+    case 'list': { const l = api('list'); if (json) print(l); else for (const d of l) print(`${d.name} ${d.state} port=${d.port} android=${d.version} proxy=${(d.info && d.info.proxy) || '-'} ip=${(d.info && d.info.ip) || '-'}${d.info && d.info.grade ? ' grade=' + d.info.grade : ''}`); break; }
+    case 'create': { const spec = { name: need(opts.name, '--name'), version: opts.version, width: opts.width, height: opts.height, dpi: opts.dpi, proxy: opts.proxy }; print(api('create', spec)); break; }
+    case 'start': print(api('start', need(rest[0], '<name>'))); break;
+    case 'stop': print(api('stop', need(rest[0], '<name>'))); break;
+    case 'restart': print(api('restart', need(rest[0], '<name>'))); break;
+    case 'remove': { need(rest[0], '<name>'); if (!yes) fail('remove deletes the device container; add --yes (and --purge to delete its data too)', 3); print(api('remove', rest[0], !!opts.purge)); break; }
+    case 'screenshot': { const d = api('screenshot', need(rest[0], '<name>')); const b64 = String(d).replace(/^data:image\/png;base64,/, ''); if (out) { writeFileSync(out, Buffer.from(b64, 'base64')); print(`saved ${out}`); } else print(json ? { dataUrl: d } : `png base64 (${b64.length} chars); use --out file.png`); break; }
+    case 'tap': print(api('input', need(rest[0], '<name>'), { type: 'tap', x: Number(rest[1]), y: Number(rest[2]) })); break;
+    case 'swipe': print(api('input', need(rest[0], '<name>'), { type: 'swipe', x1: Number(rest[1]), y1: Number(rest[2]), x2: Number(rest[3]), y2: Number(rest[4]), ms: Number(rest[5] || 200) })); break;
+    case 'key': print(api('input', need(rest[0], '<name>'), { type: 'key', key: need(rest[1], '<KEY>') })); break;
+    case 'text': print(api('input', need(rest[0], '<name>'), { type: 'text', text: need(rest.slice(1).join(' '), '<text>') })); break;
+    case 'set-proxy': { need(rest[0], '<name>'); if (rest.length < 2) fail('usage: set-proxy <name> <host:port|"">'); print(api('setProxy', rest[0], rest[1] || '')); break; }
+    case 'probe-ip': print(api('probeIp', need(rest[0], '<name>'))); break;
+    case 'frida': print(api('frida', need(rest[0], '<name>'), /^(on|1|true)$/i.test(rest[1] || ''))); break;
+    case 'apps': print(api('apps', need(rest[0], '<name>'))); break;
+    case 'launch': print(api('launch', need(rest[0], '<name>'), need(rest[1], '<pkg>'))); break;
+    case 'uninstall': print(api('uninstall', need(rest[0], '<name>'), need(rest[1], '<pkg>'))); break;
+    case 'install': print(api('install', need(rest[0], '<name>'))); break;
+    case 'shell': print(api('shell', need(rest[0], '<name>'), need(rest.slice(1).join(' '), '<cmd>'))); break;
+    default: fail(`unknown command '${cmd}' (see --help)`);
+  }
+} catch (e) {
+  fail(e.message, 4);
+}

@@ -1,0 +1,147 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "telegram-matrix",
+  "version": "0.1.0",
+  "title": "Telegram Matrix",
+  "description": "Use when controlling the cicy-desktop Telegram 矩阵 panel: manage Telegram profiles (add/remove/proxy/IP probe) and drive each profile's Telegram Web view (select, reload, eval, snapshot, CDP).",
+  "category": "agent",
+  "tags": [
+    "telegram",
+    "cicy-desktop",
+    "matrix",
+    "electron",
+    "profile",
+    "proxy"
+  ],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "agent-electron",
+    "agent-desktop"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/telegram-matrix",
+  "permissions": [
+    "network"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/telegram-matrix",
+  "i18n": {
+    "zh-CN": {
+      "title": "Telegram 矩阵",
+      "description": "打开并控制 cicy-desktop 的「Telegram 矩阵」面板：列出/新增/删除 Telegram profile，设代理与备注，探测出口 IP，并按 profile 控制每个 Telegram Web 视图（选中、重载、执行 JS、快照、截图、CDP）。"
+    }
+  },
+  "tools": [
+    {
+      "name": "open",
+      "example": "telegram-matrix open",
+      "description": "Open (or find) the Telegram 矩阵 panel tab in profile 0; prints its webContentsId"
+    },
+    {
+      "name": "close",
+      "example": "telegram-matrix close",
+      "description": "Close the panel tab"
+    },
+    {
+      "name": "profiles",
+      "example": "telegram-matrix profiles --json",
+      "description": "List profiles: accountIdx, name, proxy, note, Telegram @username, last egress IP"
+    },
+    {
+      "name": "add-profile",
+      "example": "telegram-matrix add-profile",
+      "description": "Create the next profile (persist:sandbox-N) with the default proxy"
+    },
+    {
+      "name": "remove-profile",
+      "example": "telegram-matrix remove-profile 3 --yes",
+      "description": "Delete a profile and its session data — irreversible, needs --yes"
+    },
+    {
+      "name": "set-proxy",
+      "example": "telegram-matrix set-proxy 2 http://127.0.0.1:20002",
+      "description": "Set (or clear with \"\") the proxy of a profile; an open cell reloads"
+    },
+    {
+      "name": "probe-ip",
+      "example": "telegram-matrix probe-ip 2",
+      "description": "Egress IP + region through the profile's proxy"
+    },
+    {
+      "name": "states",
+      "example": "telegram-matrix states --json",
+      "description": "Load state of every open cell (loaded / failed + error)"
+    },
+    {
+      "name": "agents",
+      "example": "telegram-matrix agents --json",
+      "description": "Per-cell helper agents known to the panel"
+    },
+    {
+      "name": "cells",
+      "example": "telegram-matrix cells --json",
+      "description": "Map every open profile to its Telegram Web webContentsId (with load state); use the id with agent-electron tab:<id> or eval/url/snapshot/cdp <idx>"
+    },
+    {
+      "name": "select",
+      "example": "telegram-matrix select 2",
+      "description": "Open the profile in the panel preview (creates its Telegram Web cell)"
+    },
+    {
+      "name": "reload",
+      "example": "telegram-matrix reload 2",
+      "description": "Reload the profile's cell"
+    },
+    {
+      "name": "cell",
+      "example": "telegram-matrix cell 2",
+      "description": "Find (opening if needed) the cell's webContentsId"
+    },
+    {
+      "name": "eval",
+      "example": "telegram-matrix eval 2 \"document.title\"",
+      "description": "Run JS inside the profile's Telegram Web page"
+    },
+    {
+      "name": "url",
+      "example": "telegram-matrix url 2 https://web.telegram.org/k/#@durov",
+      "description": "Navigate the cell"
+    },
+    {
+      "name": "snapshot",
+      "example": "telegram-matrix snapshot 2",
+      "description": "DOM snapshot of the cell — the default way to inspect state"
+    },
+    {
+      "name": "screenshot",
+      "example": "telegram-matrix screenshot 2 --out shot.png",
+      "description": "Screenshot the cell (only with explicit user permission)"
+    },
+    {
+      "name": "cdp",
+      "example": "telegram-matrix cdp 2 Page.reload \"{}\"",
+      "description": "Raw CDP on the cell"
+    },
+    {
+      "name": "panel-eval",
+      "example": "telegram-matrix panel-eval \"window.panelAPI.profiles()\"",
+      "description": "Run JS in the panel page itself"
+    }
+  ]
+}
