@@ -1,0 +1,168 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "redroid-matrix",
+  "version": "0.1.0",
+  "title": "Redroid Matrix",
+  "description": "Use when controlling the cicy-desktop Redroid 矩阵 panel: create/start/stop/remove redroid Android devices, screenshot, tap/swipe/key/text, proxy, IP grade, frida, apps, adb shell.",
+  "category": "agent",
+  "tags": [
+    "redroid",
+    "android",
+    "cicy-desktop",
+    "matrix",
+    "adb",
+    "docker",
+    "wsl"
+  ],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "agent-electron",
+    "agent-desktop"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/redroid-matrix",
+  "permissions": [
+    "network"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/redroid-matrix",
+  "i18n": {
+    "zh-CN": {
+      "title": "Redroid 矩阵",
+      "description": "打开并控制 cicy-desktop 的「Redroid 矩阵」面板：列出/创建/启动/停止/删除 redroid 安卓设备，截图与点按/滑动/按键/输入，设代理，探测 IP 纯净度，frida，安装/启动应用，adb shell。"
+    }
+  },
+  "tools": [
+    {
+      "name": "open",
+      "example": "redroid-matrix open",
+      "description": "Open (or find) the Redroid 矩阵 panel tab; prints its webContentsId"
+    },
+    {
+      "name": "close",
+      "example": "redroid-matrix close",
+      "description": "Close the panel tab"
+    },
+    {
+      "name": "defaults",
+      "example": "redroid-matrix defaults --json",
+      "description": "Available images, default spec, proxy hint, frida-server path"
+    },
+    {
+      "name": "list",
+      "example": "redroid-matrix list --json",
+      "description": "All devices with state, adb port, Android version, proxy, IP grade"
+    },
+    {
+      "name": "create",
+      "example": "redroid-matrix create --name phone2 --version 13 --width 720 --height 1280 --dpi 320 --proxy 172.18.0.2:20011",
+      "description": "Create and boot a new device (docker run in WSL)"
+    },
+    {
+      "name": "start",
+      "example": "redroid-matrix start phone2",
+      "description": "Start a stopped device"
+    },
+    {
+      "name": "stop",
+      "example": "redroid-matrix stop phone2",
+      "description": "Stop a device"
+    },
+    {
+      "name": "restart",
+      "example": "redroid-matrix restart phone2",
+      "description": "Restart a device"
+    },
+    {
+      "name": "remove",
+      "example": "redroid-matrix remove phone2 --yes --purge",
+      "description": "Delete the container (needs --yes; --purge also deletes its data dir)"
+    },
+    {
+      "name": "screenshot",
+      "example": "redroid-matrix screenshot phone2 --out shot.png",
+      "description": "PNG of the Android screen (adb screencap)"
+    },
+    {
+      "name": "tap",
+      "example": "redroid-matrix tap phone2 360 640",
+      "description": "Tap at x,y"
+    },
+    {
+      "name": "swipe",
+      "example": "redroid-matrix swipe phone2 360 1000 360 300 250",
+      "description": "Swipe x1,y1 → x2,y2 in ms"
+    },
+    {
+      "name": "key",
+      "example": "redroid-matrix key phone2 HOME",
+      "description": "Key event by AOSP name or code (HOME, BACK, ENTER, 3 …)"
+    },
+    {
+      "name": "text",
+      "example": "redroid-matrix text phone2 hello world",
+      "description": "Type ASCII text"
+    },
+    {
+      "name": "set-proxy",
+      "example": "redroid-matrix set-proxy phone2 172.18.0.2:20012",
+      "description": "Device-wide proxy (empty string clears)"
+    },
+    {
+      "name": "probe-ip",
+      "example": "redroid-matrix probe-ip phone2",
+      "description": "Egress IP, region and cleanliness grade A–D"
+    },
+    {
+      "name": "frida",
+      "example": "redroid-matrix frida phone2 on",
+      "description": "Start/stop frida-server on the device"
+    },
+    {
+      "name": "apps",
+      "example": "redroid-matrix apps phone2",
+      "description": "Installed packages"
+    },
+    {
+      "name": "launch",
+      "example": "redroid-matrix launch phone2 org.telegram.messenger",
+      "description": "Launch an app by package"
+    },
+    {
+      "name": "uninstall",
+      "example": "redroid-matrix uninstall phone2 org.telegram.messenger",
+      "description": "Uninstall a package"
+    },
+    {
+      "name": "install",
+      "example": "redroid-matrix install phone2",
+      "description": "Pick APK/XAPK files via the host's native file dialog and install them"
+    },
+    {
+      "name": "shell",
+      "example": "redroid-matrix shell phone2 getprop ro.build.version.release",
+      "description": "adb shell command"
+    },
+    {
+      "name": "panel-eval",
+      "example": "redroid-matrix panel-eval \"window.redroidAPI.list()\"",
+      "description": "Run JS in the panel page itself"
+    }
+  ]
+}
