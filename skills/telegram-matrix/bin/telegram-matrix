@@ -141,7 +141,7 @@ try {
     case 'open': { const p = ensurePanel(); print(json ? { webContentsId: p.webContentsId, url: p.url } : `panel webContentsId=${p.webContentsId}`); break; }
     case 'close': { const p = findPanel(); if (!p) { print('panel not open'); break; } electron(['close', `tab:${p.webContentsId}`]); print('closed'); break; }
     case 'panel-eval': { if (!rest[0]) fail('usage: panel-eval <js>'); const p = ensurePanel(); print(cdpEval(p.webContentsId, rest.join(' '))); break; }
-    case 'profiles': { const list = panelCall('profiles'); if (json) print(list); else for (const p of list) print(`#${p.accountIdx} ${p.name} proxy=${p.proxy || '-'} tg=${p.telegram && p.telegram.username ? '@' + p.telegram.username : '-'} ip=${p.ipInfo && p.ipInfo.ip ? p.ipInfo.ip + ' ' + (p.ipInfo.area || '') : '-'} note=${p.note || ''}`); break; }
+    case 'profiles': { const list = panelCall('profiles'); if (json) print(list); else for (const p of list) { const t = p.telegram || null; const tg = t && (t.username || t.displayName) ? (t.username ? '@' + t.username : '') + (t.displayName ? (t.username ? ' · ' : '') + t.displayName : '') : '未登录'; print(`#${p.accountIdx} ${p.name} proxy=${p.proxy || '-'} tg=${tg} ip=${p.ipInfo && p.ipInfo.ip ? p.ipInfo.ip + ' ' + (p.ipInfo.area || '') : '-'} note=${p.note || ''}`); } break; }
     case 'add-profile': print(panelCall('addProfile')); break;
     case 'remove-profile': { const i = idxOf(rest[0]); if (!yes) fail('remove-profile deletes the profile and its Telegram session; add --yes to confirm', 3); print(panelCall('removeProfile', i)); break; }
     case 'set-proxy': { const i = idxOf(rest[0]); if (rest.length < 2) fail('usage: set-proxy <idx> <url|"">'); print(panelCall('setProfileProxy', i, rest[1] || '')); break; }
