@@ -1,0 +1,169 @@
+#!/usr/bin/env node
+// facebook-matrix — open and control the cicy-desktop "Facebook 矩阵" panel and
+// every Facebook profile (Electron sandbox session) it manages.
+//
+// Transport: everything goes through the public `agent-electron` / `agent-desktop`
+// skills (desktop_event RPC). The panel page exposes `window.panelAPI` (profiles,
+// add/remove, proxy, note, IP probe, cell states); we call it with CDP
+// Runtime.evaluate on the panel tab. Each profile's Facebook view is a
+// BrowserView (`persist:sandbox-<N>`) — addressed by accountIdx.
+//
+// Zero deps, pure ESM, Node 18+.
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+
+const PRESET = 'facebook-matrix';
+process.stdout.on('error', (e) => { if (e && e.code === 'EPIPE') process.exit(0); });
+const argv = process.argv.slice(2);
+
+let clientID = '';
+let json = false;
+let yes = false;
+let out = '';
+const args = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--client' || a === '-c') { clientID = argv[++i] || ''; continue; }
+  if (a === '--json') { json = true; continue; }
+  if (a === '--yes' || a === '-y') { yes = true; continue; }
+  if (a === '--out') { out = argv[++i] || ''; continue; }
+  args.push(a);
+}
+const cmd = args[0];
+const rest = args.slice(1);
+
+function help() {
+  process.stdout.write(`facebook-matrix — control the cicy-desktop Facebook 矩阵 panel + its profiles
+
+Panel
+  facebook-matrix open                         open (or find) the Facebook 矩阵 panel tab → webContentsId
+  facebook-matrix close                        close the panel tab
+  facebook-matrix panel-eval <js>              run JS in the panel page (window.panelAPI available)
+
+Profiles (accountIdx = profile id = session persist:sandbox-N)
+  facebook-matrix profiles [--json]            list profiles: name, proxy, note, account name, ipInfo
+  facebook-matrix add-profile                  create the next profile (default proxy http://127.0.0.1:20001)
+  facebook-matrix remove-profile <idx> --yes   delete a profile + its session data (irreversible)
+  facebook-matrix set-proxy <idx> <url|"">     set/clear the profile proxy (open cell reloads)
+  facebook-matrix probe-ip <idx>               egress IP + region through the profile's proxy
+  facebook-matrix states                       load state of every open cell (loaded/failed/error)
+  facebook-matrix agents                       panel's agent list (per-cell helper agents)
+
+Cells (the Facebook view of one profile)
+  facebook-matrix cells [--json]               every profile <-> its webContentsId (open cells only) + load state
+  facebook-matrix select <idx>                 open the profile in the panel preview (creates the cell)
+  facebook-matrix reload <idx>                 reload the profile's cell
+  facebook-matrix cell <idx>                   find the cell's webContentsId (opens it if needed)
+  facebook-matrix eval <idx> <js>              run JS inside the profile's Facebook page
+  facebook-matrix url <idx> <url>              navigate the cell (e.g. https://web.facebook.com/k/#@user)
+  facebook-matrix snapshot <idx>               DOM snapshot of the cell (default way to inspect)
+  facebook-matrix screenshot <idx> --out p.png screenshot the cell (only with explicit user permission)
+  facebook-matrix cdp <idx> <method> [json]    raw CDP on the cell
+
+Options
+  --client <id>   target a specific cicy-desktop client (when several are connected)
+  --json          machine-readable output
+  --yes           confirm destructive actions (remove-profile)
+
+Notes
+- Never print or export auth keys / session storage of a Facebook profile.
+- Cells stay alive in the background once opened; select only switches the preview.
+`);
+}
+
+function fail(msg, code = 2) { process.stderr.write(`facebook-matrix: ${msg}\n`); process.exit(code); }
+function print(v) { process.stdout.write((json || typeof v !== 'string' ? JSON.stringify(v, null, json ? 0 : 2) : v) + '\n'); }
+
+function run(bin, a) {
+  const full = clientID ? ['--client', clientID, ...a] : a;
+  try { return execFileSync(bin, full, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (e) { throw new Error(`${bin} ${a[0]} failed: ${(e.stderr || e.stdout || e.message || '').toString().trim().slice(0, 400)}`); }
+}
+const electron = (a) => run('agent-electron', a);
+function rpc(tool, params) {
+  const txt = run('agent-desktop', ['rpc', tool, JSON.stringify(params), '--json']);
+  try { return JSON.parse(txt); } catch { return txt; }
+}
+function webcontents() {
+  const txt = electron(['webcontents', '--json']);
+  const arr = JSON.parse(txt);
+  return Array.isArray(arr) ? arr : (arr.data || arr.result || []);
+}
+function findPanel() {
+  return webcontents().find((w) => /^cicyui:\/\/panel\//.test(w.url || '') && (w.url || '').includes(`preset=${PRESET}`)) || null;
+}
+function ensurePanel() {
+  let p = findPanel();
+  if (p) return p;
+  rpc('electron_tab_open', { accountIdx: 0, url: `cicyui://panel/${Math.random().toString(36).slice(2, 10)}?preset=${PRESET}`, trusted: true, activate: false });
+  for (let i = 0; i < 20 && !p; i++) { sleep(500); p = findPanel(); }
+  if (!p) throw new Error('panel tab did not appear');
+  sleep(1500); // let the page boot + load profiles
+  return p;
+}
+function sleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function cdpEval(wc, expression, awaitPromise = true) {
+  const txt = electron(['cdp', `tab:${wc}`, 'Runtime.evaluate', JSON.stringify({ expression, awaitPromise, returnByValue: true })]);
+  let obj; try { obj = JSON.parse(txt); } catch { throw new Error(`bad cdp reply: ${txt.slice(0, 200)}`); }
+  const r = obj.result && obj.result.result ? obj.result.result : (obj.result || obj);
+  if (obj.result && obj.result.exceptionDetails) throw new Error(`page threw: ${JSON.stringify(obj.result.exceptionDetails).slice(0, 300)}`);
+  return r && 'value' in r ? r.value : r;
+}
+// Call window.panelAPI.<fn>(...args) in the panel page and return the JSON result.
+function panelCall(fn, ...a) {
+  const p = ensurePanel();
+  const expr = `Promise.resolve(window.panelAPI.${fn}(${a.map((x) => JSON.stringify(x)).join(',')})).then(r=>JSON.stringify(r===undefined?null:r))`;
+  const v = cdpEval(p.webContentsId, expr);
+  try { return JSON.parse(v); } catch { return v; }
+}
+const idxOf = (s) => { const n = Number(s); if (!Number.isInteger(n) || n < 1) fail(`profile index must be a positive integer, got ${s}`); return n; };
+function findCell(idx) {
+  return webcontents().find((w) => Number(w.profileId) === idx && /facebook\.com/.test(w.url || '') && w.type !== 'window') || null;
+}
+function selectProfile(idx) {
+  const p = ensurePanel();
+  const ok = cdpEval(p.webContentsId, `(()=>{const r=document.querySelector('.row[data-id="${idx}"]'); if(!r) return false; r.click(); return true;})()`, false);
+  if (!ok) throw new Error(`profile #${idx} not in the panel list`);
+  return p;
+}
+function ensureCell(idx) {
+  let c = findCell(idx);
+  if (c) return c;
+  selectProfile(idx);
+  for (let i = 0; i < 40 && !c; i++) { sleep(500); c = findCell(idx); }
+  if (!c) throw new Error(`cell for profile #${idx} did not appear`);
+  return c;
+}
+
+try {
+  switch (cmd) {
+    case undefined: case '--help': case '-h': case 'help': help(); break;
+    case 'open': { const p = ensurePanel(); print(json ? { webContentsId: p.webContentsId, url: p.url } : `panel webContentsId=${p.webContentsId}`); break; }
+    case 'close': { const p = findPanel(); if (!p) { print('panel not open'); break; } electron(['close', `tab:${p.webContentsId}`]); print('closed'); break; }
+    case 'panel-eval': { if (!rest[0]) fail('usage: panel-eval <js>'); const p = ensurePanel(); print(cdpEval(p.webContentsId, rest.join(' '))); break; }
+    case 'profiles': { const list = panelCall('profiles'); if (json) print(list); else for (const p of list) { const t = p.facebook || null; const tg = t && (t.displayName || t.id) ? (t.displayName || '') + (t.id ? ' (' + t.id + ')' : '') : '未登录'; print(`#${p.accountIdx} ${p.name} proxy=${p.proxy || '-'} fb=${tg} ip=${p.ipInfo && p.ipInfo.ip ? p.ipInfo.ip + ' ' + (p.ipInfo.area || '') : '-'} `); } break; }
+    case 'add-profile': print(panelCall('addProfile')); break;
+    case 'remove-profile': { const i = idxOf(rest[0]); if (!yes) fail('remove-profile deletes the profile and its Facebook session; add --yes to confirm', 3); print(panelCall('removeProfile', i)); break; }
+    case 'set-proxy': { const i = idxOf(rest[0]); if (rest.length < 2) fail('usage: set-proxy <idx> <url|"">'); print(panelCall('setProfileProxy', i, rest[1] || '')); break; }
+    case 'probe-ip': { const i = idxOf(rest[0]); print(panelCall('probeIp', i)); break; }
+    case 'states': print(panelCall('states')); break;
+    case 'agents': print(panelCall('agents')); break;
+    case 'cells': {
+      const states = panelCall('states');
+      const list = states.map((s) => { const m = /^facebook-preview-(\d+)$/.exec(s.id || ''); return { accountIdx: m ? Number(m[1]) : null, webContentsId: s.wcId, url: s.url, title: s.title, loading: !!s.loading, failed: !!s.failed, error: (s.error && (s.error.description || s.error.code)) || '' }; }).filter((c) => c.accountIdx);
+      if (json) print(list); else if (!list.length) print('no open cells (use select <idx>)'); else for (const c of list) print(`#${c.accountIdx} wc=${c.webContentsId} ${c.failed ? 'FAILED' : c.loading ? 'loading' : 'loaded'} ${c.url}${c.error ? ' - ' + c.error : ''}`);
+      break;
+    }
+    case 'select': { const i = idxOf(rest[0]); const c = ensureCell(i); print(json ? c : `profile #${i} selected, cell webContentsId=${c.webContentsId}`); break; }
+    case 'reload': { const i = idxOf(rest[0]); const c = findCell(i); if (!c) fail(`profile #${i} has no open cell (use select first)`); electron(['cdp', `tab:${c.webContentsId}`, 'Page.reload', '{}']); print('reloading'); break; }
+    case 'cell': { const i = idxOf(rest[0]); const c = ensureCell(i); print(json ? c : `${c.webContentsId} ${c.url}`); break; }
+    case 'eval': { const i = idxOf(rest[0]); if (!rest[1]) fail('usage: eval <idx> <js>'); const c = ensureCell(i); print(cdpEval(c.webContentsId, rest.slice(1).join(' '))); break; }
+    case 'url': { const i = idxOf(rest[0]); if (!rest[1]) fail('usage: url <idx> <url>'); const c = ensureCell(i); electron(['url', `tab:${c.webContentsId}`, rest[1]]); print('navigated'); break; }
+    case 'snapshot': { const i = idxOf(rest[0]); const c = ensureCell(i); process.stdout.write(electron(['snapshot', `tab:${c.webContentsId}`])); break; }
+    case 'screenshot': { const i = idxOf(rest[0]); const c = ensureCell(i); const a = ['screenshot', `tab:${c.webContentsId}`]; if (out) a.push('--out', out); process.stdout.write(electron(a)); break; }
+    case 'cdp': { const i = idxOf(rest[0]); if (!rest[1]) fail('usage: cdp <idx> <method> [json]'); const c = ensureCell(i); const a = ['cdp', `tab:${c.webContentsId}`, rest[1]]; if (rest[2]) a.push(rest[2]); process.stdout.write(electron(a)); break; }
+    default: fail(`unknown command '${cmd}' (see --help)`);
+  }
+} catch (e) {
+  fail(e.message, 4);
+}

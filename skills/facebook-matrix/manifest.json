@@ -1,0 +1,147 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "facebook-matrix",
+  "version": "0.1.0",
+  "title": "Facebook Matrix",
+  "description": "Use when controlling the cicy-desktop Facebook 矩阵 panel: manage Facebook profiles (add/remove/proxy/IP probe) and drive each profile's Facebook web view (select, reload, eval, snapshot, CDP).",
+  "category": "agent",
+  "tags": [
+    "facebook",
+    "cicy-desktop",
+    "matrix",
+    "electron",
+    "profile",
+    "proxy"
+  ],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "agent-electron",
+    "agent-desktop"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/facebook-matrix",
+  "permissions": [
+    "network"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/facebook-matrix",
+  "i18n": {
+    "zh-CN": {
+      "title": "Facebook 矩阵",
+      "description": "打开并控制 cicy-desktop 的「Facebook 矩阵」面板：列出/新增/删除 Facebook profile，设代理，探测出口 IP，并按 profile 控制每个 Facebook 网页视图（选中、重载、执行 JS、快照、截图、CDP）。"
+    }
+  },
+  "tools": [
+    {
+      "name": "open",
+      "example": "facebook-matrix open",
+      "description": "Open (or find) the Facebook 矩阵 panel tab in profile 0; prints its webContentsId"
+    },
+    {
+      "name": "close",
+      "example": "facebook-matrix close",
+      "description": "Close the panel tab"
+    },
+    {
+      "name": "profiles",
+      "example": "facebook-matrix profiles --json",
+      "description": "List profiles: accountIdx, name, proxy, note, Facebook account name, last egress IP"
+    },
+    {
+      "name": "add-profile",
+      "example": "facebook-matrix add-profile",
+      "description": "Create the next profile (persist:sandbox-N) with the default proxy"
+    },
+    {
+      "name": "remove-profile",
+      "example": "facebook-matrix remove-profile 3 --yes",
+      "description": "Delete a profile and its session data — irreversible, needs --yes"
+    },
+    {
+      "name": "set-proxy",
+      "example": "facebook-matrix set-proxy 2 http://127.0.0.1:20002",
+      "description": "Set (or clear with \"\") the proxy of a profile; an open cell reloads"
+    },
+    {
+      "name": "probe-ip",
+      "example": "facebook-matrix probe-ip 2",
+      "description": "Egress IP + region through the profile's proxy"
+    },
+    {
+      "name": "states",
+      "example": "facebook-matrix states --json",
+      "description": "Load state of every open cell (loaded / failed + error)"
+    },
+    {
+      "name": "agents",
+      "example": "facebook-matrix agents --json",
+      "description": "Per-cell helper agents known to the panel"
+    },
+    {
+      "name": "cells",
+      "example": "facebook-matrix cells --json",
+      "description": "Map every open profile to its Facebook webContentsId (with load state); use the id with agent-electron tab:<id> or eval/url/snapshot/cdp <idx>"
+    },
+    {
+      "name": "select",
+      "example": "facebook-matrix select 2",
+      "description": "Open the profile in the panel preview (creates its Facebook cell)"
+    },
+    {
+      "name": "reload",
+      "example": "facebook-matrix reload 2",
+      "description": "Reload the profile's cell"
+    },
+    {
+      "name": "cell",
+      "example": "facebook-matrix cell 2",
+      "description": "Find (opening if needed) the cell's webContentsId"
+    },
+    {
+      "name": "eval",
+      "example": "facebook-matrix eval 2 \"document.title\"",
+      "description": "Run JS inside the profile's Facebook page"
+    },
+    {
+      "name": "url",
+      "example": "facebook-matrix url 2 https://web.facebook.com/k/#@durov",
+      "description": "Navigate the cell"
+    },
+    {
+      "name": "snapshot",
+      "example": "facebook-matrix snapshot 2",
+      "description": "DOM snapshot of the cell — the default way to inspect state"
+    },
+    {
+      "name": "screenshot",
+      "example": "facebook-matrix screenshot 2 --out shot.png",
+      "description": "Screenshot the cell (only with explicit user permission)"
+    },
+    {
+      "name": "cdp",
+      "example": "facebook-matrix cdp 2 Page.reload \"{}\"",
+      "description": "Raw CDP on the cell"
+    },
+    {
+      "name": "panel-eval",
+      "example": "facebook-matrix panel-eval \"window.panelAPI.profiles()\"",
+      "description": "Run JS in the panel page itself"
+    }
+  ]
+}
