@@ -9,7 +9,6 @@
   telegram-matrix add-profile
   telegram-matrix remove-profile 3 --yes
   telegram-matrix set-proxy 2 http://127.0.0.1:20002
-  telegram-matrix set-note 2 主号
   telegram-matrix probe-ip 2
   telegram-matrix states --json
   telegram-matrix agents --json

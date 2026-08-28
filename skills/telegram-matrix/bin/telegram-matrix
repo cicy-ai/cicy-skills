@@ -45,7 +45,6 @@ Profiles (accountIdx = profile id = session persist:sandbox-N)
   telegram-matrix add-profile                  create the next profile (default proxy http://127.0.0.1:20001)
   telegram-matrix remove-profile <idx> --yes   delete a profile + its session data (irreversible)
   telegram-matrix set-proxy <idx> <url|"">     set/clear the profile proxy (open cell reloads)
-  telegram-matrix set-note <idx> <text>        per-profile note
   telegram-matrix probe-ip <idx>               egress IP + region through the profile's proxy
   telegram-matrix states                       load state of every open cell (loaded/failed/error)
   telegram-matrix agents                       panel's agent list (per-cell helper agents)
@@ -141,11 +140,10 @@ try {
     case 'open': { const p = ensurePanel(); print(json ? { webContentsId: p.webContentsId, url: p.url } : `panel webContentsId=${p.webContentsId}`); break; }
     case 'close': { const p = findPanel(); if (!p) { print('panel not open'); break; } electron(['close', `tab:${p.webContentsId}`]); print('closed'); break; }
     case 'panel-eval': { if (!rest[0]) fail('usage: panel-eval <js>'); const p = ensurePanel(); print(cdpEval(p.webContentsId, rest.join(' '))); break; }
-    case 'profiles': { const list = panelCall('profiles'); if (json) print(list); else for (const p of list) { const t = p.telegram || null; const tg = t && (t.username || t.displayName) ? (t.username ? '@' + t.username : '') + (t.displayName ? (t.username ? ' · ' : '') + t.displayName : '') : '未登录'; print(`#${p.accountIdx} ${p.name} proxy=${p.proxy || '-'} tg=${tg} ip=${p.ipInfo && p.ipInfo.ip ? p.ipInfo.ip + ' ' + (p.ipInfo.area || '') : '-'} note=${p.note || ''}`); } break; }
+    case 'profiles': { const list = panelCall('profiles'); if (json) print(list); else for (const p of list) { const t = p.telegram || null; const tg = t && (t.username || t.displayName) ? (t.username ? '@' + t.username : '') + (t.displayName ? (t.username ? ' · ' : '') + t.displayName : '') : '未登录'; print(`#${p.accountIdx} ${p.name} proxy=${p.proxy || '-'} tg=${tg} ip=${p.ipInfo && p.ipInfo.ip ? p.ipInfo.ip + ' ' + (p.ipInfo.area || '') : '-'} `); } break; }
     case 'add-profile': print(panelCall('addProfile')); break;
     case 'remove-profile': { const i = idxOf(rest[0]); if (!yes) fail('remove-profile deletes the profile and its Telegram session; add --yes to confirm', 3); print(panelCall('removeProfile', i)); break; }
     case 'set-proxy': { const i = idxOf(rest[0]); if (rest.length < 2) fail('usage: set-proxy <idx> <url|"">'); print(panelCall('setProfileProxy', i, rest[1] || '')); break; }
-    case 'set-note': { const i = idxOf(rest[0]); print(panelCall('setProfileNote', i, rest.slice(1).join(' '))); break; }
     case 'probe-ip': { const i = idxOf(rest[0]); print(panelCall('probeIp', i)); break; }
     case 'states': print(panelCall('states')); break;
     case 'agents': print(panelCall('agents')); break;

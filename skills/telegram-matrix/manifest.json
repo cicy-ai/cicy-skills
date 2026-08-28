@@ -3,7 +3,7 @@
   "name": "telegram-matrix",
   "version": "0.1.0",
   "title": "Telegram Matrix",
-  "description": "Use when controlling the cicy-desktop Telegram 矩阵 panel: manage Telegram profiles (add/remove/proxy/note/IP probe) and drive each profile's Telegram Web view (select, reload, eval, snapshot, CDP).",
+  "description": "Use when controlling the cicy-desktop Telegram 矩阵 panel: manage Telegram profiles (add/remove/proxy/IP probe) and drive each profile's Telegram Web view (select, reload, eval, snapshot, CDP).",
   "category": "agent",
   "tags": [
     "telegram",
@@ -77,11 +77,6 @@
       "name": "set-proxy",
       "example": "telegram-matrix set-proxy 2 http://127.0.0.1:20002",
       "description": "Set (or clear with \"\") the proxy of a profile; an open cell reloads"
-    },
-    {
-      "name": "set-note",
-      "example": "telegram-matrix set-note 2 主号",
-      "description": "Set the per-profile note"
     },
     {
       "name": "probe-ip",

@@ -1,6 +1,6 @@
 ---
 name: telegram-matrix
-description: Use when controlling the cicy-desktop Telegram 矩阵 panel: manage Telegram profiles (add/remove/proxy/note/IP probe) and drive each profile's Telegram Web view (select, reload, eval, snapshot, CDP).
+description: Use when controlling the cicy-desktop Telegram 矩阵 panel: manage Telegram profiles (add/remove/proxy/IP probe) and drive each profile's Telegram Web view (select, reload, eval, snapshot, CDP).
 ---
 
 # Telegram Matrix
@@ -32,11 +32,10 @@ telegram-matrix --help
 |---|---|---|
 | `open` | `telegram-matrix open` | Open (or find) the Telegram 矩阵 panel tab in profile 0; prints its webContentsId |
 | `close` | `telegram-matrix close` | Close the panel tab |
-| `profiles` | `telegram-matrix profiles --json` | List profiles: accountIdx, name, proxy, note, Telegram @username, last egress IP |
+| `profiles` | `telegram-matrix profiles --json` | List profiles: accountIdx, name, proxy, Telegram @username, last egress IP |
 | `add-profile` | `telegram-matrix add-profile` | Create the next profile (persist:sandbox-N) with the default proxy |
 | `remove-profile` | `telegram-matrix remove-profile 3 --yes` | Delete a profile and its session data — irreversible, needs --yes |
 | `set-proxy` | `telegram-matrix set-proxy 2 http://127.0.0.1:20002` | Set (or clear with "") the proxy of a profile; an open cell reloads |
-| `set-note` | `telegram-matrix set-note 2 主号` | Set the per-profile note |
 | `probe-ip` | `telegram-matrix probe-ip 2` | Egress IP + region through the profile's proxy |
 | `states` | `telegram-matrix states --json` | Load state of every open cell (loaded / failed + error) |
 | `agents` | `telegram-matrix agents --json` | Per-cell helper agents known to the panel |
