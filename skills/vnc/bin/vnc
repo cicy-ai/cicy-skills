@@ -1,0 +1,662 @@
+#!/usr/bin/env node
+// vnc — run a VNC server on a headless Linux host.
+// Subcommands: install / start / stop / restart / status / password /
+//              screenshot / logs / list
+
+import {
+  readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync,
+  chmodSync, unlinkSync, statSync,
+} from 'node:fs';
+import { homedir, platform } from 'node:os';
+import { join, dirname, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+
+const argv = process.argv.slice(2);
+
+if (argv.length === 0 || argv[0] === 'help' || argv.includes('--help') || argv[0] === '-h') {
+  printHelp();
+  process.exit(0);
+}
+
+const json = argv.includes('--json');
+const cmd = argv[0];
+const rest = argv.slice(1).filter((a) => a !== '--json');
+
+const HOME = homedir();
+const DB_DIR = join(HOME, 'cicy-ai', 'db');
+const STATE_PATH = process.env.VNC_STATE || join(DB_DIR, 'vnc.json');
+const VNC_DIR = join(HOME, '.vnc');
+const PASSWD_FILE = join(VNC_DIR, 'passwd');
+const LOG_DIR = join(VNC_DIR, 'logs');
+const X11_SOCKET_DIR = '/tmp/.X11-unix';
+
+// ── arg parsing ────────────────────────────────────────────────────────────
+
+// Options that take a value, so a positional argument is never confused with
+// one. Short forms map onto the same names.
+const VALUE_OPTS = new Set([
+  'display', 'port', 'geometry', 'depth', 'listen', 'wm', 'password', 'set',
+  'out', 'n',
+]);
+const SHORT = { o: 'out', n: 'n', d: 'display' };
+
+const parsed = { flags: new Set(), opts: {}, positionals: [] };
+for (let i = 0; i < rest.length; i++) {
+  const a = rest[i];
+  if (a.startsWith('--')) {
+    const eq = a.indexOf('=');
+    const name = eq > 0 ? a.slice(2, eq) : a.slice(2);
+    if (eq > 0) parsed.opts[name] = a.slice(eq + 1);
+    else if (VALUE_OPTS.has(name)) parsed.opts[name] = rest[++i] ?? '';
+    else parsed.flags.add(name);
+  } else if (/^-[a-zA-Z]$/.test(a)) {
+    const name = SHORT[a[1]];
+    if (name && VALUE_OPTS.has(name)) parsed.opts[name] = rest[++i] ?? '';
+    else parsed.flags.add(a.slice(1));
+  } else {
+    parsed.positionals.push(a);
+  }
+}
+
+function flag(name) {
+  return parsed.flags.has(name);
+}
+
+function opt(name, fallback = null) {
+  return parsed.opts[name] ?? fallback;
+}
+
+function positional() {
+  return parsed.positionals[0] ?? null;
+}
+
+function setOpt(name, value) {
+  if (parsed.opts[name] === undefined) parsed.opts[name] = value;
+}
+
+function die(msg, code = 1) {
+  if (json) process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
+  else process.stderr.write(`vnc: ${msg}\n`);
+  process.exit(code);
+}
+
+function out(obj, text) {
+  if (json) process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+  else process.stdout.write(text);
+}
+
+// ── display / port helpers ─────────────────────────────────────────────────
+
+// Accepts ":1", "1", "vnc:1" → ":1"
+function normDisplay(v, fallback = ':1') {
+  if (!v) return process.env.VNC_DISPLAY || fallback;
+  const s = String(v).trim();
+  const m = s.match(/:?(\d+)(\.\d+)?$/);
+  if (!m) die(`not a display number: ${v}`);
+  return `:${m[1]}`;
+}
+
+function displayNum(d) {
+  return parseInt(d.slice(1), 10);
+}
+
+function defaultPort(d) {
+  return 5900 + displayNum(d);
+}
+
+// ── process helpers ────────────────────────────────────────────────────────
+
+function which(bin) {
+  const r = spawnSync('sh', ['-c', `command -v ${bin} 2>/dev/null`], { encoding: 'utf8' });
+  const p = (r.stdout || '').trim();
+  return p || null;
+}
+
+function run(bin, args, extra = {}) {
+  return spawnSync(bin, args, { encoding: 'utf8', ...extra });
+}
+
+// `ps -eo pid=,args=` once, reused by every lookup.
+let _psCache = null;
+function psList(refresh = false) {
+  if (_psCache && !refresh) return _psCache;
+  const r = run('ps', ['-eo', 'pid=,args=']);
+  const lines = (r.stdout || '').split('\n').filter(Boolean);
+  _psCache = lines.map((l) => {
+    const m = l.trim().match(/^(\d+)\s+(.*)$/);
+    return m ? { pid: parseInt(m[1], 10), args: m[2] } : null;
+  }).filter(Boolean);
+  return _psCache;
+}
+
+// x11vnc serving a given display. Matches "-display :1" exactly so :1 does not
+// match :10.
+function findX11vnc(display, refresh = false) {
+  const re = new RegExp(`(^|\\s)-display\\s+${display}(\\s|$)`);
+  return psList(refresh).filter((p) => /(^|\/)x11vnc(\s|$)/.test(p.args) && re.test(p.args));
+}
+
+function findXserver(display, refresh = false) {
+  const re = new RegExp(`(^|\\s)${display}(\\s|$)`);
+  return psList(refresh).filter(
+    (p) => /(^|\/)(Xvfb|Xtigervnc|Xvnc|X|Xorg)\s/.test(p.args) && re.test(p.args),
+  );
+}
+
+function alive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function displayUp(display) {
+  // A live X server owns /tmp/.X11-unix/X<n>; confirm with a real query when
+  // xdpyinfo is around (a stale socket outlives a killed server).
+  const sock = join(X11_SOCKET_DIR, `X${displayNum(display)}`);
+  if (!existsSync(sock)) return false;
+  if (which('xdpyinfo')) {
+    const r = run('xdpyinfo', [], { env: { ...process.env, DISPLAY: display } });
+    return r.status === 0;
+  }
+  return findXserver(display).length > 0;
+}
+
+function displayGeometry(display) {
+  if (!which('xdpyinfo')) return null;
+  const r = run('xdpyinfo', [], { env: { ...process.env, DISPLAY: display } });
+  const m = (r.stdout || '').match(/dimensions:\s+(\d+x\d+)/);
+  return m ? m[1] : null;
+}
+
+// A window manager claims a WM_S<screen> selection / _NET_SUPPORTING_WM_CHECK.
+function wmRunning(display) {
+  if (!which('xprop')) return null;
+  const r = run('xprop', ['-root', '_NET_SUPPORTING_WM_CHECK'], {
+    env: { ...process.env, DISPLAY: display },
+  });
+  return r.status === 0 && /window id/i.test(r.stdout || '');
+}
+
+// ── state ──────────────────────────────────────────────────────────────────
+
+function loadState() {
+  if (!existsSync(STATE_PATH)) return { displays: {} };
+  try {
+    const s = JSON.parse(readFileSync(STATE_PATH, 'utf8'));
+    if (!s.displays) s.displays = {};
+    return s;
+  } catch {
+    return { displays: {} };
+  }
+}
+
+function saveState(state) {
+  mkdirSync(dirname(STATE_PATH), { recursive: true });
+  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + '\n');
+  try { chmodSync(STATE_PATH, 0o600); } catch {}
+}
+
+// ── password ───────────────────────────────────────────────────────────────
+
+function randomPassword(n = 10) {
+  // VNC (DES) auth truncates at 8 characters; anything longer is silently cut,
+  // so generate exactly what the protocol carries.
+  const alphabet = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(8);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+}
+
+function storePassword(pw) {
+  if (!which('x11vnc')) die('x11vnc is not installed — run "vnc install" first');
+  mkdirSync(VNC_DIR, { recursive: true });
+  const r = run('x11vnc', ['-storepasswd', pw, PASSWD_FILE]);
+  if (r.status !== 0) die(`x11vnc -storepasswd failed: ${(r.stderr || '').trim()}`);
+  chmodSync(PASSWD_FILE, 0o600);
+  return PASSWD_FILE;
+}
+
+// ── commands ───────────────────────────────────────────────────────────────
+
+function cmdInstall() {
+  if (platform() !== 'linux') die(`vnc install supports Linux only (this host: ${platform()})`);
+
+  const wanted = [
+    ['x11vnc', 'x11vnc'],
+    ['Xvfb', 'xvfb'],
+    ['fluxbox', 'fluxbox'],
+    ['xdpyinfo', 'x11-utils'],
+    ['import', 'imagemagick'],
+  ];
+  const missing = wanted.filter(([bin]) => !which(bin));
+
+  if (missing.length === 0 && !flag('force')) {
+    return out(
+      { ok: true, installed: true, packages: [] },
+      'All VNC components already present (x11vnc, Xvfb, fluxbox, x11-utils, imagemagick).\n',
+    );
+  }
+
+  const pkgs = (flag('force') ? wanted : missing).map(([, p]) => p);
+
+  if (!which('apt-get')) {
+    die(`missing: ${pkgs.join(' ')} — no apt-get on this host, install them with your package manager`);
+  }
+  const sudoOk = run('sudo', ['-n', 'true']).status === 0;
+  const asRoot = process.getuid && process.getuid() === 0;
+  if (!sudoOk && !asRoot) {
+    die(`need root to install ${pkgs.join(' ')} — run as root or grant passwordless sudo`);
+  }
+  const env = { ...process.env, DEBIAN_FRONTEND: 'noninteractive' };
+  const apt = (...a) => (asRoot ? ['apt-get', a] : ['sudo', ['apt-get', ...a]]);
+
+  const [ubin, uargs] = apt('update', '-qq');
+  const upd = run(ubin, uargs, { env, stdio: json ? 'pipe' : 'inherit' });
+  if (upd.status !== 0 && !json) process.stderr.write('vnc: apt-get update reported errors, continuing\n');
+
+  const [ibin, iargs] = apt('install', '-y', '-qq', ...pkgs);
+  const inst = run(ibin, iargs, { env, stdio: json ? 'pipe' : 'inherit' });
+  if (inst.status !== 0) die(`apt-get install failed: ${(inst.stderr || '').trim() || 'see output above'}`);
+
+  const stillMissing = wanted.filter(([bin]) => !which(bin)).map(([b]) => b);
+  if (stillMissing.length) die(`install finished but still missing: ${stillMissing.join(' ')}`);
+
+  out(
+    { ok: true, installed: true, packages: pkgs },
+    `Installed: ${pkgs.join(' ')}\nNext: vnc start :1\n`,
+  );
+}
+
+function cmdStart() {
+  const display = normDisplay(positional() || opt('display'));
+  const port = parseInt(opt('port', String(defaultPort(display))), 10);
+  const geometry = opt('geometry', '1440x900');
+  const depth = opt('depth', '24');
+  const listen = opt('listen', 'all'); // all | localhost
+  const wmWanted = opt('wm', 'fluxbox'); // fluxbox | none
+
+  if (!which('x11vnc')) die('x11vnc is not installed — run "vnc install" first');
+
+  // refresh: a restart just killed the previous server, so the cached ps list
+  // from that pass would still show it.
+  const existing = findX11vnc(display, true);
+  if (existing.length && !flag('force')) {
+    die(`x11vnc already serving ${display} (pid ${existing.map((p) => p.pid).join(',')}) — "vnc restart ${display}" or pass --force`);
+  }
+  if (existing.length && flag('force')) {
+    for (const p of existing) { try { process.kill(p.pid, 'SIGTERM'); } catch {} }
+    sleepMs(700);
+  }
+
+  // 1. X server — reuse whatever already owns the display, else start Xvfb.
+  const notes = [];
+  let startedX = false;
+  if (displayUp(display)) {
+    notes.push(`reusing X server already on ${display}`);
+  } else {
+    if (!which('Xvfb')) die(`no X server on ${display} and Xvfb is not installed — run "vnc install"`);
+    mkdirSync(LOG_DIR, { recursive: true });
+    const xlog = join(LOG_DIR, `Xvfb${displayNum(display)}.log`);
+    const ok = spawnDetached(
+      'Xvfb',
+      [display, '-screen', '0', `${geometry}x${depth}`, '-nolisten', 'tcp'],
+      xlog,
+    );
+    if (!ok) die('failed to spawn Xvfb');
+    if (!waitFor(() => displayUp(display), 8000)) {
+      die(`Xvfb did not come up on ${display} — see ${xlog}`);
+    }
+    startedX = true;
+    notes.push(`started Xvfb on ${display} (${geometry}x${depth})`);
+  }
+
+  // 2. Window manager — without one, apps draw undecorated and cannot be moved.
+  let wm = null;
+  if (wmWanted !== 'none') {
+    if (wmRunning(display)) {
+      notes.push('window manager already running');
+    } else if (which(wmWanted)) {
+      const wmlog = join(LOG_DIR, `${wmWanted}${displayNum(display)}.log`);
+      mkdirSync(LOG_DIR, { recursive: true });
+      spawnDetached(wmWanted, [], wmlog, { DISPLAY: display });
+      sleepMs(1200);
+      wm = wmRunning(display) ? wmWanted : null;
+      notes.push(wm ? `started ${wmWanted}` : `${wmWanted} did not take the screen (another WM may own it)`);
+    } else {
+      notes.push(`${wmWanted} not installed — no window manager started`);
+    }
+  }
+
+  // 3. password
+  let password = null;
+  let authArgs;
+  if (flag('nopw')) {
+    authArgs = ['-nopw'];
+    notes.push('WARNING: --nopw — anyone who can reach the port gets the desktop');
+  } else {
+    const given = opt('password');
+    if (given) password = given;
+    else if (!existsSync(PASSWD_FILE) || flag('random-password')) password = randomPassword();
+    if (password) storePassword(password);
+    authArgs = ['-rfbauth', PASSWD_FILE];
+  }
+
+  // 4. x11vnc.
+  // -noshm: an X server started by another user (root, typically) refuses
+  // MIT-SHM attach, which otherwise kills x11vnc at the first poll.
+  mkdirSync(LOG_DIR, { recursive: true });
+  const log = join(LOG_DIR, `x11vnc${displayNum(display)}.log`);
+  const args = [
+    '-display', display,
+    ...authArgs,
+    '-rfbport', String(port),
+    '-forever', '-shared', '-noshm', '-noxdamage',
+    '-bg', '-o', log,
+  ];
+  if (listen === 'localhost') args.push('-localhost');
+
+  const r = run('x11vnc', args);
+  if (r.status !== 0) {
+    die(`x11vnc failed to start: ${((r.stderr || '') + (r.stdout || '')).trim().split('\n').slice(-3).join(' ')}`);
+  }
+  if (!waitFor(() => findX11vnc(display, true).length > 0, 5000)) {
+    die(`x11vnc exited right after starting — see ${log}`);
+  }
+
+  const pid = findX11vnc(display, true)[0]?.pid ?? null;
+
+  const state = loadState();
+  // managed_x must survive a restart: the X server we created on the first
+  // start is still ours even though this pass only reused it.
+  const wasManaged = state.displays[display]?.managed_x === true;
+  state.displays[display] = {
+    port, geometry: displayGeometry(display) || geometry, depth: Number(depth),
+    wm, listen, pid, log, auth: flag('nopw') ? 'none' : 'password',
+    started_at: new Date().toISOString(),
+    managed_x: startedX || (wasManaged && displayUp(display)),
+  };
+  saveState(state);
+
+  const host = listen === 'localhost' ? '127.0.0.1' : hostAddr();
+  out(
+    {
+      ok: true, display, port, pid, geometry: state.displays[display].geometry,
+      wm, listen, log, password, url: `vnc://${host}:${port}`,
+    },
+    [
+      `VNC up on ${display}`,
+      ...notes.map((n) => `  · ${n}`),
+      `  · x11vnc pid ${pid}, port ${port} (${listen === 'localhost' ? '127.0.0.1 only' : 'all interfaces'})`,
+      password ? `  · password: ${password}` : (flag('nopw') ? '  · no password' : `  · password: existing ${PASSWD_FILE}`),
+      '',
+      `Connect: vnc://${host}:${port}`,
+      listen === 'localhost'
+        ? `Remote: ssh -L ${port}:127.0.0.1:${port} <host>, then connect to 127.0.0.1:${port}`
+        : `Log: ${log}`,
+      '',
+    ].join('\n'),
+  );
+}
+
+function cmdStop() {
+  const all = flag('all');
+  const display = all ? null : normDisplay(positional() || opt('display'));
+  const state = loadState();
+
+  const targets = all
+    ? Object.keys(state.displays).concat(
+        psList().filter((p) => /(^|\/)x11vnc(\s|$)/.test(p.args))
+          .map((p) => (p.args.match(/-display\s+(:\d+)/) || [])[1])
+          .filter(Boolean),
+      )
+    : [display];
+
+  const stopped = [];
+  for (const d of [...new Set(targets)].filter(Boolean)) {
+    const procs = findX11vnc(d, true);
+    for (const p of procs) {
+      try { process.kill(p.pid, 'SIGTERM'); stopped.push({ display: d, pid: p.pid, what: 'x11vnc' }); } catch {}
+    }
+    if (flag('kill-x')) {
+      // Only tear down an X server this skill started; a shared/system one stays.
+      const entry = state.displays[d];
+      if (entry?.managed_x) {
+        for (const p of findXserver(d, true)) {
+          try { process.kill(p.pid, 'SIGTERM'); stopped.push({ display: d, pid: p.pid, what: 'Xvfb' }); } catch {}
+        }
+      }
+    }
+    delete state.displays[d];
+  }
+  saveState(state);
+
+  if (stopped.length === 0) {
+    return out({ ok: true, stopped: [] }, all ? 'No VNC servers were running.\n' : `Nothing to stop on ${display}.\n`);
+  }
+  out(
+    { ok: true, stopped },
+    stopped.map((s) => `stopped ${s.what} on ${s.display} (pid ${s.pid})`).join('\n') + '\n',
+  );
+}
+
+function cmdRestart() {
+  const display = normDisplay(positional() || opt('display'));
+  const state = loadState();
+  const prev = state.displays[display] || {};
+  for (const p of findX11vnc(display, true)) {
+    try { process.kill(p.pid, 'SIGTERM'); } catch {}
+  }
+  sleepMs(800);
+  // Re-enter start with the previous port/listen unless the caller overrode them.
+  if (prev.port) setOpt('port', String(prev.port));
+  if (prev.listen) setOpt('listen', prev.listen);
+  cmdStart();
+}
+
+function cmdStatus() {
+  const state = loadState();
+  const want = positional() || opt('display');
+  const displays = new Set([
+    ...Object.keys(state.displays),
+    ...listSockets(),
+  ]);
+  const rows = [];
+  for (const d of [...displays].sort((a, b) => displayNum(a) - displayNum(b))) {
+    if (want && normDisplay(want) !== d) continue;
+    const vncs = findX11vnc(d);
+    const entry = state.displays[d] || {};
+    rows.push({
+      display: d,
+      x_server: displayUp(d),
+      geometry: displayUp(d) ? displayGeometry(d) : null,
+      wm: displayUp(d) ? (wmRunning(d) ? (entry.wm || 'yes') : false) : null,
+      vnc: vncs.length > 0,
+      pid: vncs[0]?.pid ?? null,
+      port: entry.port ?? (vncs[0] ? portOf(vncs[0].args) : null),
+      listen: entry.listen ?? (vncs[0] && /-localhost/.test(vncs[0].args) ? 'localhost' : vncs[0] ? 'all' : null),
+      auth: entry.auth ?? (vncs[0] && /-nopw/.test(vncs[0].args) ? 'none' : vncs[0] ? 'password' : null),
+      log: entry.log ?? null,
+    });
+  }
+
+  if (json) return process.stdout.write(JSON.stringify({ ok: true, displays: rows }, null, 2) + '\n');
+
+  if (rows.length === 0) return process.stdout.write('No X displays found.\n');
+  const pad = (s, n) => String(s ?? '-').padEnd(n);
+  process.stdout.write(
+    pad('DISPLAY', 9) + pad('X', 4) + pad('GEOMETRY', 12) + pad('WM', 10) +
+    pad('VNC', 5) + pad('PORT', 7) + pad('LISTEN', 11) + 'PID\n',
+  );
+  for (const r of rows) {
+    process.stdout.write(
+      pad(r.display, 9) + pad(r.x_server ? 'up' : 'down', 4) + pad(r.geometry, 12) +
+      pad(r.wm === false ? 'none' : r.wm, 10) + pad(r.vnc ? 'up' : '-', 5) +
+      pad(r.port, 7) + pad(r.listen, 11) + (r.pid ?? '-') + '\n',
+    );
+  }
+}
+
+function cmdPassword() {
+  if (flag('show')) {
+    if (!existsSync(PASSWD_FILE)) die(`no password file at ${PASSWD_FILE}`);
+    // x11vnc stores an obfuscated blob, not a readable password: report the
+    // file, never invent a plaintext.
+    return out(
+      { ok: true, file: PASSWD_FILE, note: 'stored obfuscated; cannot be read back' },
+      `${PASSWD_FILE} exists (stored obfuscated — set a new one to change it)\n`,
+    );
+  }
+  const given = opt('set');
+  const pw = given || randomPassword();
+  if (given && given.length > 8) {
+    process.stderr.write('vnc: note — VNC auth uses only the first 8 characters\n');
+  }
+  storePassword(pw);
+  out(
+    { ok: true, file: PASSWD_FILE, password: pw },
+    `password set (${PASSWD_FILE})\n  ${pw}\nRestart the server to apply: vnc restart :1\n`,
+  );
+}
+
+function cmdScreenshot() {
+  const display = normDisplay(positional() || opt('display'));
+  if (!displayUp(display)) die(`no X server on ${display}`);
+  const target = resolve(opt('out') || `vnc-${displayNum(display)}-${Date.now()}.png`);
+  mkdirSync(dirname(target), { recursive: true });
+
+  const env = { ...process.env, DISPLAY: display };
+  let r;
+  if (which('import')) {
+    r = run('import', ['-window', 'root', target], { env });
+  } else if (which('ffmpeg')) {
+    const geo = displayGeometry(display) || '1440x900';
+    r = run('ffmpeg', ['-y', '-f', 'x11grab', '-video_size', geo, '-i', display, '-frames:v', '1', target], { env });
+  } else {
+    die('need imagemagick (import) or ffmpeg to grab a screenshot — run "vnc install"');
+  }
+  if (r.status !== 0 || !existsSync(target)) {
+    die(`screenshot failed: ${((r.stderr || '') + (r.stdout || '')).trim().split('\n').slice(-2).join(' ')}`);
+  }
+  const size = statSync(target).size;
+  if (size === 0) die(`screenshot wrote an empty file: ${target}`);
+  out({ ok: true, display, file: target, bytes: size }, `${target} (${size} bytes)\n`);
+}
+
+function cmdLogs() {
+  const display = normDisplay(positional() || opt('display'));
+  const n = parseInt(opt('n', '40'), 10);
+  const state = loadState();
+  const log = state.displays[display]?.log || join(LOG_DIR, `x11vnc${displayNum(display)}.log`);
+  if (!existsSync(log)) die(`no log for ${display} at ${log}`);
+  const lines = readFileSync(log, 'utf8').split('\n');
+  const tail = lines.slice(Math.max(0, lines.length - n)).join('\n');
+  out({ ok: true, display, log, lines: tail.split('\n') }, tail.endsWith('\n') ? tail : tail + '\n');
+}
+
+// ── misc helpers ───────────────────────────────────────────────────────────
+
+function listSockets() {
+  try {
+    return readdirSync(X11_SOCKET_DIR)
+      .filter((f) => /^X\d+$/.test(f))
+      .map((f) => `:${f.slice(1)}`);
+  } catch {
+    return [];
+  }
+}
+
+function portOf(args) {
+  const m = args.match(/-rfbport\s+(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function hostAddr() {
+  const r = run('sh', ['-c', "hostname -I 2>/dev/null | awk '{print $1}'"]);
+  return (r.stdout || '').trim() || '127.0.0.1';
+}
+
+function spawnDetached(bin, args, logPath, extraEnv = {}) {
+  // Keep the child alive past this process: setsid + redirect, via sh so the
+  // redirection is the shell's job and no Node handles are inherited.
+  const quoted = [bin, ...args].map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ');
+  const setsid = which('setsid') ? 'setsid ' : '';
+  const r = run('sh', ['-c', `${setsid}${quoted} >> '${logPath}' 2>&1 &`], {
+    env: { ...process.env, ...extraEnv },
+  });
+  return r.status === 0;
+}
+
+function sleepMs(ms) {
+  // Synchronous sleep — this CLI is a straight-line script, no event loop to
+  // yield to.
+  const sab = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(sab), 0, 0, ms);
+}
+
+function waitFor(pred, timeoutMs, stepMs = 250) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pred()) return true;
+    sleepMs(stepMs);
+  }
+  return pred();
+}
+
+function printHelp() {
+  process.stdout.write(`vnc — run a VNC server on a headless Linux host
+
+Usage: vnc <command> [display] [options]
+
+Commands:
+  install                   Install x11vnc, Xvfb, fluxbox, x11-utils, imagemagick (apt)
+  start [:N]                Ensure display :N exists, then serve it over VNC
+  stop [:N] | --all         Stop the VNC server (add --kill-x to also stop an Xvfb we started)
+  restart [:N]              Restart the VNC server, keeping its port
+  status [:N]               Show every display: X server, geometry, WM, VNC, port
+  password                  Set the VNC password (~/.vnc/passwd)
+  screenshot [:N]           Grab the display to a PNG
+  logs [:N]                 Tail the x11vnc log
+
+Options:
+  --display :N              Display, if not given positionally (default :1)
+  --port <n>                RFB port (default 5900 + N)
+  --geometry <WxH>          Screen size when starting a new Xvfb (default 1440x900)
+  --depth <n>               Colour depth for a new Xvfb (default 24)
+  --listen all|localhost    Bind everywhere, or 127.0.0.1 only (default all)
+  --wm fluxbox|none         Window manager to start if none is running (default fluxbox)
+  --password <pw>           Use this password
+  --random-password         Generate a fresh password even if one is stored
+  --nopw                    No authentication (dangerous — anyone reaching the port is in)
+  --force                   With start: replace an x11vnc already on that display
+  --all                     With stop: every display
+  --kill-x                  With stop: also stop an Xvfb this skill started
+  --set <pw>                With password: the password to store
+  --show                    With password: report whether a password file exists
+  --out <path>, -o          With screenshot: output file
+  -n <count>                With logs: number of lines (default 40)
+  --json                    Machine-readable output
+
+Examples:
+  vnc install
+  vnc start :1 --geometry 1920x1080
+  vnc start :2 --listen localhost --random-password
+  vnc status --json
+  vnc screenshot :1 --out ~/cicy-ai/assets/desktop.png
+  vnc stop :1 --kill-x
+
+Config: ~/cicy-ai/db/vnc.json   Password: ~/.vnc/passwd   Logs: ~/.vnc/logs/
+`);
+}
+
+// ── dispatch ───────────────────────────────────────────────────────────────
+
+switch (cmd) {
+  case 'install': cmdInstall(); break;
+  case 'start': cmdStart(); break;
+  case 'stop': cmdStop(); break;
+  case 'restart': cmdRestart(); break;
+  case 'status': case 'list': cmdStatus(); break;
+  case 'password': case 'passwd': cmdPassword(); break;
+  case 'screenshot': case 'shot': cmdScreenshot(); break;
+  case 'logs': case 'log': cmdLogs(); break;
+  default:
+    die(`unknown command "${cmd}" — run "vnc --help"`, 2);
+}
