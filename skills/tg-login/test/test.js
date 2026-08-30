@@ -40,6 +40,7 @@ test("code command reads a served 接码 page (server in a child so execFile can
     "/rl": `<div>错误信息：请求过于频繁，请等待 41 秒再试。</div>`,
     "/empty": `<div>错误信息：无三十分钟内的登录消息</div>`,
   };
+  pages["/noise"] = `<div>错误信息：无三十分钟内的登录消息</div><script>window.dataLayer=[];gtag('js', 99999);</script> didi document.addEventListener('DOMContentLoaded', c)`;
   const srv = http.createServer((req, res) => { res.end(pages[req.url] || "nope"); });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   const port = srv.address().port;
@@ -52,6 +53,9 @@ test("code command reads a served 接码 page (server in a child so execFile can
     assert.equal(rl.rateLimited, true); assert.equal(rl.waitSeconds, 41);
     const em = await call("/empty");
     assert.ok(!em.code); assert.equal(em.empty, true);
+    const noise = await call("/noise");
+    assert.ok(!noise.code, "must not match a code from page/script noise");
+    assert.ok(!noise.twofa, "no 2fa without a real code");
   } finally { srv.close(); }
 });
 
