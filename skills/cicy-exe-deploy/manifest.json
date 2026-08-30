@@ -1,0 +1,31 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "cicy-exe-deploy",
+  "version": "0.1.0",
+  "title": "CiCy Exe Deploy",
+  "description": "Distribute a Windows installer (.exe) from a WSL/Docker cicy-code node to every sibling team's Windows PC via CiCy Hub ssh and install it through that team's cicy-desktop.",
+  "category": "infra",
+  "tags": ["cicy-desktop", "windows", "installer", "fleet", "hub", "frp", "ssh", "agent-desktop"],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": ["ssh", "scp"],
+  "npm_dependencies": false,
+  "entry": "bin/cicy-exe-deploy",
+  "permissions": ["network", "filesystem:home"],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  }
+}
