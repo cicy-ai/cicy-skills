@@ -1,0 +1,345 @@
+#!/usr/bin/env node
+// tg-login — automate Telegram Web login inside cicy-desktop's Telegram 矩阵
+// panel, driving each profile's BrowserView over the Electron CDP endpoint.
+//
+// Flow per account:  phone number → SMS code (read from a 接码 / getcode URL)
+// → optional 2FA cloud password.  The code arrives on the number's already
+// logged-in device and is surfaced by the 接码 service; this tool reads it,
+// respecting the service's ~1 req/min rate limit, and types it into the right
+// Telegram view.
+//
+// Zero runtime dependencies: a tiny built-in CDP-over-WebSocket client (node
+// net + crypto) plus http(s) for the 接码 fetch. Node 18+.
+
+import net from "node:net";
+import crypto from "node:crypto";
+import http from "node:http";
+import https from "node:https";
+import { readFileSync } from "node:fs";
+
+const CDP_HOST = process.env.TG_CDP_HOST || "127.0.0.1";
+const CDP_PORT = Number(process.env.TG_CDP_PORT || 9221);
+const TG_URL_PREFIX = "https://web.telegram.org/k/";
+
+// ── output ───────────────────────────────────────────────────────────────────
+const isJson = process.argv.includes("--json");
+function out(obj, human) {
+  if (isJson) process.stdout.write(JSON.stringify(obj) + "\n");
+  else if (human !== undefined) process.stdout.write(human + "\n");
+  else process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+}
+function die(msg, code = 1) {
+  if (isJson) process.stdout.write(JSON.stringify({ ok: false, error: String(msg) }) + "\n");
+  else process.stderr.write(`tg-login: ${msg}\n`);
+  process.exit(code);
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── 接码 URL: fetch + parse ───────────────────────────────────────────────────
+// The 接码 page renders the device verification code, its login time and the
+// 2fa password. Pull them out of the raw HTML text. Returns { code, time,
+// twofa, rateLimited, waitSeconds, empty }.
+export function parseCodePage(html) {
+  const text = String(html).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const rl = text.match(/请等待\s*(\d+)\s*秒/);
+  if (/请求过于频繁/.test(text)) return { rateLimited: true, waitSeconds: rl ? Number(rl[1]) : 0 };
+  if (/无三十分钟内的登录消息|错误信息/.test(text) && !/设备验证码/.test(text)) return { empty: true, reason: text.slice(0, 120) };
+  const code = (text.match(/设备验证码[:：]?\s*([0-9]{4,6})/) || text.match(/\b([0-9]{5})\b/) || [])[1] || "";
+  const time = (text.match(/登录时间[:：]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:]{5,8})/) || [])[1] || "";
+  const twofa = (text.match(/2fa\/?密码[:：]?\s*([^\s✅登]+)/i) || [])[1] || "";
+  return { code, time, twofa, empty: !code };
+}
+
+function fetchUrl(url, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    let mod;
+    try { mod = new URL(url).protocol === "http:" ? http : https; }
+    catch { return reject(new Error("invalid URL")); }
+    const req = mod.get(url, { headers: { "User-Agent": "tg-login" } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume(); clearTimeout(timer);
+        return resolve(fetchUrl(new URL(res.headers.location, url).href, timeoutMs));
+      }
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => (body += c));
+      res.on("end", () => { clearTimeout(timer); resolve(body); });
+    });
+    const timer = setTimeout(() => { req.destroy(new Error("request timed out")); }, timeoutMs);
+    req.on("error", (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+// Poll a 接码 URL until a code appears, honouring the rate limit. maxMs caps
+// the total wait; minGapMs is the floor between requests (service is ~1/min).
+async function pollCode(url, { maxMs = 8 * 60000, minGapMs = 62000, onTick } = {}) {
+  const started = Date.now();
+  let attempt = 0;
+  while (Date.now() - started < maxMs) {
+    attempt++;
+    let info;
+    try { info = parseCodePage(await fetchUrl(url)); }
+    catch (e) { info = { error: e.message }; }
+    if (onTick) onTick({ attempt, info });
+    if (info.code) return info;
+    let wait = minGapMs;
+    if (info.rateLimited && info.waitSeconds) wait = Math.max((info.waitSeconds + 3) * 1000, minGapMs);
+    await sleep(wait);
+  }
+  return { empty: true, reason: "timed out waiting for a code" };
+}
+
+// ── phone----codeUrl line parsing ─────────────────────────────────────────────
+export function parseAccountLine(line) {
+  const s = String(line).trim();
+  if (!s || s.startsWith("#")) return null;
+  const m = s.split(/----|\t|\s{2,}|,/).map((x) => x.trim()).filter(Boolean);
+  const phone = (m[0] || "").replace(/[^\d+]/g, "");
+  const codeUrl = m.find((x) => /^https?:\/\//.test(x)) || "";
+  if (!phone) return null;
+  return { phone: phone.startsWith("+") ? phone : "+" + phone, codeUrl };
+}
+
+// ── minimal CDP client (raw WebSocket, zero deps) ─────────────────────────────
+async function cdpTargets() {
+  const body = await new Promise((resolve, reject) => {
+    http.get({ host: CDP_HOST, port: CDP_PORT, path: "/json" }, (res) => {
+      let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => resolve(b));
+    }).on("error", reject);
+  });
+  return JSON.parse(body);
+}
+
+function cdpConnect(wsUrl) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(wsUrl);
+    const key = crypto.randomBytes(16).toString("base64");
+    const sock = net.connect(Number(u.port), u.hostname, () => {
+      sock.write(
+        `GET ${u.pathname}${u.search} HTTP/1.1\r\n` +
+          `Host: ${u.host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+          `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`
+      );
+    });
+    let buf = Buffer.alloc(0), handshook = false, id = 0;
+    const pending = new Map();
+    const client = {
+      send(method, params = {}) {
+        const msg = JSON.stringify({ id: ++id, method, params });
+        sock.write(encodeFrame(msg));
+        return new Promise((res) => pending.set(id, res));
+      },
+      close() { try { sock.destroy(); } catch {} },
+    };
+    sock.on("data", (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      if (!handshook) {
+        const i = buf.indexOf("\r\n\r\n");
+        if (i === -1) return;
+        const head = buf.slice(0, i).toString();
+        if (!/101/.test(head)) { reject(new Error("CDP handshake failed")); return; }
+        handshook = true; buf = buf.slice(i + 4); resolve(client);
+      }
+      let frame;
+      while ((frame = decodeFrame(buf))) {
+        buf = frame.rest;
+        if (frame.opcode === 8) { sock.destroy(); return; }
+        if (frame.opcode !== 1) continue;
+        let m; try { m = JSON.parse(frame.payload.toString()); } catch { continue; }
+        if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+      }
+    });
+    sock.on("error", reject);
+    sock.setTimeout(30000, () => reject(new Error("CDP socket timeout")));
+  });
+}
+function encodeFrame(str) {
+  const payload = Buffer.from(str);
+  const len = payload.length;
+  const mask = crypto.randomBytes(4);
+  let header;
+  if (len < 126) header = Buffer.from([0x81, 0x80 | len]);
+  else if (len < 65536) { header = Buffer.alloc(4); header[0] = 0x81; header[1] = 0x80 | 126; header.writeUInt16BE(len, 2); }
+  else { header = Buffer.alloc(10); header[0] = 0x81; header[1] = 0x80 | 127; header.writeBigUInt64BE(BigInt(len), 2); }
+  const masked = Buffer.alloc(len);
+  for (let i = 0; i < len; i++) masked[i] = payload[i] ^ mask[i % 4];
+  return Buffer.concat([header, mask, masked]);
+}
+function decodeFrame(buf) {
+  if (buf.length < 2) return null;
+  const opcode = buf[0] & 0x0f;
+  let len = buf[1] & 0x7f, offset = 2;
+  if (len === 126) { if (buf.length < 4) return null; len = buf.readUInt16BE(2); offset = 4; }
+  else if (len === 127) { if (buf.length < 10) return null; len = Number(buf.readBigUInt64BE(2)); offset = 10; }
+  if (buf.length < offset + len) return null;
+  return { opcode, payload: buf.slice(offset, offset + len), rest: buf.slice(offset + len) };
+}
+
+// ── CDP high-level helpers ────────────────────────────────────────────────────
+async function evaluate(cdp, expr) {
+  const r = await cdp.send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
+  if (r.result && r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.text || "eval error");
+  return r.result?.result?.value;
+}
+async function clickEl(cdp, findExpr) {
+  const rect = await evaluate(cdp, `(()=>{const el=(${findExpr}); if(!el) return null; el.scrollIntoView({block:'center'}); const r=el.getBoundingClientRect(); return {x:r.x+r.width/2, y:r.y+r.height/2};})()`);
+  if (!rect) return false;
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: rect.x, y: rect.y });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: rect.x, y: rect.y, button: "left", clickCount: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: rect.x, y: rect.y, button: "left", clickCount: 1 });
+  return true;
+}
+async function typeInto(cdp, findExpr, text) {
+  const ok = await clickEl(cdp, findExpr);
+  if (!ok) return false;
+  await sleep(250);
+  // clear then type real keystrokes (Telegram controlled inputs need real events)
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", modifiers: 2, commands: ["selectAll"] });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
+  for (const ch of String(text)) {
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: ch });
+  }
+  await sleep(400);
+  return true;
+}
+async function pageText(cdp) { return (await evaluate(cdp, "document.body.innerText.replace(/\\s+/g,' ').slice(0,300)")) || ""; }
+
+// Pick a Telegram target. --target wins; else the first visible web.telegram.org page.
+async function pickTelegramTarget(targetId) {
+  const ts = (await cdpTargets()).filter((t) => t.type === "page");
+  if (targetId) { const hit = ts.find((t) => t.id === targetId); if (!hit) throw new Error(`no CDP target ${targetId}`); return hit; }
+  const tg = ts.filter((t) => t.url.startsWith(TG_URL_PREFIX) && !t.url.endsWith(".js"));
+  if (!tg.length) throw new Error("no Telegram Web view found (open one in the 矩阵 panel first)");
+  for (const t of tg) {
+    const cdp = await cdpConnect(t.webSocketDebuggerUrl).catch(() => null);
+    if (!cdp) continue;
+    const vis = await evaluate(cdp, "document.visibilityState").catch(() => "hidden");
+    cdp.close();
+    if (vis === "visible") return t;
+  }
+  return tg[0];
+}
+
+// ── the login flow ────────────────────────────────────────────────────────────
+// Telegram web-k's 2FA page has THREE input[type=password]: two `.stealthy`
+// autofill decoys and one real `input.input-field-input`. Fill the real one.
+const PW_SELECTOR = "document.querySelector('input.input-field-input[type=password]')";
+const CODE_SELECTOR = "document.querySelector('input[inputmode=numeric]') || document.querySelector('input')";
+const PHONE_SELECTOR = "[...document.querySelectorAll('.input-field-input')].find(i=>i.getAttribute('inputmode')==='decimal')";
+const NEXT_BTN = "[...document.querySelectorAll('button')].find(e=>/^next$/i.test((e.textContent||'').trim()))";
+const PHONE_BTN = "[...document.querySelectorAll('button')].find(e=>/log in by phone number/i.test(e.textContent||''))";
+
+async function runLogin(target, { phone, codeUrl, twofa, code, onStep }) {
+  const cdp = await cdpConnect(target.webSocketDebuggerUrl);
+  const step = (s, extra) => onStep && onStep(s, extra);
+  try {
+    let text = await pageText(cdp);
+    // 1. switch to phone-number login if we're on the QR screen
+    if (/log in by qr code/i.test(text) || /qr code/i.test(text)) {
+      await clickEl(cdp, PHONE_BTN);
+      await sleep(2500);
+      text = await pageText(cdp);
+    }
+    // 2. enter phone + Next (unless already past it)
+    if (/enter your phone|confirm your country|phone number/i.test(text) && !/we have sent you/i.test(text)) {
+      step("phone");
+      if (!(await typeInto(cdp, PHONE_SELECTOR, phone))) throw new Error("phone input not found");
+      await clickEl(cdp, NEXT_BTN);
+      // wait until the request is accepted (leaves "PLEASE WAIT...")
+      for (let i = 0; i < 20; i++) { await sleep(1500); text = await pageText(cdp); if (!/please wait/i.test(text)) break; }
+    }
+    // 3. code — fetch from 接码 URL if not supplied
+    if (/we have sent you|enter (the )?code|code we sent/i.test(text) || (await evaluate(cdp, "!!document.querySelector('input[inputmode=numeric]')"))) {
+      step("code:waiting");
+      let theCode = code;
+      if (!theCode) {
+        if (!codeUrl) throw new Error("no code and no 接码 URL to read it from");
+        const info = await pollCode(codeUrl, { onTick: (t) => step("code:poll", t) });
+        if (!info.code) throw new Error("could not obtain a code: " + (info.reason || "unknown"));
+        theCode = info.code;
+        if (!twofa && info.twofa) twofa = info.twofa;
+      }
+      step("code:enter", { code: theCode });
+      if (!(await typeInto(cdp, CODE_SELECTOR, theCode))) throw new Error("code input not found");
+      await sleep(4000);
+      text = await pageText(cdp);
+      if (/code expired/i.test(text)) throw new Error("code expired — request a fresh one and retry");
+    }
+    // 4. 2FA cloud password (the real, non-stealthy input)
+    if (await evaluate(cdp, `!!(${PW_SELECTOR})`)) {
+      if (!twofa) throw new Error("account has a 2FA password but none was provided (--2fa)");
+      step("2fa");
+      if (!(await typeInto(cdp, PW_SELECTOR, twofa))) throw new Error("2FA input not found");
+      await clickEl(cdp, NEXT_BTN);
+      await sleep(6000);
+    }
+    // 5. verdict
+    const loggedIn = await evaluate(cdp, "!!document.querySelector('#column-left .chatlist, .chatlist-chat, ul.chatlist li')");
+    text = await pageText(cdp);
+    return { loggedIn: !!loggedIn, text };
+  } finally { cdp.close(); }
+}
+
+// ── CLI ───────────────────────────────────────────────────────────────────────
+const HELP = `tg-login — automate Telegram Web login in cicy-desktop's 矩阵 panel
+
+  tg-login code <codeUrl>            read a 接码/getcode URL: code, time, 2fa
+  tg-login poll <codeUrl>            poll it (rate-limit aware) until a code shows
+  tg-login parse [file]              parse "phone----codeUrl" lines (stdin if no file)
+  tg-login targets                   list open Telegram Web CDP views
+  tg-login login <phone> <codeUrl> [--2fa <pw>] [--code <c>] [--target <id>]
+                                     drive phone → code → 2FA on the visible view
+
+Env: TG_CDP_HOST (127.0.0.1), TG_CDP_PORT (9221).  Add --json for machine output.
+Notes: codes expire in minutes; the 接码 service is ~1 request/min. The 2FA page
+has decoy .stealthy inputs — this tool fills the real input.input-field-input.`;
+
+function flag(name) { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; }
+const args = process.argv.slice(2).filter((a) => a !== "--json");
+const cmd = args[0];
+
+async function main() {
+  switch (cmd) {
+    case undefined: case "help": case "-h": case "--help":
+      process.stdout.write(HELP + "\n"); return;
+    case "code": {
+      if (!args[1]) die("usage: tg-login code <codeUrl>");
+      const info = parseCodePage(await fetchUrl(args[1]));
+      out({ ok: true, ...info }, info.code ? `code=${info.code} time=${info.time || "?"} 2fa=${info.twofa || "-"}` : info.rateLimited ? `rate-limited, wait ${info.waitSeconds}s` : `no code yet (${info.reason || "empty"})`);
+      return;
+    }
+    case "poll": {
+      if (!args[1]) die("usage: tg-login poll <codeUrl>");
+      const info = await pollCode(args[1], { onTick: ({ attempt, info }) => { if (!isJson) process.stderr.write(`  [${attempt}] ${info.code ? "code " + info.code : info.rateLimited ? "rate-limited " + info.waitSeconds + "s" : info.reason || "empty"}\n`); } });
+      if (!info.code) die(info.reason || "no code");
+      out({ ok: true, ...info }, `code=${info.code} 2fa=${info.twofa || "-"}`);
+      return;
+    }
+    case "parse": {
+      const src = args[1] ? readFileSync(args[1], "utf8") : readFileSync(0, "utf8");
+      const rows = src.split(/\r?\n/).map(parseAccountLine).filter(Boolean);
+      out({ ok: true, count: rows.length, accounts: rows }, rows.map((r) => `${r.phone}\t${r.codeUrl}`).join("\n"));
+      return;
+    }
+    case "targets": {
+      const ts = (await cdpTargets()).filter((t) => t.type === "page" && t.url.startsWith(TG_URL_PREFIX) && !t.url.endsWith(".js"));
+      out({ ok: true, count: ts.length, targets: ts.map((t) => ({ id: t.id, title: t.title })) }, ts.map((t) => `${t.id}  ${t.title}`).join("\n") || "(no Telegram views open)");
+      return;
+    }
+    case "login": {
+      const phone = args[1], codeUrl = args[2];
+      if (!phone) die("usage: tg-login login <phone> <codeUrl> [--2fa pw]");
+      const target = await pickTelegramTarget(flag("--target"));
+      const res = await runLogin(target, { phone, codeUrl, twofa: flag("--2fa"), code: flag("--code"),
+        onStep: (s, extra) => { if (!isJson) process.stderr.write(`  · ${s}${extra && extra.code ? " " + extra.code : ""}\n`); } });
+      out({ ok: res.loggedIn, ...res }, res.loggedIn ? `logged in: ${phone}` : `not logged in — ${res.text.slice(0, 120)}`);
+      process.exit(res.loggedIn ? 0 : 2);
+    }
+    default:
+      die(`unknown command: ${cmd}\n\n${HELP}`, 2);
+  }
+}
+main().catch((e) => die(e.message || String(e)));
