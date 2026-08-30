@@ -44,9 +44,13 @@ export function parseCodePage(html) {
   const rl = text.match(/请等待\s*(\d+)\s*秒/);
   if (/请求过于频繁/.test(text)) return { rateLimited: true, waitSeconds: rl ? Number(rl[1]) : 0 };
   if (/无三十分钟内的登录消息|错误信息/.test(text) && !/设备验证码/.test(text)) return { empty: true, reason: text.slice(0, 120) };
-  const code = (text.match(/设备验证码[:：]?\s*([0-9]{4,6})/) || text.match(/\b([0-9]{5})\b/) || [])[1] || "";
+  // Only trust an explicit 设备验证码 label — a bare 5-digit fallback matched
+  // page/script noise (e.g. gtag ids) on the empty page and produced garbage.
+  const code = (text.match(/设备验证码[:：]?\s*([0-9]{4,7})\b/) || [])[1] || "";
   const time = (text.match(/登录时间[:：]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:]{5,8})/) || [])[1] || "";
-  const twofa = (text.match(/2fa\/?密码[:：]?\s*([^\s✅登]+)/i) || [])[1] || "";
+  // 2fa/密码 is a short token; stop at whitespace/label chars so we never slurp
+  // trailing markup or script text.
+  const twofa = code ? (text.match(/2fa\/?密码[:：]?\s*([A-Za-z0-9@._-]{1,64})/i) || [])[1] || "" : "";
   return { code, time, twofa, empty: !code };
 }
 
