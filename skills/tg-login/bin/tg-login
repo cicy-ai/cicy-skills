@@ -54,6 +54,16 @@ export function parseCodePage(html) {
   return { code, time, twofa, empty: !code };
 }
 
+// Parse the 接码 页 login time ("2026-08-31 03:57:11", account tz) into a
+// comparable number. Used only to compare 接码 times to EACH OTHER (a baseline
+// read vs. later reads) — never against wall clock — so the timezone offset
+// cancels out and freshness is unambiguous.
+export function parseTimeMs(s) {
+  const m = String(s || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return 0;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+}
+
 function fetchUrl(url, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     let mod;
@@ -76,7 +86,7 @@ function fetchUrl(url, timeoutMs = 20000) {
 
 // Poll a 接码 URL until a code appears, honouring the rate limit. maxMs caps
 // the total wait; minGapMs is the floor between requests (service is ~1/min).
-async function pollCode(url, { maxMs = 8 * 60000, minGapMs = 62000, onTick } = {}) {
+async function pollCode(url, { maxMs = 8 * 60000, minGapMs = 62000, afterTimeMs = 0, onTick } = {}) {
   const started = Date.now();
   let attempt = 0;
   while (Date.now() - started < maxMs) {
@@ -84,13 +94,34 @@ async function pollCode(url, { maxMs = 8 * 60000, minGapMs = 62000, onTick } = {
     let info;
     try { info = parseCodePage(await fetchUrl(url)); }
     catch (e) { info = { error: e.message }; }
-    if (onTick) onTick({ attempt, info });
-    if (info.code) return info;
+    // freshness gate: a code is only the one WE just requested if its 登录时间
+    // is strictly newer than the baseline captured before the request. Without
+    // a baseline (0) any code is accepted. A code with no time is accepted only
+    // when there is no baseline to beat.
+    const t = parseTimeMs(info.time);
+    const fresh = !!info.code && (afterTimeMs <= 0 ? true : t > afterTimeMs);
+    if (onTick) onTick({ attempt, info, fresh, stale: !!info.code && !fresh });
+    if (fresh) return info;
     let wait = minGapMs;
     if (info.rateLimited && info.waitSeconds) wait = Math.max((info.waitSeconds + 3) * 1000, minGapMs);
     await sleep(wait);
   }
-  return { empty: true, reason: "timed out waiting for a code" };
+  return { empty: true, reason: "timed out waiting for a fresh code (account may be spam-restricted — appeal via @SpamBot)" };
+}
+
+// Read the 接码 页 once for a definitive baseline (its current login time),
+// waiting out the service rate limit. Reading never triggers a Telegram flood,
+// so this is safe to do before requesting a login.
+async function baselineTime(url, { maxMs = 3 * 60000 } = {}) {
+  const started = Date.now();
+  while (Date.now() - started < maxMs) {
+    let info;
+    try { info = parseCodePage(await fetchUrl(url)); }
+    catch { return 0; }
+    if (info.rateLimited) { await sleep(Math.max((info.waitSeconds + 3) * 1000, 8000)); continue; }
+    return parseTimeMs(info.time); // 0 when the page currently has no code
+  }
+  return 0;
 }
 
 // ── phone----codeUrl line parsing ─────────────────────────────────────────────
@@ -240,6 +271,11 @@ async function runLogin(target, { phone, codeUrl, twofa, code, onStep }) {
   const cdp = await cdpConnect(target.webSocketDebuggerUrl);
   const step = (s, extra) => onStep && onStep(s, extra);
   try {
+    // Baseline: the 接码 页's current login time BEFORE we ask Telegram for a
+    // new code, so we can later accept only a strictly-newer (=fresh) code and
+    // never type a stale/expired one.
+    let baseMs = 0;
+    if (codeUrl && !code) { step("baseline"); baseMs = await baselineTime(codeUrl); step("baseline:done", { baseMs }); }
     let text = await pageText(cdp);
     // 1. switch to phone-number login if we're on the QR screen
     if (/log in by qr code/i.test(text) || /qr code/i.test(text)) {
@@ -261,7 +297,7 @@ async function runLogin(target, { phone, codeUrl, twofa, code, onStep }) {
       let theCode = code;
       if (!theCode) {
         if (!codeUrl) throw new Error("no code and no 接码 URL to read it from");
-        const info = await pollCode(codeUrl, { onTick: (t) => step("code:poll", t) });
+        const info = await pollCode(codeUrl, { afterTimeMs: baseMs, onTick: (t) => step("code:poll", t) });
         if (!info.code) throw new Error("could not obtain a code: " + (info.reason || "unknown"));
         theCode = info.code;
         if (!twofa && info.twofa) twofa = info.twofa;
