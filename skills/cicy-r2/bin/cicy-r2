@@ -54,7 +54,18 @@ function redact(s, keep = 4) {
   return `${s.slice(0, keep)}…(len=${s.length})`;
 }
 
-function wrangler(cfg, args) {
+// Object commands must carry --remote: since wrangler 4 they default to the
+// LOCAL simulated store (.wrangler/state/v3/r2), so a put "succeeds" while
+// writing nothing to the real bucket.
+const REMOTE_CMDS = new Set(["put", "get", "delete"]);
+
+function withRemote(args) {
+  const isObject = args[0] === "r2" && args[1] === "object" && REMOTE_CMDS.has(args[2]);
+  return isObject && !args.includes("--remote") ? [...args, "--remote"] : args;
+}
+
+function wrangler(cfg, rawArgs) {
+  const args = withRemote(rawArgs);
   if (!fs.existsSync(WRANGLER_CWD)) {
     die(`wrangler dir not found: ${WRANGLER_CWD}\nset CICY_R2_WRANGLER_CWD to a dir with node_modules/wrangler installed`);
   }

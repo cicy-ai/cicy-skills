@@ -97,3 +97,11 @@ cicy-r2 domain-list
 | `.../mihomo/` `.../rootfs/` `.../ttyd/` `.../installers/` | 保持相同路径结构至 R2 主机 |
 
 COS 在欠费状态下会冻结 GetObject 接口（包括已签名的请求），因此批量迁移 COS→R2 需先充值 COS，或直接将新版发布资源上传至 R2 并等待旧版客户端自然迁移完毕。
+
+## wrangler `--remote`
+
+`put` / `get` / `delete` 一律带 `--remote`。从 wrangler 4 起，`r2 object`
+系列命令默认操作**本地模拟存储**（wrangler 工作目录下的
+`.wrangler/state/v3/r2/`）：put 会打印 "Upload complete"，但真实 bucket 里
+什么都没有，`list`（走 REST API）和公开 URL 都看不到它。手工调用 wrangler
+时记得自己加 `--remote`。

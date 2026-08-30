@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-r2",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "title": "CiCy R2",
   "description": "Upload, download, list, and manage objects in the project Cloudflare R2 bucket (public CDN at r2.deepfetch.de5.net). Global-friendly replacement for the arrears-prone Tencent COS bucket.",
   "category": "cloud",

@@ -112,3 +112,12 @@ to migrate (host → `r2.deepfetch.de5.net`, path unchanged):
 COS GetObject is frozen during arrears (even signed), so bulk-mirroring
 COS→R2 requires recharging COS first, OR just publishing fresh release
 assets straight to R2 and letting old clients drain off COS.
+
+## wrangler `--remote`
+
+`put` / `get` / `delete` always pass `--remote`. Since wrangler 4, the
+`r2 object` commands default to the **local simulated store**
+(`.wrangler/state/v3/r2/` under the wrangler cwd): a put prints
+"Upload complete" while writing nothing to the real bucket, and the object
+never appears in `list` (which goes through the REST API) or at the public
+URL. If you invoke wrangler by hand, add `--remote` yourself.
