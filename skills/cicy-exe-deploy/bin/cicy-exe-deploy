@@ -1,0 +1,327 @@
+#!/usr/bin/env node
+// cicy-exe-deploy — push a Windows installer (.exe) from this cicy-code node to
+// every sibling node of the same CiCy Hub account and install it on each
+// node's Windows host through that node's connected cicy-desktop.
+//
+// Topology this is built for: each team runs cicy-code as a Docker container
+// inside WSL on a Windows PC. The container's ~/projects is the host's C:\
+// (drvfs mount), and the PC's cicy-desktop is connected to that container's
+// :8008. So:  scp exe → node:~/projects/X.exe  ==  C:\X.exe on that PC, and
+// `agent-desktop exec-file` against node:8008 runs it there.
+//
+// Zero deps, Node 18+. Needs: ssh/scp on PATH, sibling SSH trust (cicy-code
+// hub mode installs it), and the `agent-desktop` skill for the install step.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import net from "node:net";
+import { spawn, spawnSync } from "node:child_process";
+
+process.stdout.on("error", (e) => { if (e.code === "EPIPE") process.exit(0); });
+const argv = process.argv.slice(2);
+const HOME = os.homedir();
+const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || path.join(HOME, "cicy-ai", "global.json");
+const API_PORT = Number(process.env.CICY_API_PORT || 8008);
+const SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=accept-new", "-o", "LogLevel=ERROR"];
+
+function usage() {
+  process.stdout.write(`cicy-exe-deploy — push an .exe to sibling nodes and install it via their cicy-desktop
+
+  cicy-exe-deploy nodes [--json]                       list hub siblings with ssh/desktop reachability
+  cicy-exe-deploy push <exe|https://url> [opts]        get the installer onto every node, then (default) silent install
+                                                       URL: each node downloads it itself (fast: use an OSS/CDN link)
+                                                       local file: scp over the hub frp ssh port (slow, ~10 KB/s — prefer a URL)
+  cicy-exe-deploy install <C:\\name.exe|name> [opts]   only run an already-copied installer
+  cicy-exe-deploy status <name.exe> [opts]             is the file present on each node (~/<dest> = C:\\<dest>) ?
+  cicy-exe-deploy versions [opts]                      cicy-desktop version each node's PC reports
+
+opts:
+  --nodes a,b,c        only these node names (default: every online linux/WSL sibling)
+  --exclude a,b        skip these
+  --dest <dir>         remote dir under ~ (default: projects → C:\\projects on WSL-docker hosts)
+  --force              re-download even if the file is already there
+  --via-desktop        (URL only) skip the container: the PC's cicy-desktop downloads with Windows curl and installs
+  --verbose            log each step
+  --no-install         push only
+  --args "<flags>"     installer flags (default: /S — NSIS silent)
+  --name <file.exe>    remote file name (default: basename of the path/URL)
+  --parallel N         nodes at once (default 3)
+  --json               machine-readable summary
+`);
+}
+
+function readToken() {
+  if (process.env.CICY_API_TOKEN) return process.env.CICY_API_TOKEN;
+  try { return JSON.parse(fs.readFileSync(GLOBAL_JSON, "utf8")).api_token || ""; } catch { return ""; }
+}
+
+async function api(route) {
+  const r = await fetch(`http://127.0.0.1:${API_PORT}${route}`, { headers: { authorization: "Bearer " + readToken() } });
+  if (!r.ok) throw new Error(`cicy-code ${route} → HTTP ${r.status}`);
+  return r.json();
+}
+
+function opt(name, def) {
+  const i = argv.indexOf(name);
+  if (i < 0) return def;
+  return argv[i + 1];
+}
+const has = (name) => argv.includes(name);
+const VERBOSE = argv.includes("--verbose");
+const log = (n, msg) => { if (VERBOSE) process.stderr.write(`[${n}] ${msg}\n`); };
+const list = (v) => (v ? String(v).split(",").map((s) => s.trim()).filter(Boolean) : []);
+
+// ── discovery ────────────────────────────────────────────────────────────────
+async function siblings() {
+  const d = await api("/api/im/cicy-cloud/instances");
+  const rows = Array.isArray(d.instances) ? d.instances : [];
+  return rows
+    .filter((i) => !i.self)
+    .map((i) => ({
+      name: i.name || (i.proxyHost ? String(i.proxyHost).split(".")[0] : i.instanceId),
+      id: i.instanceId,
+      platform: i.platform || "",
+      online: i.status ? i.status === "online" : !!i.online,
+      version: i.version || "",
+      sshHost: i.frp && i.frp.host,
+      sshPort: i.frp && i.frp.ports && i.frp.ports.ssh,
+      sshUser: (i.frp && i.frp.user) || i.sshUser || "cicy",
+      sshLive: !!(i.frp && i.frp.sshLive),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+
+function selectNodes(all) {
+  const only = list(opt("--nodes"));
+  const excl = list(opt("--exclude"));
+  return all.filter((n) => {
+    if (only.length && !only.includes(n.name)) return false;
+    if (excl.includes(n.name)) return false;
+    if (!only.length && !(n.platform === "linux" || n.platform === "")) return false; // WSL-docker hosts only by default
+    return true;
+  });
+}
+
+// ── ssh helpers ──────────────────────────────────────────────────────────────
+const target = (n) => `${n.sshUser}@${n.sshHost}`;
+function sshArgs(n) { return [...SSH_OPTS, "-p", String(n.sshPort)]; }
+function run(cmd, args, { timeout = 60000, input } = {}) {
+  const r = spawnSync(cmd, args, { encoding: "utf8", timeout, input });
+  return { code: r.status, out: (r.stdout || "").trim(), err: (r.stderr || "").trim(), timedOut: !!r.error };
+}
+function ssh(n, remoteCmd, timeout = 40000, tries = 5) {
+  let r;
+  for (let i = 0; i < tries; i++) {
+    r = run("ssh", ["-n", ...sshArgs(n), target(n), remoteCmd], { timeout });
+    if (r.code === 0 || !/kex_exchange|Connection closed|Connection reset|timed out|Connection refused/i.test(r.err)) return r;
+    sleepSync(2000 * (i + 1));
+  }
+  return r;
+}
+function sleepSync(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function scp(n, local, remote, timeout = 20 * 60 * 1000) { return run("scp", ["-q", ...sshArgs(n), local, `${target(n)}:${remote}`], { timeout }); }
+
+function freePort() {
+  return new Promise((res) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => res(p)); }); });
+}
+// forward local port → node's 127.0.0.1:8008, resolve once it accepts
+async function tunnel(n, tries = 5) {
+  for (let i = 0; i < tries; i++) {
+    try { return await tunnelOnce(n); } catch (e) { if (i === tries - 1) throw e; await new Promise((r) => setTimeout(r, 2000 * (i + 1))); }
+  }
+}
+async function tunnelOnce(n) {
+  const port = await freePort();
+  const child = spawn("ssh", ["-N", ...sshArgs(n), "-L", `${port}:127.0.0.1:${API_PORT}`, target(n)], { stdio: "ignore" });
+  for (let i = 0; i < 120; i++) { // up to ~60 s: the hub frp port can be slow to accept under load
+    await new Promise((r) => setTimeout(r, 500));
+    const ok = await new Promise((r) => { const s = net.connect(port, "127.0.0.1"); s.once("connect", () => { s.destroy(); r(true); }); s.once("error", () => r(false)); });
+    if (ok) return { port, close: () => { try { child.kill(); } catch {} } };
+    if (child.exitCode != null) break;
+  }
+  try { child.kill(); } catch {}
+  throw new Error("tunnel failed");
+}
+
+function remoteToken(n) {
+  const r = ssh(n, `python3 -c "import json;print(json.load(open('${HOME}/cicy-ai/global.json')).get('api_token',''))" 2>/dev/null || sed -n 's/.*"api_token" *: *"\\([^"]*\\)".*/\\1/p' ~/cicy-ai/global.json`);
+  return r.out.split("\n").pop().trim();
+}
+
+function agentDesktop(port, token, args, timeout = 45000) {
+  const r = spawnSync("agent-desktop", args, { encoding: "utf8", timeout, env: { ...process.env, CICY_API_PORT: String(port), CICY_API_TOKEN: token } });
+  return { code: r.status, out: (r.stdout || "").trim(), err: (r.stderr || "").trim(), missing: r.error && r.error.code === "ENOENT" };
+}
+
+function desktopClients(port, token) {
+  const r = agentDesktop(port, token, ["clients", "--json"]);
+  if (r.missing) throw new Error("agent-desktop skill not installed (cicy-code skill install agent-desktop)");
+  try {
+    const d = JSON.parse(r.out);
+    const rows = Array.isArray(d) ? d : d.data || d.clients || [];
+    return rows.filter((c) => c && c.client_id && (!c.platform || String(c.platform).startsWith("win"))).map((c) => c.client_id);
+  } catch { return []; }
+}
+
+// ── steps ────────────────────────────────────────────────────────────────────
+function winPath(dest, name) { return `C:\\${String(dest).replace(/\//g, "\\")}\\${name}`; }
+
+function installBat(exeName, dest, flags, url) {
+  if (url) {
+    return `@echo off\r\nset "F=%TEMP%\\${exeName}"\r\ncurl -sL --retry 3 -o "%F%" "${url}" || (echo download failed & exit /b 1)\r\nfor %%A in ("%F%") do echo downloaded %%~zA bytes\r\nstart "" "%F%" ${flags}\r\necho started ${exeName}\r\n`;
+  }
+  const wp = winPath(dest, exeName);
+  return `@echo off\r\nif not exist "${wp}" (echo missing ${wp} & exit /b 2)\r\nstart "" "${wp}" ${flags}\r\necho started ${exeName}\r\n`;
+}
+
+async function installOn(n, exeName, dest, flags, url) {
+  log(n.name, "read node token");
+  const tok = remoteToken(n);
+  if (!tok) return { ok: false, error: "no api_token on node" };
+  let t;
+  log(n.name, "open tunnel");
+  try { t = await tunnel(n); } catch (e) { return { ok: false, error: e.message }; }
+  try {
+    log(n.name, `list desktop clients via :${t.port}`);
+    const clients = desktopClients(t.port, tok);
+    if (!clients.length) return { ok: false, error: "no cicy-desktop connected to this node" };
+    const bat = path.join(os.tmpdir(), `cicy-exe-install-${process.pid}-${n.name}.bat`);
+    fs.writeFileSync(bat, installBat(exeName, dest, flags, url));
+    const res = {};
+    for (const c of clients) {
+      log(n.name, `exec-file on ${c}`);
+      const r = agentDesktop(t.port, tok, ["exec-file", bat, "--client", c], url ? 180000 : 45000);
+      // the installer restarts the desktop → the ack may time out; treat as sent
+      res[c] = r.code === 0 ? (r.out.split("\n").pop() || "ok") : (/timeout/i.test(r.out + r.err) ? "sent (ack timed out — expected)" : (r.err || r.out || `exit ${r.code}`));
+    }
+    try { fs.unlinkSync(bat); } catch {}
+    return { ok: true, clients: res };
+  } finally { t.close(); }
+}
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]); } }));
+  return out;
+}
+
+function printSummary(rows, json) {
+  if (json) { process.stdout.write(JSON.stringify(rows, null, 2) + "\n"); return; }
+  for (const r of rows) {
+    const extra = r.clients ? " " + Object.entries(r.clients).map(([c, v]) => `${c}: ${v}`).join("; ") : "";
+    process.stdout.write(`${r.ok ? "✔" : "✖"} ${r.node.padEnd(12)} ${r.step || ""} ${r.error || ""}${extra}\n`);
+  }
+  const ok = rows.filter((r) => r.ok).length;
+  process.stdout.write(`\n${ok}/${rows.length} ok\n`);
+}
+
+async function main() {
+  const cmd = argv[0];
+  if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "help") { usage(); return; }
+  const json = has("--json");
+  const all = await siblings();
+
+  if (cmd === "nodes") {
+    if (json) { process.stdout.write(JSON.stringify(all, null, 2) + "\n"); return; }
+    for (const n of all) process.stdout.write(`${n.online ? "●" : "○"} ${n.name.padEnd(12)} ${n.platform.padEnd(6)} v${n.version.padEnd(9)} ssh ${n.sshLive ? "live" : "down"}  ${n.sshUser}@${n.sshHost}:${n.sshPort}\n`);
+    return;
+  }
+
+  const nodes = selectNodes(all);
+  if (!nodes.length) { process.stderr.write("no matching nodes\n"); process.exit(1); }
+  const dest = opt("--dest", "projects");
+  const flags = opt("--args", "/S");
+  const parallel = Number(opt("--parallel", 3)) || 3;
+
+  if (cmd === "push") {
+    const exe = argv[1];
+    const isUrl = /^https?:\/\//i.test(exe || "");
+    if (!exe || (!isUrl && !fs.existsSync(exe))) { process.stderr.write("push: installer path or URL required\n"); process.exit(1); }
+    const exeName = (opt("--name") || decodeURIComponent(path.basename(isUrl ? new URL(exe).pathname : exe))).replace(/\s+/g, "-");
+    const install = !has("--no-install");
+    process.stdout.write(`push ${exe} → ${nodes.length} node(s) as ${winPath(dest, exeName)}${install ? ` then install (${flags})` : ""}\n`);
+    if (!isUrl) process.stdout.write("note: local file goes over the hub frp ssh port (slow). Put it on OSS/CDN and pass the URL when you can.\n");
+    const viaDesktop = has("--via-desktop");
+    const rows = await mapLimit(nodes, parallel, async (n) => {
+      if (!n.sshPort || !n.sshHost) return { node: n.name, ok: false, step: "ssh", error: "no frp ssh port" };
+      if (!n.online && !n.sshLive) return { node: n.name, ok: false, step: "ssh", error: "offline" };
+      // Windows-side path: the PC's cicy-desktop downloads with Windows curl and installs —
+      // no drvfs mount needed (some containers cannot see C:\ at all).
+      const desktopPath = async (why) => {
+        if (!isUrl || !install) return { node: n.name, ok: false, step: "ssh", error: why };
+        log(n.name, `container path unusable (${why}) → download+install on the PC itself`);
+        const r = await installOn(n, exeName, dest, flags, exe);
+        return { node: n.name, ok: r.ok, step: r.ok ? "installed (via desktop)" : "install", error: r.error, clients: r.clients };
+      };
+      if (viaDesktop && isUrl && install) return desktopPath("--via-desktop");
+      const pre = ssh(n, `mkdir -p ~/${dest} && touch ~/${dest}/.cicy-exe-deploy && rm -f ~/${dest}/.cicy-exe-deploy && echo ok`);
+      if (pre.code !== 0) return desktopPath(pre.err || "unreachable");
+      if (isUrl) {
+        // the node fetches it itself — its own (CN) route to OSS/CDN is far faster than anything relayed through the hub
+        const force = has("--force");
+        log(n.name, "download");
+        const dl = ssh(n, `cd ~/${dest} && if [ -s "${exeName}" ] && [ "${force ? 1 : 0}" = 0 ]; then stat -c %s "${exeName}"; else curl -fsSL --retry 3 --max-time 900 -o "${exeName}.part" "${exe}" && mv -f "${exeName}.part" "${exeName}" && stat -c %s "${exeName}"; fi`, 15 * 60 * 1000);
+        if (dl.code !== 0) return desktopPath("download: " + (dl.err.split("\n").pop() || (dl.timedOut ? "timeout" : `exit ${dl.code}`)));
+        process.stdout.write(`  ${n.name}: downloaded ${(Number(dl.out.split("\n").pop()) / 1048576).toFixed(1)} MB\n`);
+      } else {
+        const cp = scp(n, exe, `~/${dest}/${exeName}`);
+        if (cp.code !== 0) return { node: n.name, ok: false, step: "scp", error: cp.err || (cp.timedOut ? "timeout" : `exit ${cp.code}`) };
+        process.stdout.write(`  ${n.name}: copied\n`);
+      }
+      if (!install) return { node: n.name, ok: true, step: "copied" };
+      const r = await installOn(n, exeName, dest, flags);
+      return { node: n.name, ok: r.ok, step: r.ok ? "installed" : "install", error: r.error, clients: r.clients };
+    });
+    printSummary(rows, json);
+    process.exit(rows.every((r) => r.ok) ? 0 : 2);
+  }
+
+  if (cmd === "install") {
+    const exeName = path.basename(String(argv[1] || "").replace(/\\/g, "/"));
+    if (!exeName) { process.stderr.write("install: installer name required\n"); process.exit(1); }
+    const rows = await mapLimit(nodes, parallel, async (n) => {
+      const r = await installOn(n, exeName, dest, flags);
+      return { node: n.name, ok: r.ok, step: r.ok ? "installed" : "install", error: r.error, clients: r.clients };
+    });
+    printSummary(rows, json);
+    process.exit(rows.every((r) => r.ok) ? 0 : 2);
+  }
+
+  if (cmd === "versions") {
+    const rows = await mapLimit(nodes, parallel, async (n) => {
+      const tok = remoteToken(n);
+      if (!tok) return { node: n.name, ok: false, step: "versions", error: "no api_token on node" };
+      let t;
+      try { t = await tunnel(n); } catch (e) { return { node: n.name, ok: false, step: "versions", error: e.message }; }
+      try {
+        const r = agentDesktop(t.port, tok, ["clients", "--json"]);
+        if (r.missing) throw new Error("agent-desktop skill not installed");
+        let d; try { d = JSON.parse(r.out); } catch { return { node: n.name, ok: false, step: "versions", error: r.err || "bad reply" }; }
+        const cs = (Array.isArray(d) ? d : d.data || d.clients || []).filter((c) => c && c.client_id);
+        if (!cs.length) return { node: n.name, ok: false, step: "versions", error: "no cicy-desktop connected" };
+        const clients = {};
+        for (const c of cs) { const m = /CiCyDesktop\/([0-9.]+)/.exec(c.user_agent || ""); clients[c.client_id] = (m ? m[1] : "?") + (c.platform ? ` (${c.platform})` : ""); }
+        return { node: n.name, ok: true, step: "desktop", clients };
+      } finally { t.close(); }
+    });
+    printSummary(rows, json);
+    process.exit(rows.every((r) => r.ok) ? 0 : 2);
+  }
+
+  if (cmd === "status") {
+    const exeName = path.basename(String(argv[1] || "").replace(/\\/g, "/"));
+    if (!exeName) { process.stderr.write("status: installer name required\n"); process.exit(1); }
+    const rows = await mapLimit(nodes, parallel, async (n) => {
+      const r = ssh(n, `stat -c %s ~/${dest}/${exeName} 2>/dev/null || echo missing`);
+      const present = r.code === 0 && /^\d+$/.test(r.out);
+      return { node: n.name, ok: present, step: present ? `${(Number(r.out) / 1048576).toFixed(1)} MB` : (r.code === 0 ? "missing" : "unreachable"), error: r.code === 0 ? "" : r.err };
+    });
+    printSummary(rows, json);
+    return;
+  }
+
+  usage();
+  process.exit(1);
+}
+
+main().catch((e) => { process.stderr.write(`cicy-exe-deploy: ${e.message}\n`); process.exit(1); });
