@@ -1,0 +1,92 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "vnc",
+  "version": "1.0.0",
+  "title": "VNC Desktop Server",
+  "description": "Run a VNC server on a headless Linux host: install x11vnc/Xvfb, start a display with a window manager and password, check status, grab screenshots.",
+  "category": "system",
+  "tags": [
+    "vnc",
+    "x11vnc",
+    "xvfb",
+    "remote-desktop",
+    "headless"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/vnc",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "x11vnc",
+    "xvfb"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/vnc",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "config": {
+    "path": "~/cicy-ai/db/vnc.json",
+    "secret_fields": []
+  },
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "VNC 远程桌面",
+      "description": "在无头 Linux 主机上运行 VNC：安装 x11vnc/Xvfb，带窗口管理器和密码启动显示器，查看状态，截取屏幕。"
+    }
+  },
+  "tools": [
+    {
+      "name": "install",
+      "example": "vnc install",
+      "description": "Install x11vnc, Xvfb, fluxbox, x11-utils and imagemagick via apt"
+    },
+    {
+      "name": "start",
+      "example": "vnc start :1 --geometry 1920x1080",
+      "description": "Ensure the display exists (Xvfb if needed) and serve it over VNC"
+    },
+    {
+      "name": "stop",
+      "example": "vnc stop :1 --kill-x",
+      "description": "Stop the VNC server on a display, optionally the Xvfb behind it"
+    },
+    {
+      "name": "status",
+      "example": "vnc status --json",
+      "description": "List displays with X server, geometry, window manager, VNC port and pid"
+    },
+    {
+      "name": "password",
+      "example": "vnc password --set hunter2",
+      "description": "Store the VNC password in ~/.vnc/passwd"
+    },
+    {
+      "name": "screenshot",
+      "example": "vnc screenshot :1 --out ~/cicy-ai/assets/desktop.png",
+      "description": "Grab the current display contents to a PNG"
+    },
+    {
+      "name": "logs",
+      "example": "vnc logs :1 -n 50",
+      "description": "Tail the x11vnc log for a display"
+    }
+  ]
+}
