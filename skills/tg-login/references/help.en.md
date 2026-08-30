@@ -23,3 +23,10 @@ type it, then fill the 2FA cloud password if the account has one. Exit 0 when
 the chat list is present, 2 otherwise. Steps print on stderr.
 
 Env: `TG_CDP_HOST` (127.0.0.1), `TG_CDP_PORT` (9221). `--json` on any command.
+
+## Freshness gating (login)
+Before requesting a code, `login` reads the 接码 URL once to capture the
+current 登录时间 as a baseline, then accepts only a code whose 登录时间 is
+strictly newer — i.e. the one produced by this request — so it never types a
+stale or expired code. If no fresher code appears within the poll window the
+number is likely spam-restricted (appeal via @SpamBot).

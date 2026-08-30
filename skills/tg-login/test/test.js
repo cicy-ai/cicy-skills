@@ -64,3 +64,19 @@ test("targets errors cleanly when CDP is down", () => {
   try { run(["targets", "--json"], { env: { ...process.env, TG_CDP_PORT: "1" } }); assert.fail("should throw"); }
   catch (e) { assert.ok(e.status !== 0); }
 });
+
+test("parseTimeMs orders 接码 login times and gates freshness", async () => {
+  const { execFile } = await import("node:child_process");
+  const older = "<div>设备验证码: 11111</div><div>登录时间: 2026-08-31 03:50:00</div>";
+  const newer = "<div>设备验证码: 22222</div><div>登录时间: 2026-08-31 03:57:11</div>";
+  const srv = http.createServer((req, res) => { res.end(req.url === "/new" ? newer : older); });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const port = srv.address().port;
+  const call = (p) => new Promise((res, rej) => execFile("node", [BIN, "code", `http://127.0.0.1:${port}${p}`, "--json"], (e, so) => e ? rej(e) : res(JSON.parse(so))));
+  try {
+    const a = await call("/old"), b = await call("/new");
+    // both parse a code+time; the newer one must sort after the older one
+    assert.equal(a.code, "11111"); assert.equal(b.code, "22222");
+    assert.ok(Date.parse(b.time.replace(" ", "T")) > Date.parse(a.time.replace(" ", "T")));
+  } finally { srv.close(); }
+});
