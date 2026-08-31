@@ -45,6 +45,8 @@ Profiles (accountIdx = profile id = session persist:sandbox-N)
   telegram-matrix add-profile                  create the next profile (default proxy http://127.0.0.1:20001)
   telegram-matrix remove-profile <idx> --yes   delete a profile + its session data (irreversible)
   telegram-matrix set-proxy <idx> <url|"">     set/clear the profile proxy (open cell reloads)
+  telegram-matrix set-login <idx> <phone> [codeUrl]   set the profile's phone + 接码 URL (shown in the list)
+  telegram-matrix open-code <idx> [url]        open the profile's 接码 page in ITS window (force-navigates)
   telegram-matrix probe-ip <idx>               egress IP + region through the profile's proxy
   telegram-matrix states                       load state of every open cell (loaded/failed/error)
   telegram-matrix agents                       panel's agent list (per-cell helper agents)
@@ -53,6 +55,8 @@ Cells (the Telegram Web view of one profile)
   telegram-matrix cells [--json]               every profile <-> its webContentsId (open cells only) + load state
   telegram-matrix select <idx>                 open the profile in the panel preview (creates the cell)
   telegram-matrix reload <idx>                 reload the profile's cell
+  telegram-matrix reset <idx> --yes            wipe the cell's web storage + reload → back to the login screen
+  telegram-matrix batch [on|off]               report / set the panel's 批量登录 grid (all cells side by side)
   telegram-matrix cell <idx>                   find the cell's webContentsId (opens it if needed)
   telegram-matrix eval <idx> <js>              run JS inside the profile's Telegram Web page
   telegram-matrix url <idx> <url>              navigate the cell (e.g. https://web.telegram.org/k/#@user)
@@ -63,11 +67,13 @@ Cells (the Telegram Web view of one profile)
 Options
   --client <id>   target a specific cicy-desktop client (when several are connected)
   --json          machine-readable output
-  --yes           confirm destructive actions (remove-profile)
+  --yes           confirm destructive actions (remove-profile, reset)
 
 Notes
 - Never print or export auth keys / session storage of a Telegram profile.
 - Cells stay alive in the background once opened; select only switches the preview.
+- reload keeps the Telegram login state — a cell stuck mid-login stays on the
+  code step. Use reset to get back to the phone/QR screen.
 `);
 }
 
@@ -123,9 +129,43 @@ function findCell(idx) {
 function selectProfile(idx) {
   const p = ensurePanel();
   const ok = cdpEval(p.webContentsId, `(()=>{const r=document.querySelector('.row[data-id="${idx}"]'); if(!r) return false; r.click(); return true;})()`, false);
-  if (!ok) throw new Error(`profile #${idx} not in the panel list`);
+  if (!ok) {
+    const known = (panelCall('profiles') || []).some((x) => x.accountIdx === idx);
+    throw new Error(known
+      ? `profile #${idx} exists but the panel list is stale (it was created outside the panel) — reopen the panel tab: telegram-matrix close && telegram-matrix open`
+      : `profile #${idx} does not exist`);
+  }
   return p;
 }
+// The panel's openCodeUrl REUSES the profile's existing 接码 tab and does not
+// navigate it — so after the profile's codeUrl changes (a replacement card), the
+// tab still shows the previous card's page, stale error and all. Ask the panel
+// first (it creates the tab in the right profile window), then navigate the tab
+// ourselves whenever its URL is not the one we asked for.
+function openCodeUrl(idx, url) {
+  const res = panelCall('openCodeUrl', idx, url) || {};
+  const tabId = res.tabId;
+  if (!tabId || !url) return res;
+  const cur = webcontents().find((w) => Number(w.webContentsId) === Number(tabId));
+  if (cur && (cur.url || '') !== url) {
+    electron(['url', `tab:${tabId}`, url]);
+    res.navigated = true;
+  }
+  return res;
+}
+
+// Clear the cell's web storage so Telegram Web K forgets a half-finished login.
+// A plain reload does NOT do this: web-k keeps the pending auth state in
+// localStorage, so a cell stuck on "enter the code" reloads straight back onto
+// the code step with no way to change the number.
+function resetCell(idx) {
+  const c = ensureCell(idx);
+  cdpEval(c.webContentsId, `(async()=>{try{localStorage.clear();sessionStorage.clear();}catch(e){}
+    try{const dbs=indexedDB.databases?await indexedDB.databases():[];for(const d of dbs){try{indexedDB.deleteDatabase(d.name);}catch(e){}}}catch(e){}
+    location.reload();return true;})()`);
+  return c;
+}
+
 function ensureCell(idx) {
   let c = findCell(idx);
   if (c) return c;
@@ -142,9 +182,41 @@ try {
     case 'close': { const p = findPanel(); if (!p) { print('panel not open'); break; } electron(['close', `tab:${p.webContentsId}`]); print('closed'); break; }
     case 'panel-eval': { if (!rest[0]) fail('usage: panel-eval <js>'); const p = ensurePanel(); print(cdpEval(p.webContentsId, rest.join(' '))); break; }
     case 'profiles': { const list = panelCall('profiles'); if (json) print(list); else for (const p of list) { const t = p.telegram || null; const tg = t && (t.username || t.displayName) ? (t.username ? '@' + t.username : '') + (t.displayName ? (t.username ? ' · ' : '') + t.displayName : '') : '未登录'; print(`#${p.accountIdx} ${p.name} proxy=${p.proxy || '-'} tg=${tg} ip=${p.ipInfo && p.ipInfo.ip ? p.ipInfo.ip + ' ' + (p.ipInfo.area || '') : '-'} `); } break; }
-    case 'add-profile': print(panelCall('addProfile')); break;
+    case 'add-profile': {
+      // Click the panel's own button rather than calling panelAPI.addProfile
+      // directly: the page reloads and re-renders its profile list inside that
+      // handler, and nothing else does. Calling the API alone creates the
+      // profile but leaves the list stale, so `select <newIdx>` can't find its
+      // row until the panel is reopened.
+      const p = ensurePanel();
+      const before = new Set((panelCall('profiles') || []).map((x) => x.accountIdx));
+      const clicked = cdpEval(p.webContentsId, `(()=>{const b=document.getElementById('add-profile'); if(!b) return false; b.click(); return true;})()`, false);
+      let created = null;
+      if (clicked) {
+        for (let i = 0; i < 40; i++) {
+          sleep(500);
+          const rows = cdpEval(p.webContentsId, `[...document.querySelectorAll('.row')].map(r=>Number(r.dataset.id))`);
+          created = (rows || []).find((n) => !before.has(n));
+          if (created) break;
+        }
+      }
+      if (!created) created = (panelCall('addProfile') || {}).accountIdx; // headless fallback
+      const prof = (panelCall('profiles') || []).find((x) => x.accountIdx === created) || { accountIdx: created };
+      print(json ? prof : `#${prof.accountIdx} ${prof.name || ''} proxy=${prof.proxy || '-'}`);
+      break;
+    }
     case 'remove-profile': { const i = idxOf(rest[0]); if (!yes) fail('remove-profile deletes the profile and its Telegram session; add --yes to confirm', 3); print(panelCall('removeProfile', i)); break; }
     case 'set-proxy': { const i = idxOf(rest[0]); if (rest.length < 2) fail('usage: set-proxy <idx> <url|"">'); print(panelCall('setProfileProxy', i, rest[1] || '')); break; }
+    case 'set-login': { const i = idxOf(rest[0]); if (!rest[1]) fail('usage: set-login <idx> <phone> [codeUrl]'); print(panelCall('setProfileLogin', i, rest[1], rest[2] || '')); break; }
+    case 'open-code': {
+      const i = idxOf(rest[0]);
+      let url = rest[1];
+      if (!url) { const p = (panelCall('profiles') || []).find((x) => x.accountIdx === i); url = (p && p.login && p.login.codeUrl) || ''; }
+      if (!url) fail(`profile #${i} has no 接码 URL (set one with set-login)`);
+      const res = openCodeUrl(i, url);
+      print(json ? res : `opened in profile #${i}: ${url}${res.navigated ? ' (navigated a reused tab)' : ''}`);
+      break;
+    }
     case 'probe-ip': { const i = idxOf(rest[0]); print(panelCall('probeIp', i)); break; }
     case 'states': print(panelCall('states')); break;
     case 'agents': print(panelCall('agents')); break;
@@ -156,6 +228,28 @@ try {
     }
     case 'select': { const i = idxOf(rest[0]); const c = ensureCell(i); print(json ? c : `profile #${i} selected, cell webContentsId=${c.webContentsId}`); break; }
     case 'reload': { const i = idxOf(rest[0]); const c = findCell(i); if (!c) fail(`profile #${i} has no open cell (use select first)`); electron(['cdp', `tab:${c.webContentsId}`, 'Page.reload', '{}']); print('reloading'); break; }
+    case 'reset': {
+      const i = idxOf(rest[0]);
+      if (!yes) fail('reset wipes the cell\'s web storage — an in-progress or completed Telegram login on this profile is lost; add --yes to confirm', 3);
+      const c = resetCell(i);
+      print(json ? { accountIdx: i, webContentsId: c.webContentsId, reset: true } : `profile #${i} cell reset — back to the login screen`);
+      break;
+    }
+    case 'batch': {
+      const want = (rest[0] || '').toLowerCase();
+      if (want && want !== 'on' && want !== 'off') fail('usage: batch [on|off]  (no argument reports the current mode)');
+      const p = ensurePanel();
+      // No argument = report only. Toggling on a bare `batch` would flip the
+      // user's grid out from under them just for asking what it is.
+      const mode = cdpEval(p.webContentsId, `(()=>{const b=document.getElementById('batch-login'); if(!b) return null;
+        const on=/退出批量/.test(b.textContent||'');
+        const want=${JSON.stringify(want || '')};
+        if(want && (want==='on')!==on) b.click();
+        return /退出批量/.test(b.textContent||'')?'on':'off';})()`, false);
+      if (mode === null) fail('批量登录 button not found in the panel', 4);
+      print(json ? { batch: mode } : `batch ${mode}`);
+      break;
+    }
     case 'cell': { const i = idxOf(rest[0]); const c = ensureCell(i); print(json ? c : `${c.webContentsId} ${c.url}`); break; }
     case 'eval': { const i = idxOf(rest[0]); if (!rest[1]) fail('usage: eval <idx> <js>'); const c = ensureCell(i); print(cdpEval(c.webContentsId, rest.slice(1).join(' '))); break; }
     case 'url': { const i = idxOf(rest[0]); if (!rest[1]) fail('usage: url <idx> <url>'); const c = ensureCell(i); electron(['url', `tab:${c.webContentsId}`, rest[1]]); print('navigated'); break; }

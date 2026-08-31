@@ -30,3 +30,12 @@ current 登录时间 as a baseline, then accepts only a code whose 登录时间 
 strictly newer — i.e. the one produced by this request — so it never types a
 stale or expired code. If no fresher code appears within the poll window the
 number is likely spam-restricted (appeal via @SpamBot).
+
+## Dead cards (terminal)
+The 接码 service relays codes off a device that is already logged into the
+number. When that device drops (`接码设备已掉线`) or the number is frozen or
+banned, a code will **never** arrive. `code` / `poll` / `login` recognise that
+page, return `{dead:true, reason, fixUrl}` — `fixUrl` being the service's
+自助补号 (self-service replacement) link — and exit with code **5**, instead of
+spending the full 8-minute poll window on it. `login` checks before it asks
+Telegram for a code at all, so a dead card never burns a send allowance.

@@ -80,3 +80,41 @@ test("parseTimeMs orders 接码 login times and gates freshness", async () => {
     assert.ok(Date.parse(b.time.replace(" ", "T")) > Date.parse(a.time.replace(" ", "T")));
   } finally { srv.close(); }
 });
+
+test("a dead 接码 card is terminal: reported as dead, exit 5, 补号 link surfaced", async () => {
+  const { execFile } = await import("node:child_process");
+  // The real page an offline card serves (tags stripped by parseCodePage).
+  const dead = `<h3>发生错误</h3><p>错误信息：</p><p>接码设备已掉线！</p>
+    <p>此号未登录过，<a href="https://buhao.tgqqq.com/?prefill=Kzg4MDE4Nzg5">👉点此进入自助补号</a></p>
+    <a href="https://help.tgqqq.com/">✅✅登录不上？点此查看使用教程！✅✅</a>`;
+  const frozen = `<p>错误信息：</p><p>该号已冻结</p>`;
+  const srv = http.createServer((req, res) => { res.end(req.url === "/frozen" ? frozen : dead); });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const port = srv.address().port;
+  const call = (p, cmd = "code") => new Promise((res) => execFile("node", [BIN, cmd, `http://127.0.0.1:${port}${p}`, "--json"], (e, so) => res({ status: e ? e.code : 0, out: JSON.parse(so) })));
+  try {
+    const d = await call("/dead");
+    assert.equal(d.out.dead, true, "offline device must be flagged dead, not just empty");
+    assert.equal(d.status, 5, "dead card exits 5 so callers can branch on it");
+    assert.match(d.out.reason, /掉线/);
+    assert.equal(d.out.fixUrl, "https://buhao.tgqqq.com/?prefill=Kzg4MDE4Nzg5", "the 补号 link, not the help link");
+    assert.equal((await call("/frozen")).out.dead, true, "a frozen number is dead too");
+    // poll must give up at once instead of burning its 8-minute window
+    const started = Date.now();
+    const p = await call("/dead", "poll");
+    assert.equal(p.out.dead, true);
+    assert.ok(Date.now() - started < 30000, "poll must not keep retrying a dead card");
+  } finally { srv.close(); }
+});
+
+test("a normal empty page is NOT dead (polling should continue)", async () => {
+  const { execFile } = await import("node:child_process");
+  const srv = http.createServer((_q, res) => res.end(`<p>错误信息：</p><p>无三十分钟内的登录消息</p>`));
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const port = srv.address().port;
+  try {
+    const o = await new Promise((res) => execFile("node", [BIN, "code", `http://127.0.0.1:${port}/x`, "--json"], (_e, so) => res(JSON.parse(so))));
+    assert.equal(o.empty, true);
+    assert.ok(!o.dead, "no code yet is a transient state, not a dead card");
+  } finally { srv.close(); }
+});

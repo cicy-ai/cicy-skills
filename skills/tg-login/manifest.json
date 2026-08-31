@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-login",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "title": "Telegram Login",
   "description": "Automate Telegram Web login in cicy-desktop's 矩阵 panel: phone → SMS code (read from a 接码/getcode URL, rate-limit aware) → 2FA, driven over the Electron CDP endpoint.",
   "category": "agent",

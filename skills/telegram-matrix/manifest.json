@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "telegram-matrix",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "Telegram Matrix",
   "description": "Use when controlling the cicy-desktop Telegram 矩阵 panel: manage Telegram profiles (add/remove/proxy/IP probe) and drive each profile's Telegram Web view (select, reload, eval, snapshot, CDP).",
   "category": "agent",
