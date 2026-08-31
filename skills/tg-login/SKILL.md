@@ -51,6 +51,12 @@ Add `--json` to any command for machine-readable output.
   with no error. This tool always targets the real input.
 - **Controlled inputs need real keystrokes** — synthetic `.click()` /
   `el.value=` are ignored; the tool uses CDP `Input` events.
+- **A dead card is terminal, not slow.** The 接码 service relays the code off a
+  device already logged into the number; if that device drops
+  (`接码设备已掉线`) or the number is frozen, no code will *ever* appear.
+  `code` / `poll` / `login` detect it, return `{dead:true, fixUrl}` with the
+  service's 自助补号 link, and **exit 5** — instead of burning the poll window
+  (or a Telegram flood allowance) on a number that cannot answer.
 
 See [references/help.md](references/help.md) and
 [references/tools.md](references/tools.md).

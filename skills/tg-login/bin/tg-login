@@ -40,9 +40,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // 2fa password. Pull them out of the raw HTML text. Returns { code, time,
 // twofa, rateLimited, waitSeconds, empty }.
 export function parseCodePage(html) {
-  const text = String(html).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const raw = String(html);
+  const text = raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   const rl = text.match(/请等待\s*(\d+)\s*秒/);
   if (/请求过于频繁/.test(text)) return { rateLimited: true, waitSeconds: rl ? Number(rl[1]) : 0 };
+  // Terminal states. The 接码 service relays the code off a device that is
+  // already logged into the number; when that device drops (掉线) or the number
+  // is frozen/banned, NO amount of polling will ever produce a code — the card
+  // has to be replaced through the service's 自助补号 page. Distinguish this
+  // from "no code yet" so callers stop instead of burning the poll window.
+  if (!/设备验证码/.test(text) && /(设备已掉线|设备掉线|已冻结|已封禁|已被封)/.test(text)) {
+    const href = (raw.match(/href=["']([^"']*buhao[^"']*)["']/i) || [])[1] || "";
+    const reason = ((text.match(/错误信息[:：]?\s*([^✅👉]{1,60})/) || [])[1] || text.slice(0, 120)).trim();
+    return { dead: true, empty: true, reason, fixUrl: href.replace(/&amp;/g, "&") };
+  }
   if (/无三十分钟内的登录消息|错误信息/.test(text) && !/设备验证码/.test(text)) return { empty: true, reason: text.slice(0, 120) };
   // Only trust an explicit 设备验证码 label — a bare 5-digit fallback matched
   // page/script noise (e.g. gtag ids) on the empty page and produced garbage.
@@ -102,6 +113,7 @@ async function pollCode(url, { maxMs = 8 * 60000, minGapMs = 62000, afterTimeMs 
     const fresh = !!info.code && (afterTimeMs <= 0 ? true : t > afterTimeMs);
     if (onTick) onTick({ attempt, info, fresh, stale: !!info.code && !fresh });
     if (fresh) return info;
+    if (info.dead) return info;   // terminal — polling can never recover a dead card
     let wait = minGapMs;
     if (info.rateLimited && info.waitSeconds) wait = Math.max((info.waitSeconds + 3) * 1000, minGapMs);
     await sleep(wait);
@@ -118,6 +130,7 @@ async function baselineTime(url, { maxMs = 3 * 60000 } = {}) {
     let info;
     try { info = parseCodePage(await fetchUrl(url)); }
     catch { return 0; }
+    if (info.dead) return -1;  // signal: card is dead, don't request a login at all
     if (info.rateLimited) { await sleep(Math.max((info.waitSeconds + 3) * 1000, 8000)); continue; }
     return parseTimeMs(info.time); // 0 when the page currently has no code
   }
@@ -275,7 +288,15 @@ async function runLogin(target, { phone, codeUrl, twofa, code, onStep }) {
     // new code, so we can later accept only a strictly-newer (=fresh) code and
     // never type a stale/expired one.
     let baseMs = 0;
-    if (codeUrl && !code) { step("baseline"); baseMs = await baselineTime(codeUrl); step("baseline:done", { baseMs }); }
+    if (codeUrl && !code) {
+      step("baseline");
+      baseMs = await baselineTime(codeUrl);
+      // -1 = the 接码 card is dead (device offline / number frozen). Requesting a
+      // login now would only burn a Telegram flood allowance for a code nobody
+      // can read, so stop here and tell the caller to replace the card.
+      if (baseMs < 0) { const e = new Error("接码 card is dead (device offline / number frozen) — replace it via 自助补号"); e.dead = true; throw e; }
+      step("baseline:done", { baseMs });
+    }
     let text = await pageText(cdp);
     // 1. switch to phone-number login if we're on the QR screen
     if (/log in by qr code/i.test(text) || /qr code/i.test(text)) {
@@ -298,6 +319,7 @@ async function runLogin(target, { phone, codeUrl, twofa, code, onStep }) {
       if (!theCode) {
         if (!codeUrl) throw new Error("no code and no 接码 URL to read it from");
         const info = await pollCode(codeUrl, { afterTimeMs: baseMs, onTick: (t) => step("code:poll", t) });
+        if (info.dead) { const e = new Error("接码 card is dead: " + info.reason + (info.fixUrl ? " — 补号: " + info.fixUrl : "")); e.dead = true; e.fixUrl = info.fixUrl; throw e; }
         if (!info.code) throw new Error("could not obtain a code: " + (info.reason || "unknown"));
         theCode = info.code;
         if (!twofa && info.twofa) twofa = info.twofa;
@@ -335,7 +357,9 @@ const HELP = `tg-login — automate Telegram Web login in cicy-desktop's 矩阵 
 
 Env: TG_CDP_HOST (127.0.0.1), TG_CDP_PORT (9221).  Add --json for machine output.
 Notes: codes expire in minutes; the 接码 service is ~1 request/min. The 2FA page
-has decoy .stealthy inputs — this tool fills the real input.input-field-input.`;
+has decoy .stealthy inputs — this tool fills the real input.input-field-input.
+A dead card (接码设备已掉线 / 冻结) is terminal: reported as {dead:true} with the
+自助补号 link and exit code 5 — polling can never recover it.`;
 
 function flag(name) { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; }
 const args = process.argv.slice(2).filter((a) => a !== "--json");
@@ -348,12 +372,17 @@ async function main() {
     case "code": {
       if (!args[1]) die("usage: tg-login code <codeUrl>");
       const info = parseCodePage(await fetchUrl(args[1]));
-      out({ ok: true, ...info }, info.code ? `code=${info.code} time=${info.time || "?"} 2fa=${info.twofa || "-"}` : info.rateLimited ? `rate-limited, wait ${info.waitSeconds}s` : `no code yet (${info.reason || "empty"})`);
+      out({ ok: !info.dead, ...info }, info.code ? `code=${info.code} time=${info.time || "?"} 2fa=${info.twofa || "-"}`
+        : info.rateLimited ? `rate-limited, wait ${info.waitSeconds}s`
+        : info.dead ? `DEAD CARD: ${info.reason}${info.fixUrl ? `\n补号: ${info.fixUrl}` : ""}`
+        : `no code yet (${info.reason || "empty"})`);
+      if (info.dead) process.exit(5);
       return;
     }
     case "poll": {
       if (!args[1]) die("usage: tg-login poll <codeUrl>");
       const info = await pollCode(args[1], { onTick: ({ attempt, info }) => { if (!isJson) process.stderr.write(`  [${attempt}] ${info.code ? "code " + info.code : info.rateLimited ? "rate-limited " + info.waitSeconds + "s" : info.reason || "empty"}\n`); } });
+      if (info.dead) { out({ ok: false, ...info }, `DEAD CARD: ${info.reason}${info.fixUrl ? `\n补号: ${info.fixUrl}` : ""}`); process.exit(5); }
       if (!info.code) die(info.reason || "no code");
       out({ ok: true, ...info }, `code=${info.code} 2fa=${info.twofa || "-"}`);
       return;
@@ -373,8 +402,15 @@ async function main() {
       const phone = args[1], codeUrl = args[2];
       if (!phone) die("usage: tg-login login <phone> <codeUrl> [--2fa pw]");
       const target = await pickTelegramTarget(flag("--target"));
-      const res = await runLogin(target, { phone, codeUrl, twofa: flag("--2fa"), code: flag("--code"),
-        onStep: (s, extra) => { if (!isJson) process.stderr.write(`  · ${s}${extra && extra.code ? " " + extra.code : ""}\n`); } });
+      let res;
+      try {
+        res = await runLogin(target, { phone, codeUrl, twofa: flag("--2fa"), code: flag("--code"),
+          onStep: (s, extra) => { if (!isJson) process.stderr.write(`  · ${s}${extra && extra.code ? " " + extra.code : ""}\n`); } });
+      } catch (e) {
+        if (!e || !e.dead) throw e;
+        out({ ok: false, dead: true, phone, error: e.message, fixUrl: e.fixUrl || "" }, `${phone}: ${e.message}`);
+        process.exit(5);
+      }
       out({ ok: res.loggedIn, ...res }, res.loggedIn ? `logged in: ${phone}` : `not logged in — ${res.text.slice(0, 120)}`);
       process.exit(res.loggedIn ? 0 : 2);
     }
