@@ -1,0 +1,440 @@
+#!/usr/bin/env node
+// rustdesk-selfhost — deploy & operate a self-hosted RustDesk server (hbbs/hbbr)
+// and generate the exact client config / one-click enrollment scripts your fleet
+// needs to reach it. Zero npm dependencies. Pure ESM. Node 18+.
+//
+// The hard-won lessons this tool encodes (so nobody re-learns them the hard way):
+//   • The ID-server public key clients configure MUST equal the server's CURRENT
+//     id_ed25519.pub. Every hbbs restart that regenerates the keypair silently
+//     breaks every client with "Key 不匹配" / "invalid key". Never rebuild the
+//     keypair casually; if you must, re-push the new key to EVERY client at once.
+//   • hbbs's `-r <relay>` is broadcast to all clients as the relay address. Point
+//     it at a PUBLIC host:port, never a LAN IP, or off-LAN clients hang on connect.
+//   • On Windows the RustDesk service runs as LocalSystem and reads its config from
+//     C:\Windows\ServiceProfiles\LocalService\...\RustDesk2.toml. Writing only the
+//     per-user %APPDATA% copy does NOT change unattended behaviour. Writing the
+//     service copy needs Administrator + a UAC pass — no remote non-elevated bypass
+//     exists (verified: direct write, schtasks /rl highest, service stop, WSL
+//     interop all refused). Ship a one-click .bat for those hosts instead.
+//   • A rendezvous keeps a device "online" via a UDP heartbeat on 21116. If the
+//     firewall passes TCP 21116 but not UDP 21116, devices register once then look
+//     offline and every connect stalls at "正在连接". Open BOTH.
+//   • Cloudflare's proxy (orange cloud) only fronts HTTP. A DNS record used as the
+//     RustDesk ID/relay endpoint MUST be DNS-only (grey cloud), else it resolves to
+//     a Cloudflare edge IP and 21115-21117 are dead.
+//
+// Config (never committed): ~/cicy-ai/db/rustdesk-selfhost.json — see `config`.
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const CONFIG_PATH = process.env.CICY_RUSTDESK_CONFIG
+  || join(homedir(), 'cicy-ai', 'db', 'rustdesk-selfhost.json');
+
+// Default RustDesk server ports. hbbs: 21115 (NAT test), 21116 (ID/rendezvous,
+// tcp+udp), 21118 (ws). hbbr: 21117 (relay), 21119 (ws relay). 21114 is the Pro
+// API port (open-source hbbs does not listen on it — harmless if firewalled).
+const PORTS = { natTest: 21115, id: 21116, relay: 21117, idWs: 21118, relayWs: 21119, api: 21114 };
+const IMAGE = 'rustdesk/rustdesk-server';
+
+const argv = process.argv.slice(2);
+if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h' || argv[0] === 'help') {
+  printHelp();
+  process.exit(0);
+}
+
+try {
+  const cmd = argv[0];
+  const rest = argv.slice(1);
+  switch (cmd) {
+    case 'config':        cmdConfig(); break;
+    case 'status':        cmdStatus(); break;
+    case 'server-up':     cmdServerUp(rest); break;
+    case 'server-down':   cmdServerDown(); break;
+    case 'key':           cmdKey(); break;
+    case 'client-config': cmdClientConfig(rest); break;
+    case 'client-toml':   cmdClientToml(rest); break;
+    case 'enroll-script': cmdEnrollScript(rest); break;
+    case 'ps1':           cmdPs1(rest); break;
+    case 'firewall':      cmdFirewall(rest); break;
+    case 'check':         cmdCheck(rest); break;
+    default:
+      process.stderr.write(`rustdesk-selfhost: unknown command "${cmd}". Try --help.\n`);
+      process.exit(2);
+  }
+} catch (e) {
+  process.stderr.write(`rustdesk-selfhost: ${e.message}\n`);
+  process.exit(1);
+}
+
+// ── config ────────────────────────────────────────────────────────────────────
+function loadConfig() {
+  if (!existsSync(CONFIG_PATH)) return {};
+  try { return JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); }
+  catch { throw new Error(`config file is not valid JSON: ${CONFIG_PATH}`); }
+}
+function saveConfig(cfg) {
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + '\n');
+  chmodSync(CONFIG_PATH, 0o600);
+}
+// The server endpoint (host or host:port), relay endpoint, and public key that
+// clients need. `host` is what you point clients at — a DNS-only domain is best
+// so the underlying IP can change without touching a single client.
+function resolved(cfg) {
+  const host = cfg.host || '';
+  const id = host ? `${host}:${cfg.idPort || PORTS.id}` : '';
+  const relay = host ? `${host}:${cfg.relayPort || PORTS.relay}` : '';
+  return { host, id, relay, key: cfg.key || '', password: cfg.password || '' };
+}
+
+function cmdConfig() {
+  const cfg = loadConfig();
+  const sets = argv.slice(1).filter((a) => a.includes('='));
+  if (sets.length === 0) {
+    const r = resolved(cfg);
+    process.stdout.write(JSON.stringify({
+      config_path: CONFIG_PATH,
+      host: cfg.host || '(unset)',
+      id_server: r.id || '(unset)',
+      relay_server: r.relay || '(unset)',
+      key: r.key ? r.key : '(unset)',
+      password: r.password ? '(set)' : '(unset)',
+      dataDir: cfg.dataDir || defaultDataDir(),
+    }, null, 2) + '\n');
+    process.stdout.write(`\nSet values:  rustdesk-selfhost config host=rd.example.com key=<pub> password=<pw>\n`);
+    return;
+  }
+  for (const kv of sets) {
+    const i = kv.indexOf('=');
+    const k = kv.slice(0, i), v = kv.slice(i + 1);
+    cfg[k] = v;
+  }
+  saveConfig(cfg);
+  process.stdout.write(`saved ${sets.length} field(s) to ${CONFIG_PATH}\n`);
+}
+
+function cmdStatus() {
+  const cfg = loadConfig();
+  const r = resolved(cfg);
+  const running = dockerRunning();
+  process.stdout.write(JSON.stringify({
+    server_containers: running,
+    id_server: r.id || '(unset)',
+    relay_server: r.relay || '(unset)',
+    key_set: !!r.key,
+    password_set: !!r.password,
+  }, null, 2) + '\n');
+}
+
+// ── server lifecycle (docker) ───────────────────────────────────────────────
+function defaultDataDir() { return join(homedir(), 'rustdesk-data'); }
+
+// server-up: start hbbs + hbbr via docker with host networking. Requires the
+// relay endpoint so hbbs broadcasts the right address. Persists key to config.
+function cmdServerUp(rest) {
+  const cfg = loadConfig();
+  const flags = parseFlags(rest);
+  const relayHost = flags.relay || cfg.host
+    || die('need a public relay host: --relay rd.example.com (or `config host=...` first)');
+  const relayEndpoint = relayHost.includes(':') ? relayHost : `${relayHost}:${cfg.relayPort || PORTS.relay}`;
+  const dataDir = flags.data || cfg.dataDir || defaultDataDir();
+  ensureDocker();
+  mkdirSync(dataDir, { recursive: true });
+
+  // hbbr first (relay), then hbbs (rendezvous) with -r pointing at the public relay.
+  sh('docker', ['rm', '-f', 'hbbs', 'hbbr'], { allowFail: true });
+  sh('docker', ['run', '-d', '--name', 'hbbr', '--net=host', '--restart=unless-stopped',
+    '-v', `${dataDir}:/root`, IMAGE, 'hbbr']);
+  sh('docker', ['run', '-d', '--name', 'hbbs', '--net=host', '--restart=unless-stopped',
+    '-v', `${dataDir}:/root`, IMAGE, 'hbbs', '-r', relayEndpoint]);
+
+  // wait for the keypair, then persist the public key.
+  const pubPath = join(dataDir, 'id_ed25519.pub');
+  let key = '';
+  for (let i = 0; i < 12; i++) {
+    if (existsSync(pubPath)) { key = readFileSync(pubPath, 'utf8').trim(); if (key) break; }
+    sleep(1000);
+  }
+  if (!key) throw new Error('server started but id_ed25519.pub never appeared — check `docker logs hbbs`');
+  cfg.dataDir = dataDir;
+  if (flags.relay && flags.relay.includes('.') && !cfg.host) cfg.host = relayHost.split(':')[0];
+  cfg.key = key;
+  saveConfig(cfg);
+  process.stdout.write(JSON.stringify({
+    started: ['hbbs', 'hbbr'], relay: relayEndpoint, dataDir,
+    key,
+    note: 'This key is now the ONLY valid server key. Push it to every client. Do NOT rebuild the keypair without re-pushing.',
+  }, null, 2) + '\n');
+}
+
+function cmdServerDown() {
+  ensureDocker();
+  sh('docker', ['rm', '-f', 'hbbs', 'hbbr'], { allowFail: true });
+  process.stdout.write('stopped hbbs + hbbr\n');
+}
+
+// key: print the current server public key (from disk, authoritative).
+function cmdKey() {
+  const cfg = loadConfig();
+  const dataDir = cfg.dataDir || defaultDataDir();
+  const pubPath = join(dataDir, 'id_ed25519.pub');
+  if (existsSync(pubPath)) {
+    process.stdout.write(readFileSync(pubPath, 'utf8').trim() + '\n');
+  } else if (cfg.key) {
+    process.stdout.write(cfg.key + '\n');
+  } else {
+    die('no key on disk and none in config — run server-up first');
+  }
+}
+
+// ── client artifacts ─────────────────────────────────────────────────────────
+function requireEndpoint() {
+  const cfg = loadConfig();
+  const r = resolved(cfg);
+  if (!r.host) die('host not set — `rustdesk-selfhost config host=rd.example.com`');
+  if (!r.key) die('key not set — run server-up, or `config key=<pub>`');
+  return { cfg, ...r };
+}
+
+// client-config: human-readable settings to type into RustDesk's GUI. The control
+// client MUST be set in the GUI (Network → ID/Relay server) — a value written to
+// the config file is overwritten by the running GUI on the control side.
+function cmdClientConfig() {
+  const { id, relay, key, password } = requireEndpoint();
+  process.stdout.write([
+    'RustDesk → Settings → Network → ID/Relay server:',
+    `  ID Server:    ${id}`,
+    `  Relay Server: ${relay}`,
+    `  Key:          ${key}`,
+    password ? `\nUnattended password: ${password}` : '',
+    '\nControl client: set these in the GUI (not the config file) and restart RustDesk.',
+  ].filter(Boolean).join('\n') + '\n');
+}
+
+// client-toml: the [options] block to merge into RustDesk2.toml on a MANAGED
+// (unattended/被控) host. Use for automation that writes both the service and
+// user profiles.
+function cmdClientToml() {
+  const { cfg, id, relay, key } = requireEndpoint();
+  const idBare = id; // custom-rendezvous-server takes host:port
+  process.stdout.write([
+    `key = '${key}'`,
+    `custom-rendezvous-server = '${idBare}'`,
+    `relay-server = '${relay}'`,
+  ].join('\n') + '\n');
+  void cfg;
+}
+
+// enroll-script: a one-click Windows .bat that (as Administrator) writes the
+// service + user RustDesk config, restarts the service, and sets the unattended
+// password. This is the ONLY way to enroll a host whose remote-control agent is
+// not elevated. Right-click → Run as administrator.
+function cmdEnrollScript() {
+  const { id, relay, key, password } = requireEndpoint();
+  const pw = password || 'change-me';
+  const bat = enrollBat({ id, relay, key, password: pw });
+  process.stdout.write(bat);
+}
+
+// ps1: a PowerShell snippet that writes the managed config to BOTH profiles and
+// restarts the service. For automation that already runs elevated on the host
+// (e.g. an elevated remote-control agent). Prints raw PowerShell.
+function cmdPs1() {
+  const { id, relay, key, password } = requireEndpoint();
+  process.stdout.write(managedPs1({ id, relay, key, password }));
+}
+
+// firewall: print the exact rules / commands to open the RustDesk ports. GCP,
+// generic iptables, and a plain port list.
+function cmdFirewall(rest) {
+  const which = (rest[0] || 'list');
+  const tcp = `${PORTS.natTest},${PORTS.id},${PORTS.relay}`;
+  if (which === 'gcloud') {
+    process.stdout.write([
+      '# GCP VPC firewall — RustDesk ports. UDP 21116 is REQUIRED (heartbeat).',
+      `gcloud compute firewall-rules create rustdesk \\`,
+      `  --direction=INGRESS --action=ALLOW \\`,
+      `  --rules=tcp:${tcp},udp:${PORTS.id} --source-ranges=0.0.0.0/0 --network=default`,
+      '',
+      '# If the SA lacks compute.firewalls.create, grant it or run as your own account:',
+      '#   gcloud projects add-iam-policy-binding <project> \\',
+      '#     --member=serviceAccount:<sa> --role=roles/compute.securityAdmin',
+    ].join('\n') + '\n');
+  } else if (which === 'iptables') {
+    process.stdout.write([
+      `iptables -A INPUT -p tcp -m multiport --dports ${tcp} -j ACCEPT`,
+      `iptables -A INPUT -p udp --dport ${PORTS.id} -j ACCEPT`,
+    ].join('\n') + '\n');
+  } else {
+    process.stdout.write([
+      'Open inbound on the server:',
+      `  TCP ${PORTS.natTest} ${PORTS.id} ${PORTS.relay}   (NAT test / ID / relay)`,
+      `  UDP ${PORTS.id}                (ID heartbeat — REQUIRED, most-missed rule)`,
+      `  TCP ${PORTS.idWs} ${PORTS.relayWs}       (optional: web client)`,
+      '',
+      'A cloud DNS record used as the endpoint must be DNS-only (no HTTP proxy).',
+    ].join('\n') + '\n');
+  }
+}
+
+// check: verify the server is reachable and healthy. Runs locally against the
+// server host (docker + listening ports). External reachability must be tested
+// from another machine (this tool cannot see its own NAT/firewall from inside).
+function cmdCheck() {
+  const cfg = loadConfig();
+  const dataDir = cfg.dataDir || defaultDataDir();
+  const out = { containers: dockerRunning(), listening: {}, key_on_disk: false, keypair_consistent: null };
+  for (const [name, port] of Object.entries({ natTest: PORTS.natTest, id: PORTS.id, relay: PORTS.relay })) {
+    out.listening[`tcp_${port}`] = portListening(port, 'tcp');
+  }
+  out.listening[`udp_${PORTS.id}`] = portListening(PORTS.id, 'udp');
+  const pub = join(dataDir, 'id_ed25519.pub');
+  const priv = join(dataDir, 'id_ed25519');
+  out.key_on_disk = existsSync(pub);
+  // keypair sanity: the ed25519 private file is base64(64 bytes = seed32+pub32);
+  // its trailing 32 bytes must equal the public key. A short/garbled private file
+  // is the classic silent cause of "invalid key".
+  try {
+    if (existsSync(pub) && existsSync(priv)) {
+      const pubB64 = readFileSync(pub, 'utf8').trim();
+      const privRaw = Buffer.from(readFileSync(priv, 'utf8').trim(), 'base64');
+      out.keypair_consistent = (privRaw.length === 64)
+        && (privRaw.subarray(32).toString('base64') === pubB64);
+      if (!out.keypair_consistent) out.keypair_warning = 'private key does not match public key — clients will get "invalid key"; rebuild cleanly';
+    }
+  } catch { out.keypair_consistent = false; }
+  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+}
+
+// ── builders ─────────────────────────────────────────────────────────────────
+function enrollBat({ id, relay, key, password }) {
+  // CRLF, and a GBK-safe body: keep the human strings ASCII so the .bat prints
+  // correctly regardless of the console codepage.
+  const lines = [
+    '@echo off',
+    'net session >nul 2>&1',
+    'if %errorlevel% neq 0 (',
+    '  echo [!] Right-click this file and choose "Run as administrator".',
+    '  pause & exit /b 1',
+    ')',
+    'echo [*] Writing RustDesk server config...',
+    'set "SVCDIR=C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk\\config"',
+    'set "USRDIR=%APPDATA%\\RustDesk\\config"',
+    'net stop RustDesk >nul 2>&1',
+    'timeout /t 2 >nul',
+    'taskkill /f /im rustdesk.exe >nul 2>&1',
+    'timeout /t 1 >nul',
+    'for %%D in ("%SVCDIR%" "%USRDIR%") do (',
+    '  if not exist "%%~D" mkdir "%%~D"',
+    '  (',
+    "    echo rendezvous_server = ''",
+    '    echo nat_type = 0',
+    '    echo serial = 0',
+    '    echo.',
+    '    echo [options]',
+    `    echo key = '${key}'`,
+    `    echo custom-rendezvous-server = '${id}'`,
+    `    echo relay-server = '${relay}'`,
+    "    echo access-mode = 'full'",
+    '  ) > "%%~D\\RustDesk2.toml"',
+    '  echo     wrote %%~D\\RustDesk2.toml',
+    ')',
+    'net start RustDesk >nul 2>&1',
+    'timeout /t 3 >nul',
+    `"%ProgramFiles%\\RustDesk\\rustdesk.exe" --password ${password}`,
+    'echo.',
+    'echo [OK] Done. This machine RustDesk ID:',
+    '"%ProgramFiles%\\RustDesk\\rustdesk.exe" --get-id',
+    'echo.',
+    'pause',
+  ];
+  return lines.join('\r\n') + '\r\n';
+}
+
+function managedPs1({ id, relay, key, password }) {
+  return [
+    `$key='${key}'; $rv='${id}'; $rl='${relay}'`,
+    `net stop RustDesk 2>$null | Out-Null`,
+    `Get-Process rustdesk -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue`,
+    `Start-Sleep -Seconds 3`,
+    `$targets=@('C:\\Windows\\ServiceProfiles\\LocalService\\AppData\\Roaming\\RustDesk\\config\\RustDesk2.toml',(Join-Path $env:APPDATA 'RustDesk\\config\\RustDesk2.toml'))`,
+    `foreach($u in $targets){`,
+    `  $dir=Split-Path $u; if(-not(Test-Path $dir)){New-Item -ItemType Directory -Force -Path $dir|Out-Null}`,
+    `  $lines=if(Test-Path $u){@(Get-Content $u)}else{@("rendezvous_server = ''","nat_type = 0","serial = 0","","[options]")}`,
+    `  $lines=@($lines|Where-Object{$_ -notmatch "^\\s*(key|custom-rendezvous-server|relay-server)\\s*="})`,
+    `  $out=@();$done=$false`,
+    `  foreach($l in $lines){$out+=$l;if(-not $done -and $l -match '^\\s*\\[options\\]\\s*$'){$out+="key = '$key'";$out+="custom-rendezvous-server = '$rv'";$out+="relay-server = '$rl'";$done=$true}}`,
+    `  if(-not $done){$out+='';$out+='[options]';$out+="key = '$key'";$out+="custom-rendezvous-server = '$rv'";$out+="relay-server = '$rl'"}`,
+    `  Set-Content -Path $u -Value ($out -join "\`r\`n") -Encoding UTF8`,
+    `}`,
+    `net start RustDesk 2>$null | Out-Null`,
+    password ? `Start-Sleep -Seconds 3; & (Join-Path $env:ProgramFiles 'RustDesk\\rustdesk.exe') --password '${password}'` : '',
+  ].filter(Boolean).join('\n') + '\n';
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+function parseFlags(rest) {
+  const f = {};
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i].startsWith('--')) { f[rest[i].slice(2)] = (rest[i + 1] && !rest[i + 1].startsWith('--')) ? rest[++i] : true; }
+  }
+  return f;
+}
+function sh(cmd, args, opts = {}) {
+  try { return execFileSync(cmd, args, { encoding: 'utf8', stdio: opts.capture ? 'pipe' : 'inherit' }); }
+  catch (e) { if (opts.allowFail) return ''; throw new Error(`${cmd} ${args.join(' ')} failed: ${e.message}`); }
+}
+function ensureDocker() {
+  try { execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], { stdio: 'ignore' }); }
+  catch { throw new Error('docker not available — install docker or start the daemon'); }
+}
+function dockerRunning() {
+  try {
+    const out = execFileSync('docker', ['ps', '--format', '{{.Names}} {{.Status}}'], { encoding: 'utf8' });
+    return out.split('\n').filter((l) => /hbb[sr]/.test(l)).map((l) => l.trim());
+  } catch { return []; }
+}
+function portListening(port, proto) {
+  try {
+    const flag = proto === 'udp' ? '-lnu' : '-lnt';
+    const out = execFileSync('ss', [flag], { encoding: 'utf8' });
+    return new RegExp(`[:.]${port}\\b`).test(out);
+  } catch { return null; }
+}
+function sleep(ms) { execFileSync('sleep', [String(ms / 1000)], { stdio: 'ignore' }); }
+function die(msg) { throw new Error(msg); }
+
+function printHelp() {
+  process.stdout.write(`rustdesk-selfhost — deploy & operate a self-hosted RustDesk server and enroll clients.
+
+SERVER (run on the public server host)
+  server-up --relay <public-host>   Start hbbs+hbbr (docker), broadcast <public-host>:21117 as relay
+  server-down                       Stop hbbs+hbbr
+  key                               Print the current server public key (authoritative, from disk)
+  check                             Verify containers, listening ports, keypair consistency
+  firewall [gcloud|iptables]        Print firewall rules (UDP 21116 is required!)
+
+CLIENT ARTIFACTS
+  client-config                     Human settings to type into the RustDesk GUI (control client)
+  client-toml                       [options] TOML block for a managed/unattended host
+  ps1                               Elevated PowerShell to configure a managed host (both profiles)
+  enroll-script                     One-click Windows .bat (Run as administrator) for non-elevated hosts
+
+CONFIG
+  config [k=v ...]                  Show or set: host=<dns> key=<pub> password=<pw> idPort relayPort dataDir
+  status                            Show server + endpoint status
+
+NOTES (the mistakes this tool prevents)
+  • The server key clients configure MUST equal the CURRENT id_ed25519.pub. Rebuilding
+    the keypair breaks every client ("Key 不匹配"/"invalid key") until you re-push the new key.
+  • Open UDP 21116 too — TCP-only makes devices register then look offline.
+  • A cloud DNS endpoint must be DNS-only (no HTTP proxy).
+  • Windows service config lives under C:\\Windows\\ServiceProfiles\\LocalService — writing it
+    needs Administrator+UAC; use enroll-script for hosts you cannot elevate remotely.
+
+Config file: ~/cicy-ai/db/rustdesk-selfhost.json  (0600; holds host, key, password)
+`);
+}

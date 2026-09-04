@@ -1,0 +1,91 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "rustdesk-selfhost",
+  "version": "1.0.0",
+  "title": "RustDesk Self-Host",
+  "description": "Deploy a self-hosted RustDesk server (hbbs/hbbr) and generate the exact client config, TOML, and one-click Windows enrollment scripts your fleet needs to reach it.",
+  "category": "infra",
+  "tags": [
+    "rustdesk",
+    "remote-desktop",
+    "hbbs",
+    "hbbr",
+    "self-host",
+    "windows"
+  ],
+  "author": "cicy-ai",
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/rustdesk-selfhost",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "docker"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/rustdesk-selfhost",
+  "config": {
+    "path": "~/cicy-ai/db/rustdesk-selfhost.json",
+    "permissions": "0600",
+    "secret_fields": [
+      "key",
+      "password"
+    ]
+  },
+  "permissions": [
+    "network",
+    "filesystem:db",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "RustDesk 自建服务器",
+      "description": "部署自建 RustDesk 服务器（hbbs/hbbr），并生成整批机器接入所需的客户端配置、TOML 及一键 Windows 注册脚本。"
+    }
+  },
+  "tools": [
+    {
+      "name": "rustdesk-selfhost server-up",
+      "example": "rustdesk-selfhost server-up --relay rd.example.com",
+      "description": "Start hbbs+hbbr via docker; broadcast the public relay; persist the server key"
+    },
+    {
+      "name": "rustdesk-selfhost key",
+      "example": "rustdesk-selfhost key",
+      "description": "Print the current server public key (authoritative, from disk)"
+    },
+    {
+      "name": "rustdesk-selfhost check",
+      "example": "rustdesk-selfhost check",
+      "description": "Verify containers, listening ports, and keypair consistency"
+    },
+    {
+      "name": "rustdesk-selfhost firewall",
+      "example": "rustdesk-selfhost firewall gcloud",
+      "description": "Print firewall rules for the server ports (UDP 21116 required)"
+    },
+    {
+      "name": "rustdesk-selfhost client-config",
+      "example": "rustdesk-selfhost client-config",
+      "description": "Human-readable ID/relay/key to type into the RustDesk GUI"
+    },
+    {
+      "name": "rustdesk-selfhost enroll-script",
+      "example": "rustdesk-selfhost enroll-script > fix.bat",
+      "description": "One-click Windows .bat (Run as administrator) to enroll a managed host"
+    }
+  ]
+}
