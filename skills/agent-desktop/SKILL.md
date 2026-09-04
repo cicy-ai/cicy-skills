@@ -30,6 +30,28 @@ Use this skill when the task involves:
 2. Target a specific client by `--client <client_id>`. When omitted, `agent-desktop` auto-selects the single client whose UA contains `ElectronMCP`; it refuses to guess if multiple are connected.
 3. For response-oriented calls, **report the actual returned payload** — don't stop at "event sent".
 
+
+## Fleet — every desktop over the homepage channel
+
+The commands above drive **this host's** local desktop via local cicy-code. The
+`fleet` subcommand drives **every** cicy-desktop through the homepage control
+channel at `desktop.cicy-ai.com` — no per-node cicy-code needed. Each desktop
+holds a ws socket there and shows a short **id** in its top bar.
+
+```sh
+agent-desktop fleet ls                          # short id, team, version, login
+agent-desktop fleet exec <target> '<shell>'     # shell (exec_shell)
+agent-desktop fleet rpc  <target> <tool> '{…}'  # an Electron tool
+agent-desktop fleet js   <target> '<async js>'  # JS in the page
+agent-desktop fleet main <target> '<js>'        # JS in the Electron main process
+agent-desktop fleet ipc  <target> <chan> '[…]'  # ipcRenderer.invoke
+agent-desktop fleet team <target> <name>        # name a machine
+```
+
+`<target>` = short id (`TWPW9`), team (`desktop-xs-1001` / `xs-1001`),
+hostname, or `all`. `--json` anywhere. Operator token:
+`~/cicy-ai/db/desktop-ctrl.json`. Only owner-signed clients accept commands.
+
 ## References
 
 - [help.md](./references/help.md)

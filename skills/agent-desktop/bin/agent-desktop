@@ -48,12 +48,95 @@ const RPC_TIMEOUT_MS = Number(process.env.CICY_AGENT_TIMEOUT_MS || 30000);
       case 'exec-file':   await cmdExecFile(rest); return;
       case 'sysinfo':     await cmdSysinfo(); return;
       case 'rpc':         await cmdRPC(rest); return;
+      case 'fleet':       await cmdFleet(rest); return;
       default: bail(`unknown command: ${cmd}. Try agent-desktop --help.`, 2);
     }
   } catch (e) {
     bail(e.message, e.exitCode || 1);
   }
 })();
+
+
+// ── fleet: the whole cicy-desktop fleet over the homepage control channel ──
+// Unlike the commands above (which drive THIS host's local desktop via local
+// cicy-code), 'fleet' reaches EVERY desktop through desktop.cicy-ai.com. Each
+// desktop holds a ws socket there and reports a short id shown in its top bar.
+// Operator token: ~/cicy-ai/db/desktop-ctrl.json.
+function fleetCfg() {
+  const f = join(homedir(), 'cicy-ai', 'db', 'desktop-ctrl.json');
+  let c;
+  try { c = JSON.parse(readFileSync(f, 'utf8')); }
+  catch (e) { bail(`cannot read ${f}: ${e.message}`); }
+  if (!c.base || !c.token) bail(`${f} needs { base, token }`);
+  return { base: String(c.base).replace(/\/+$/, ''), token: c.token };
+}
+async function fleetCall(pathname, payload) {
+  const { base, token } = fleetCfg();
+  const res = await fetch(base + pathname, {
+    method: payload != null ? 'POST' : 'GET',
+    headers: {
+      'x-cicy-ctrl': token,
+      'content-type': 'application/json',
+      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) agent-desktop-fleet/1',
+    },
+    body: payload != null ? JSON.stringify(payload) : undefined,
+  });
+  const txt = await res.text();
+  let j = null; try { j = JSON.parse(txt); } catch {}
+  if (!res.ok) bail(`HTTP ${res.status} ${txt.slice(0, 300)}`);
+  return j != null ? j : txt;
+}
+function fleetBody(a) {
+  if (a === '-') return readFileSync(0, 'utf8');
+  try { if (existsSync(a)) return readFileSync(a, 'utf8'); } catch {}
+  return a;
+}
+function fleetMainWrap(code) {
+  return "const g=await window.electronRPC('get_windows',{});" +
+    "const gt=((g&&g.content)||[]).map(c=>c&&c.text).join('');" +
+    "let wid=1;try{const ws=JSON.parse(gt);if(ws&&ws.length)wid=ws[0].id}catch(e){}" +
+    "const r=await window.electronRPC('control_electron_BrowserWindow',{win_id:wid,code:" +
+    JSON.stringify(code) + "});return ((r&&r.content)||[]).map(c=>c&&c.text).join('');";
+}
+function fleetShow(res) {
+  if (json) { process.stdout.write(JSON.stringify(res, null, 2) + '\n'); return; }
+  for (const r of (res.results || [])) {
+    let out = r.out;
+    if (typeof out === 'string' && out && '{['.includes(out[0])) { try { out = JSON.stringify(JSON.parse(out)); } catch {} }
+    process.stdout.write(`${r.ok ? 'ok ' : 'ERR'} ${String(r.host || '?').padEnd(18)} ${out ?? ''}\n`);
+  }
+}
+async function cmdFleet(a) {
+  const sub = a[0];
+  const t = a.slice(1);
+  if (!sub || sub === 'ls' || sub === 'nodes') {
+    const d = await fleetCall('/api/fleet');
+    const peers = d.peers || [];
+    if (json) { process.stdout.write(JSON.stringify(peers, null, 2) + '\n'); return; }
+    process.stdout.write(`build=${d.build}  peers=${peers.length}\n`);
+    for (const p of peers.sort((x, y) => String(x.team || x.host).localeCompare(String(y.team || y.host)))) {
+      const who = p.team || (p.host + ' (no team)');
+      process.stdout.write(`  ${String(p.short || '-----').padEnd(6)} ${String(who).padEnd(22)} v=${String(p.v || '?').padEnd(9)} ${String(p.plat || '?').padEnd(6)} login=${p.authed} idle=${p.idleSec}s\n`);
+    }
+    return;
+  }
+  if (sub === 'exec') { if (t.length < 2) bail('usage: agent-desktop fleet exec <target> <shell...>'); return fleetShow(await fleetCall('/api/rpc', { target: t[0], tool: 'exec_shell', args: { command: t.slice(1).join(' ') } })); }
+  if (sub === 'rpc')  { if (t.length < 2) bail('usage: agent-desktop fleet rpc <target> <tool> [json]'); return fleetShow(await fleetCall('/api/rpc', { target: t[0], tool: t[1], args: t[2] ? JSON.parse(t[2]) : {} })); }
+  if (sub === 'js')   { if (t.length < 2) bail('usage: agent-desktop fleet js <target> <file|-|code>'); return fleetShow(await fleetCall('/api/rpc', { target: t[0], js: fleetBody(t[1]) })); }
+  if (sub === 'main') { if (t.length < 2) bail('usage: agent-desktop fleet main <target> <file|-|code>'); return fleetShow(await fleetCall('/api/rpc', { target: t[0], js: fleetMainWrap(fleetBody(t[1])) })); }
+  if (sub === 'ipc')  { if (t.length < 2) bail('usage: agent-desktop fleet ipc <target> <channel> [json]'); return fleetShow(await fleetCall('/api/rpc', { target: t[0], ipc: t[1], args: t[2] ? JSON.parse(t[2]) : [] })); }
+  if (sub === 'team') {
+    if (t.length < 2) bail('usage: agent-desktop fleet team <target> <name>');
+    const name = t[1].startsWith('desktop-') ? t[1] : 'desktop-' + t[1];
+    const code = "(()=>{const r=process.mainModule.require.bind(process.mainModule);const os=r('os'),fs=r('fs'),path=r('path');" +
+      "const p=path.join(os.homedir(),'cicy-ai','global.json');let c={};try{c=JSON.parse(fs.readFileSync(p,'utf8'))}catch(e){}" +
+      "c.desktopTeam=" + JSON.stringify(name) + ";fs.writeFileSync(p,JSON.stringify(c,null,2));" +
+      "try{fs.writeFileSync(path.join(os.homedir(),'cicy-ai','team.txt')," + JSON.stringify(name.replace(/^desktop-/, '')) + ")}catch(e){}" +
+      "return JSON.stringify({host:os.hostname(),team:c.desktopTeam})})()";
+    return fleetShow(await fleetCall('/api/rpc', { target: t[0], js: fleetMainWrap(code) }));
+  }
+  bail(`unknown fleet subcommand '${sub}'. Try: ls exec rpc js main ipc team`, 2);
+}
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
