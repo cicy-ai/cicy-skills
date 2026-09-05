@@ -1,0 +1,31 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "tg-matrix",
+  "version": "0.1.0",
+  "title": "TG Matrix Panel",
+  "description": "Open, focus, or check the Telegram 矩阵 panel on cicy-desktop machines over the fleet control socket; each machine's panel tab is discovered at runtime, never by a hard-coded id.",
+  "category": "agent",
+  "tags": ["telegram", "cicy-desktop", "fleet", "panel", "wsd"],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/tg-matrix",
+  "permissions": [],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  }
+}

@@ -1,0 +1,200 @@
+#!/usr/bin/env node
+// tg-matrix — open / focus the "Telegram 矩阵" panel on cicy-desktop machines.
+//
+// Reaches the fleet over the same realtime control socket that `wsd` uses:
+// reads {base, token} from ~/cicy-ai/db/desktop-ctrl.json and POSTs the panel
+// command into each machine's Electron MAIN process. Zero deps, Node 18+.
+//
+// The panel tab's webContentsId is DIFFERENT on every machine and changes over
+// time, so nothing here is hard-coded: each command discovers the panel at
+// runtime by matching `preset=telegram-matrix` in the live tab list, and a
+// freshly created panel gets a runtime-unique cicyui URL.
+// Piping into `head` etc. closes stdout early; exit quietly instead of throwing.
+process.stdout.on('error', (e) => { if (e && e.code === 'EPIPE') process.exit(0); });
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
+
+const HOME = os.homedir();
+const CFG = process.env.CICY_DESKTOP_CTRL ||
+  path.join(HOME, 'cicy-ai', 'db', 'desktop-ctrl.json');
+
+function die(msg, code = 1) { process.stderr.write(String(msg) + '\n'); process.exit(code); }
+
+function loadCfg() {
+  let c;
+  try { c = JSON.parse(fs.readFileSync(CFG, 'utf8')); }
+  catch (e) { die(`tg-matrix: cannot read control config ${CFG}: ${e.message}`, 4); }
+  if (!c.base || !c.token) die(`tg-matrix: ${CFG} missing "base" or "token"`, 4);
+  return { base: String(c.base).replace(/\/+$/, ''), token: String(c.token) };
+}
+
+// One HTTP call to the control plane, same headers wsd sends.
+function call(pathname, payload, timeout = 130000) {
+  const { base, token } = loadCfg();
+  const url = new URL(base + pathname);
+  const mod = url.protocol === 'https:' ? https : http;
+  const data = payload == null ? null : Buffer.from(JSON.stringify(payload));
+  const opts = {
+    method: payload == null ? 'GET' : 'POST',
+    headers: {
+      'x-cicy-ctrl': token,
+      'content-type': 'application/json',
+      // Cloudflare answers the default UA with a bot challenge; present a normal one.
+      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) tg-matrix/1',
+    },
+  };
+  if (data) opts.headers['content-length'] = data.length;
+  return new Promise((resolve, reject) => {
+    const req = mod.request(url, opts, (res) => {
+      let buf = '';
+      res.on('data', (d) => (buf += d));
+      res.on('end', () => {
+        if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode} ${buf.slice(0, 300)}`));
+        try { resolve(JSON.parse(buf)); } catch (e) { reject(new Error(`bad JSON: ${buf.slice(0, 200)}`)); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(timeout, () => req.destroy(new Error('timeout')));
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+// Run JS in each target machine's Electron MAIN process. Mirrors `wsd main`:
+// the homepage bridge resolves the window id per-process, then evaluates `code`
+// inside control_electron_BrowserWindow. `code` must be a self-contained async
+// IIFE that returns a string.
+async function runMain(target, code) {
+  const wrapper =
+    "const g = await window.electronRPC('get_windows', {});" +
+    "const gt = ((g&&g.content)||[]).map(c=>c&&c.text).join('');" +
+    "let wid = 1; try { const ws = JSON.parse(gt); if (ws && ws.length) wid = ws[0].id; } catch (e) {}" +
+    "const r = await window.electronRPC('control_electron_BrowserWindow'," +
+    "{win_id: wid, code: " + JSON.stringify(code) + "});" +
+    "return ((r&&r.content)||[]).map(c=>c&&c.text).join('');";
+  const res = await call('/api/rpc', { target, js: wrapper });
+  // Normalize into [{host, ok, out}] and parse each machine's returned JSON.
+  return (res.results || []).map((r) => {
+    let out = r.out;
+    if (typeof out === 'string' && out && '{['.includes(out[0])) {
+      try { out = JSON.parse(out); } catch (e) { /* leave as string */ }
+    }
+    return { host: (r.host || '?').replace(/^desktop-/, ''), ok: r.ok !== false, out };
+  });
+}
+
+async function fleet() {
+  const d = await call('/api/fleet');
+  return (d.peers || []).map((p) => ({
+    host: (p.team || p.host || '?').replace(/^desktop-/, ''),
+    plat: p.plat, v: p.v, ip: p.ip,
+  }));
+}
+
+// ---- MAIN-process payloads (run inside each machine's Electron main) ----
+// Panel is always found by URL feature, never by a stored id.
+const MATCH = 'preset=telegram-matrix';
+
+const P_OPEN = `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const st = globalThis.__cicyTabBrowserState;
+    if (!st) return JSON.stringify({ ok: false, err: 'no tab-browser state (app not ready?)' });
+    const m = st.managers.get(0);
+    if (!m) return JSON.stringify({ ok: false, err: 'no profile-0 tab manager' });
+    const RE = /${MATCH}/;
+    let entry = m.list().find((t) => RE.test(t.url));
+    let created = false;
+    if (!entry) {
+      const url = 'cicyui://panel/' + Date.now().toString(36) + '?${MATCH}';
+      m.addTab(url, { title: 'Telegram 矩阵' });
+      created = true;
+      await sleep(500);
+      entry = m.list().find((t) => RE.test(t.url));
+    }
+    if (!entry) return JSON.stringify({ ok: false, err: 'panel missing after addTab' });
+    m.activate(entry.webContentsId);
+    await sleep(200);
+    const after = m.list().find((t) => RE.test(t.url));
+    return JSON.stringify({ ok: true, created, wcid: entry.webContentsId, active: after ? after.active : false });
+  } catch (e) { return JSON.stringify({ ok: false, err: String((e && e.message) || e) }); }
+})()`;
+
+const P_STATUS = `(async () => {
+  try {
+    const st = globalThis.__cicyTabBrowserState;
+    if (!st) return JSON.stringify({ ok: true, panel: false, why: 'no tab state' });
+    const m = st.managers.get(0);
+    if (!m) return JSON.stringify({ ok: true, panel: false, why: 'no profile-0 tab manager' });
+    const RE = /${MATCH}/;
+    const e = m.list().find((t) => RE.test(t.url));
+    return JSON.stringify({ ok: true, panel: !!e, active: e ? e.active : false, wcid: e ? e.webContentsId : null, tabs: m.list().length });
+  } catch (e) { return JSON.stringify({ ok: false, err: String((e && e.message) || e) }); }
+})()`;
+
+// ---- CLI ----
+const USAGE = `tg-matrix — open / focus the Telegram 矩阵 panel on cicy-desktop machines
+
+usage:
+  tg-matrix ls                    list machines currently connected
+  tg-matrix open <target>         open (or focus) the panel; creates it if absent
+  tg-matrix status <target>       report whether the panel is open / foreground
+
+<target> is a machine (e.g. xs-1001), a comma list, or 'all'.
+Add --json for machine-readable output.
+
+config: reads {base, token} from ${CFG}
+        (override path with CICY_DESKTOP_CTRL)`;
+
+function printRows(rows, kind) {
+  for (const r of rows) {
+    const o = r.out;
+    if (o && typeof o === 'object') {
+      if (kind === 'open') {
+        if (o.ok) process.stdout.write(`ok   ${r.host.padEnd(12)} panel ${o.created ? 'created' : 'focused'} · wcid=${o.wcid} · foreground=${o.active}\n`);
+        else process.stdout.write(`ERR  ${r.host.padEnd(12)} ${o.err}\n`);
+      } else { // status
+        if (o.panel) process.stdout.write(`ok   ${r.host.padEnd(12)} panel OPEN · foreground=${o.active} · wcid=${o.wcid} · tabs=${o.tabs}\n`);
+        else if (o.ok) process.stdout.write(`--   ${r.host.padEnd(12)} panel CLOSED${o.why ? ' · ' + o.why : ''}\n`);
+        else process.stdout.write(`ERR  ${r.host.padEnd(12)} ${o.err}\n`);
+      }
+    } else {
+      process.stdout.write(`${r.ok ? 'ok  ' : 'ERR '} ${r.host.padEnd(12)} ${o}\n`);
+    }
+  }
+}
+
+async function run() {
+  const argv = process.argv.slice(2).filter((x) => x !== '--json');
+  const asJson = process.argv.includes('--json');
+  const cmd = argv[0];
+  if (!cmd || cmd === '-h' || cmd === '--help' || cmd === 'help') { process.stdout.write(USAGE + '\n'); return; }
+
+  if (cmd === 'ls' || cmd === 'nodes') {
+    const peers = await fleet();
+    if (asJson) { process.stdout.write(JSON.stringify(peers, null, 2) + '\n'); return; }
+    process.stdout.write(`connected: ${peers.length}\n`);
+    for (const p of peers) process.stdout.write(`  ${p.host.padEnd(20)} v=${p.v || '?'} ${p.plat || '?'} ip=${p.ip || ''}\n`);
+    return;
+  }
+
+  if (cmd === 'open' || cmd === 'status') {
+    const target = argv[1];
+    if (!target) die(`usage: tg-matrix ${cmd} <target>`, 2);
+    const rows = await runMain(target, cmd === 'open' ? P_OPEN : P_STATUS);
+    if (asJson) { process.stdout.write(JSON.stringify(rows, null, 2) + '\n'); return; }
+    if (!rows.length) { process.stdout.write(`(no machine matched "${target}")\n`); return; }
+    printRows(rows, cmd);
+    // non-zero exit if any machine errored, so scripts can tell
+    if (rows.some((r) => r.out && typeof r.out === 'object' && r.out.ok === false)) process.exit(4);
+    return;
+  }
+
+  die(`tg-matrix: unknown command '${cmd}' (try --help)`, 2);
+}
+
+run().catch((e) => die('tg-matrix: ' + (e && e.message || e), 1));
