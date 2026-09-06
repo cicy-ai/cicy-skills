@@ -1,0 +1,38 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "tg-autologin",
+  "version": "0.1.1",
+  "title": "TG Auto Login",
+  "description": "Automate Telegram Web login on cicy-desktop over the wsd socket: send phone, overlay a same-size 接码/getcode webview on the profile cell to read the SMS code + 2FA, then type them. CLI-side cooldowns.",
+  "category": "agent",
+  "tags": [
+    "telegram",
+    "login",
+    "cicy-desktop",
+    "getcode",
+    "2fa",
+    "wsd"
+  ],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/tg-autologin",
+  "permissions": [],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  }
+}

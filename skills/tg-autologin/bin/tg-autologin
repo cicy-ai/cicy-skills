@@ -1,0 +1,244 @@
+#!/usr/bin/env node
+// tg-autologin — automate Telegram Web login on cicy-desktop machines.
+//
+// Flow per profile (drives the machine's Electron MAIN process over the same
+// realtime control socket wsd uses):
+//   1. send   : reset the cell, enter the phone, click NEXT → code requested
+//   2. overlay: stack a 接码(getcode) BrowserView ON TOP of the cell (same size,
+//               higher z), read the SMS code + 2FA password from it
+//   3. finish : destroy the overlay, type the code, then the 2FA password → login
+//
+// The waiting/cooldown lives HERE (Node), so every control call stays sub-second
+// and never trips the socket timeout. The 接码 service rate-limits ~1 req/min
+// ("请求过于频繁"), so reads are spaced out on this side.
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const http = require('http');
+const https = require('https');
+
+const CFG = process.env.CICY_DESKTOP_CTRL || path.join(os.homedir(), 'cicy-ai', 'db', 'desktop-ctrl.json');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function die(m, c = 1) { process.stderr.write(String(m) + '\n'); try { wsClose(); } catch (e) {} process.exit(c); }
+
+function loadCfg() {
+  let c;
+  try { c = JSON.parse(fs.readFileSync(CFG, 'utf8')); } catch (e) { die(`tg-autologin: cannot read ${CFG}: ${e.message}`, 4); }
+  if (!c.base || !c.token) die(`tg-autologin: ${CFG} missing base/token`, 4);
+  return { base: String(c.base).replace(/\/+$/, ''), token: String(c.token) };
+}
+
+// 控制走 hub 的 /ws 长连接(单条,复用整个 CLI 生命周期),不再逐条 HTTP。
+const DEVCFG = process.env.CICY_CLOUD_DEVICE || path.join(os.homedir(), 'cicy-ai', 'db', 'cloud-device.json');
+let _hubTok = ''; try { _hubTok = JSON.parse(fs.readFileSync(DEVCFG, 'utf8')).token || ''; } catch (e) {}
+const _uid = 'tgauto-' + process.pid + '-' + Math.random().toString(36).slice(2, 8);
+function _normTarget(t) { if (!t) return t; const l = String(t).toLowerCase();
+  if (l === 'all') return 'all'; if (/^c\d+-/.test(l)) return t; if (l.startsWith('desktop-')) return t; return 'desktop-' + t; }
+let _ws = null, _authed = false, _conn = null; const _waiters = new Map();
+function _connect() {
+  if (_conn) return _conn;
+  _conn = new Promise((resolve) => {
+    const { base } = loadCfg();
+    const u = base.replace(/^http/, 'ws') + '/ws?team=' + encodeURIComponent(_uid) + '&mid=' + encodeURIComponent(_uid) + '&host=' + encodeURIComponent(_uid) + '&short=TGAUTO';
+    const sock = new WebSocket(u); let settled = false;
+    sock.addEventListener('open', () => sock.send(JSON.stringify({ type: 'hello', tok: _hubTok, mid: _uid, host: _uid, team: _uid, v: 'tgauto', plat: 'linux', auto: false })));
+    sock.addEventListener('message', (e) => { let f = null; try { f = JSON.parse(String(e.data)); } catch { return; }
+      if (f.type === 'welcome') { setTimeout(() => { _authed = true; _ws = sock; if (!settled) { settled = true; resolve(sock); } }, 1600); return; }
+      if (f.type === 'cmd_result') { const w = _waiters.get(f.cmdId); if (w) { clearTimeout(w.timer); _waiters.delete(f.cmdId); w.resolve(f.result || {}); } }
+    });
+    const drop = () => { _authed = false; _ws = null; _conn = null; for (const [, w] of _waiters) { clearTimeout(w.timer); w.resolve({ ok: false, out: 'ws disconnected' }); } _waiters.clear(); if (!settled) { settled = true; resolve(null); } };
+    sock.addEventListener('close', drop); sock.addEventListener('error', () => {});
+  });
+  return _conn;
+}
+function wsClose() { try { if (_ws) _ws.close(); } catch (e) {} }
+// 仅支持 /api/rpc(payload={target,js|tool|args}),返回 {results:[{host,short,ok,out}]}
+async function call(pathname, payload, timeout = 60000) {
+  if (!_ws || !_authed) await _connect();
+  if (!_ws || !_authed) return { results: [{ ok: false, out: 'ws unavailable' }] };
+  const result = await new Promise((resolve) => {
+    const cmdId = 'k' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const timer = setTimeout(() => { if (_waiters.delete(cmdId)) resolve({ ok: false, out: 'timeout' }); }, timeout);
+    _waiters.set(cmdId, { resolve, timer });
+    try { _ws.send(JSON.stringify({ type: 'cmd', cmdId, target: _normTarget(payload.target), js: payload.js, tool: payload.tool, args: payload.args })); }
+    catch { if (_waiters.delete(cmdId)) { clearTimeout(timer); resolve({ ok: false, out: 'send failed' }); } }
+  });
+  return { results: [result] };
+}
+
+// Run main-process `code` on `target`; returns the parsed JSON the code returns.
+async function main(target, code, timeout = 60000) {
+  const wrapper =
+    "const g = await window.electronRPC('get_windows', {});" +
+    "const gt = ((g&&g.content)||[]).map(c=>c&&c.text).join('');" +
+    "let wid = 1; try { const ws = JSON.parse(gt); if (ws && ws.length) wid = ws[0].id; } catch (e) {}" +
+    "const r = await window.electronRPC('control_electron_BrowserWindow', {win_id: wid, code: " + JSON.stringify(code) + "});" +
+    "return ((r&&r.content)||[]).map(c=>c&&c.text).join('');";
+  const res = await call('/api/rpc', { target, js: wrapper }, timeout);
+  const row = (res.results || [])[0];
+  if (!row) throw new Error('no machine matched ' + target);
+  if (row.ok === false) throw new Error(String(row.out).slice(0, 200));
+  try { return JSON.parse(row.out); } catch (e) { return { raw: row.out }; }
+}
+
+// ---------- MAIN-process payloads (find the cell by partition sandbox-<idx>) ----------
+const CELL =
+  `const cell=()=>webContents.getAllWebContents().find(w=>{try{return w.getType()==="browserView"&&(w.session.storagePath||"").split(/[\\\\/]/).pop()===("sandbox-"+IDX)&&/web\\.telegram\\.org|chrome-error/.test(w.getURL())}catch(e){return false}});`;
+
+// read phone + codeUrl the panel stored on this profile
+const P_INFO = (idx) => `(async()=>{const req=process.mainModule.require.bind(process.mainModule);const{app}=req("electron");const path=req("path");try{const store=req(path.join(app.getAppPath(),"src","profiles","profile-store"));const p=(store.listProfiles("electron")||[]).find(x=>Number(x.accountIdx)===${idx});const t=(p&&p.telegramLogin)||{};return JSON.stringify({phone:t.phone||"",codeUrl:t.codeUrl||""});}catch(e){return JSON.stringify({err:String(e.message||e)})}})()`;
+
+// assign phone + codeUrl onto a profile
+const P_ASSIGN = (idx, phone, codeUrl) => `(async()=>{const req=process.mainModule.require.bind(process.mainModule);const{app}=req("electron");const path=req("path");try{const store=req(path.join(app.getAppPath(),"src","profiles","profile-store"));store.setTelegramLogin("electron",${idx},{phone:${JSON.stringify(phone)},codeUrl:${JSON.stringify(codeUrl)}});return JSON.stringify({ok:true});}catch(e){return JSON.stringify({err:String(e.message||e)})}})()`;
+
+const P_SEND = (idx, phone) => `(async () => {
+  const req=process.mainModule.require.bind(process.mainModule);const{webContents,session}=req("electron");
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));const IDX=${idx},PHONE=${JSON.stringify(phone)};const digits=PHONE.replace(/\\D/g,"");
+  ${CELL}
+  const wc=cell();if(!wc)return JSON.stringify({err:"no cell"});
+  const authed=async()=>wc.executeJavaScript("(function(){try{return !!localStorage.getItem('user_auth')}catch(e){return false}})()");
+  if(await authed())return JSON.stringify({ok:true,already:true});
+  // 换号必清:Telegram Web-K 把半截登录存 localStorage,不清的话 reload 会退回旧号验证码界面、换不了号。
+  try{ await session.fromPartition("persist:sandbox-"+IDX).clearStorageData({storages:["localstorage","indexdb","cookies","serviceworkers","cachestorage"]}); }catch(e){}
+  const dbg=wc.debugger;try{dbg.attach("1.3")}catch(e){}
+  const poll=async(fn,t,iv)=>{for(let i=0;i<t;i++){let r;try{r=await fn()}catch(e){r=null}if(r)return r;await sleep(iv)}return null;};
+  wc.reload();await poll(async()=>await wc.executeJavaScript("document.readyState")==="complete",40,400);await sleep(1200);
+  // 「Log in by phone」按钮要精确匹配,别匹配到二维码说明里的 "...on your phone"
+  await poll(async()=>wc.executeJavaScript("(()=>{const a=[...document.querySelectorAll('button,a')].find(x=>x.offsetParent&&/log ?in by phone|phone number|\\u624b\\u673a\\u53f7/i.test(x.innerText||''));if(a){a.click();return true}return false})()"),15,500);
+  // 手机号输入框在新版 web-K 是 contenteditable 的 .input-field-input(不是 <input>);取最后一个(号码字段,非国家码)
+  await poll(async()=>wc.executeJavaScript("(()=>[...document.querySelectorAll('.input-field-input, input:not([type=password])')].some(x=>x.offsetParent))()"),20,400);
+  await wc.executeJavaScript("(()=>{const is=[...document.querySelectorAll('.input-field-input, input:not([type=password])')].filter(x=>x.offsetParent);const i=is[is.length-1];if(i){i.focus();i.click()}})()");
+  await dbg.sendCommand("Input.dispatchKeyEvent",{type:"keyDown",modifiers:2,key:"a",code:"KeyA",windowsVirtualKeyCode:65});await dbg.sendCommand("Input.dispatchKeyEvent",{type:"keyUp",modifiers:2,key:"a",code:"KeyA",windowsVirtualKeyCode:65});
+  await dbg.sendCommand("Input.dispatchKeyEvent",{type:"keyDown",key:"Delete",code:"Delete",windowsVirtualKeyCode:46});await dbg.sendCommand("Input.dispatchKeyEvent",{type:"keyUp",key:"Delete",code:"Delete",windowsVirtualKeyCode:46});
+  await dbg.sendCommand("Input.insertText",{text:PHONE});
+  await poll(async()=>wc.executeJavaScript("(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.offsetParent&&!x.disabled&&/^next$/i.test((x.innerText||'').trim()));if(b){b.click();return true}return false})()"),12,500);
+  const sent=await poll(async()=>{const h=await wc.executeJavaScript("([...document.querySelectorAll('h1,h4,.subtitle')].map(x=>x.innerText).join(' '))");return String(h).replace(/\\D/g,"").includes(digits.slice(-8));},22,600);
+  try{dbg.detach()}catch(e){}
+  return JSON.stringify({ok:!!sent});
+})()`;
+
+const P_OVERLAY_OPEN = (idx, codeUrl) => `(async () => {
+  const req=process.mainModule.require.bind(process.mainModule);const{webContents,BrowserView}=req("electron");
+  const IDX=${idx},CODEURL=${JSON.stringify(codeUrl)};
+  const st=globalThis.__cicyTabBrowserState,win=st.managers.get(0).win;
+  ${CELL}
+  const wc=cell();if(!wc)return JSON.stringify({err:"no cell"});
+  let cb=null;for(const v of win.getBrowserViews()){try{if(v.webContents.id===wc.id){cb=v.getBounds();break;}}catch(e){}}
+  let cv=global["__jiema"+IDX];if(cv&&!cv.webContents.isDestroyed()){try{win.removeBrowserView(cv)}catch(e){}}
+  // 接码 view 用与 TG cell 同一个 partition(persist:sandbox-<idx>),从而走该 profile 的代理出口 IP,
+  // 各号各 IP,不会因本机直连 IP 被接码服务按 IP 限流。
+  cv=new BrowserView({webPreferences:{partition:"persist:sandbox-"+IDX}});global["__jiema"+IDX]=cv;
+  win.addBrowserView(cv);if(cb)cv.setBounds(cb);   // 全尺寸覆盖 + 叠最上层(z 更高)
+  // 接码 webview 上挂「重载 / 关闭」按钮(事件驱动:dom-ready 重注,关闭走导航哨兵销毁 view)。
+  // 自动读码失败时留着,操作者可手动等过限流再重载、或关掉露出登录页。
+  var TB='(function(){try{if(document.getElementById("__jbar"))return;var bar=document.createElement("div");bar.id="__jbar";bar.style.cssText="position:fixed;top:8px;right:8px;z-index:2147483647;display:flex;gap:8px";function mk(t,bg,fn){var b=document.createElement("button");b.textContent=t;b.style.cssText="padding:6px 12px;font:bold 14px sans-serif;border:0;border-radius:8px;cursor:pointer;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.35);background:"+bg;b.onclick=fn;return b;}bar.appendChild(mk("\\u91cd\\u8f7d","#1f6feb",function(){location.reload();}));bar.appendChild(mk("\\u2715 \\u5173\\u95ed","#c0142e",function(){location.href="https://jiema.didiapi.uk/__JCLOSE__";}));document.body.appendChild(bar);}catch(e){}})()';
+  cv.webContents.on("dom-ready",function(){cv.webContents.executeJavaScript(TB).catch(function(){});});
+  cv.webContents.on("will-navigate",function(e,url){if(/__JCLOSE__/.test(url)){try{e.preventDefault();}catch(x){} try{win.removeBrowserView(cv);}catch(x){} try{cv.webContents.destroy();}catch(x){} global["__jiema"+IDX]=null;}});
+  await cv.webContents.loadURL(CODEURL).catch(()=>{});
+  return JSON.stringify({ok:true,fullSize:!!cb});
+})()`;
+
+const P_OVERLAY_READ = (idx, reload) => `(async () => {
+  const req=process.mainModule.require.bind(process.mainModule);const cv=global["__jiema${idx}"];
+  if(!cv||cv.webContents.isDestroyed())return JSON.stringify({err:"overlay gone"});
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  ${reload ? 'try{cv.webContents.reload()}catch(e){} await sleep(2500);' : ''}
+  const g=async(s)=>{try{return String(await cv.webContents.executeJavaScript("((document.querySelector('"+s+"')||{}).value||'')"))}catch(e){return ""}};
+  const code=await g("#code"),pw=await g("#pass2fa");
+  let body="";try{body=String(await cv.webContents.executeJavaScript("((document.body?document.body.innerText:'').replace(/\\\\s+/g,' ').slice(0,120))"))}catch(e){}
+  return JSON.stringify({code,pw,body,rateLimited:/请求过于频繁/.test(body)});
+})()`;
+
+const P_FINISH = (idx, code, pw) => `(async () => {
+  const req=process.mainModule.require.bind(process.mainModule);const{webContents}=req("electron");
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));const IDX=${idx},CODE=${JSON.stringify(code)},PW=${JSON.stringify(pw)};
+  const st=globalThis.__cicyTabBrowserState,win=st.managers.get(0).win;
+  const cv=global["__jiema"+IDX];if(cv){try{win.removeBrowserView(cv)}catch(e){}try{cv.webContents.destroy()}catch(e){}global["__jiema"+IDX]=null;}
+  ${CELL}
+  const wc=cell();if(!wc)return JSON.stringify({err:"no cell"});
+  const authed=async()=>wc.executeJavaScript("(function(){try{return !!localStorage.getItem('user_auth')}catch(e){return false}})()");
+  if(await authed())return JSON.stringify({ok:true,already:true});
+  const dbg=wc.debugger;try{dbg.attach("1.3")}catch(e){}
+  const kd=async(o)=>{await dbg.sendCommand("Input.dispatchKeyEvent",{type:"keyDown",...o});await dbg.sendCommand("Input.dispatchKeyEvent",{type:"keyUp",...o});};
+  const type=async(s)=>{for(const ch of s){const vk=ch.toUpperCase().charCodeAt(0);await kd({text:ch,key:ch,code:(/\\d/.test(ch)?"Digit":"Key")+ch.toUpperCase(),windowsVirtualKeyCode:vk});await sleep(80);}};
+  const poll=async(fn,t,iv)=>{for(let i=0;i<t;i++){let r;try{r=await fn()}catch(e){r=null}if(r)return r;await sleep(iv)}return null;};
+  await poll(async()=>wc.executeJavaScript("(()=>{const i=[...document.querySelectorAll('input')].filter(x=>x.offsetParent&&x.type!=='password')[0];if(i){i.focus();i.click();return true}return false})()"),15,400);
+  await kd({modifiers:2,key:"a",code:"KeyA",windowsVirtualKeyCode:65});await kd({key:"Delete",code:"Delete",windowsVirtualKeyCode:46});
+  await type(CODE);
+  const step=await poll(async()=>{if(await authed())return"authed";const p=await wc.executeJavaScript("(()=>[...document.querySelectorAll('input[type=password]')].some(x=>x.offsetParent))()");return p?"2fa":null;},25,700);
+  let twofa=false;
+  if(step==="2fa"){twofa=true;
+    await wc.executeJavaScript("(()=>{const i=[...document.querySelectorAll('input[type=password]')].filter(x=>x.offsetParent&&!/stealthy/.test(x.className))[0];if(i){i.focus();i.click()}})()");
+    await kd({modifiers:2,key:"a",code:"KeyA",windowsVirtualKeyCode:65});for(let i=0;i<12;i++)await kd({key:"Backspace",code:"Backspace",windowsVirtualKeyCode:8});
+    await type(PW);await kd({key:"Enter",code:"Enter",windowsVirtualKeyCode:13});
+    await wc.executeJavaScript("(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.offsetParent&&!x.disabled&&/next|submit|log ?in|下一步|登录|提交/i.test((x.innerText||'').trim()));if(b)b.click();})()").catch(()=>{});
+  }
+  const ok=await poll(async()=>await authed(),20,800);try{dbg.detach()}catch(e){}
+  return JSON.stringify({ok:!!ok,twofa});
+})()`;
+
+// ---------- orchestration ----------
+async function loginOne(machine, idx, opts) {
+  let phone = opts.phone, codeUrl = opts.codeUrl;
+  if (phone && codeUrl) { await main(machine, P_ASSIGN(idx, phone, codeUrl), 30000); }
+  if (!phone || !codeUrl) {
+    const info = await main(machine, P_INFO(idx), 30000);
+    phone = phone || info.phone; codeUrl = codeUrl || info.codeUrl;
+  }
+  if (!phone || !codeUrl) throw new Error(`#${idx} 没有 phone/codeUrl(先派号或用 --phone/--code-url)`);
+  process.stdout.write(`${machine} #${idx} ${phone}\n`);
+  const sent = await main(machine, P_SEND(idx, phone), 100000);
+  if (sent.already) { process.stdout.write(`  已登录,跳过\n`); return { idx, ok: true, already: true }; }
+  process.stdout.write(`  发码: ${sent.ok ? 'ok' : '未确认(继续尝试接码)'}\n`);
+  await main(machine, P_OVERLAY_OPEN(idx, codeUrl), 40000);
+  // read code, spacing reads to respect the ~1/min 接码 rate limit
+  let code = '', pw = 'didi';
+  const MAX = opts.tries || 5;
+  for (let i = 0; i < MAX; i++) {
+    const r = await main(machine, P_OVERLAY_READ(idx, i > 0), 30000).catch((e) => ({ err: e.message }));
+    if (r.code) { code = r.code; pw = r.pw || 'didi'; break; }
+    if (r.rateLimited) { process.stdout.write(`  接码限流,冷却 ${opts.cooldown || 62}s…\n`); await sleep((opts.cooldown || 62) * 1000); }
+    else { process.stdout.write(`  等码…(${r.body ? r.body.slice(0, 40) : ''})\n`); await sleep(15000); }
+  }
+  if (!code) { process.stdout.write(`  ✗ 没拿到码(可能死卡/设备离线)\n`); return { idx, ok: false, err: 'no code' }; }
+  process.stdout.write(`  接码: ${code} / 2FA ${pw}\n`);
+  const fin = await main(machine, P_FINISH(idx, code, pw), 70000);
+  process.stdout.write(`  ${fin.ok ? '✓ 登录成功' : '✗ 登录失败'}${fin.twofa ? ' (2FA)' : ''}\n`);
+  return { idx, ok: !!fin.ok };
+}
+
+const USAGE = `tg-autologin — Telegram Web 自动登录(发码→接码overlay→填码+2FA)
+
+  tg-autologin login <machine> <idx>[,<idx>...] [--phone <p> --code-url <u>]
+                                     [--cooldown <sec>] [--tries <n>] [--json]
+
+- <machine>: 机器名(如 xs-1004)。<idx>: profile 序号,可逗号多个(单机顺序执行,不并发)。
+- 不带 --phone/--code-url 时从该 profile 已存的 telegramLogin 读取;带上则先派号再登。
+- 接码服务 ~1 req/min 限流,读码在 CLI 侧按冷却间隔重试(--cooldown 默认 62s)。
+- 2FA 密码优先用接码页的 pass2fa,缺省 didi。
+config: ${CFG}`;
+
+async function run() {
+  const argv = process.argv.slice(2);
+  const asJson = argv.includes('--json');
+  const a = argv.filter((x) => x !== '--json');
+  if (!a[0] || a[0] === '-h' || a[0] === '--help') { process.stdout.write(USAGE + '\n'); return; }
+  if (a[0] !== 'login') die(`未知命令 '${a[0]}'(试 --help)`, 2);
+  const machine = a[1], idxArg = a[2];
+  if (!machine || !idxArg) die('用法: tg-autologin login <machine> <idx[,idx...]>', 2);
+  const getOpt = (name) => { const i = a.indexOf(name); return i >= 0 ? a[i + 1] : undefined; };
+  const opts = { phone: getOpt('--phone'), codeUrl: getOpt('--code-url'),
+    cooldown: Number(getOpt('--cooldown')) || 62, tries: Number(getOpt('--tries')) || 5 };
+  const idxs = idxArg.split(',').map((x) => parseInt(x, 10)).filter(Number.isInteger);
+  const out = [];
+  for (const idx of idxs) {  // 单机顺序,绝不并发(接码/CDP 会互相干扰)
+    try { out.push(await loginOne(machine, idx, opts)); }
+    catch (e) { process.stdout.write(`  ✗ #${idx}: ${e.message}\n`); out.push({ idx, ok: false, err: e.message }); }
+  }
+  if (asJson) process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+  wsClose();
+  process.exit(out.some((r) => !r.ok) ? 4 : 0);
+}
+run().catch((e) => die('tg-autologin: ' + (e && e.message || e), 1));
