@@ -16,6 +16,7 @@
 | `CICY_SKILLS_ROOT` | 覆盖 `~/cicy-ai/skills`（技能安装位置） |
 | `CICY_SKILLS_REGISTRY` | 单一来源覆盖（忽略 registries.json） |
 | `CICY_SKILLS_REGISTRY_TOKEN` | 用于覆盖注册表的 Bearer 令牌 |
+| `CICY_API_BASE` / `CICY_API_TOKEN` | skill 找 cicy-code 的地址与 token(先看环境变量,再回退 `~/cicy-ai/global.json`);Windows 上由 dsh 启动器设置 |
 
 ## 相关 cicy-code 命令
 

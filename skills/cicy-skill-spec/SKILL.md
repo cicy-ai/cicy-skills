@@ -61,7 +61,7 @@ Skeleton (same shape as any cicy skill):
 ├── manifest.json     # name == dir name; entry "bin/<name>"; bump version each publish
 ├── SKILL.md          # frontmatter description MUST equal manifest.description exactly
 ├── README.md
-├── bin/<name>        # #!/usr/bin/env node, chmod +x, zero deps preferred
+├── bin/<name>        # #!/usr/bin/env node, chmod +x, zero deps, must also run in dsh on Windows (§4)
 └── references/
     ├── help.en.md / help.cn.md
     └── tools.en.md / tools.cn.md
@@ -142,6 +142,40 @@ git tag <name>-v<version> && git push origin <name>-v<version>
 
 ---
 
+## 4. dsh / Windows compatibility spec
+
+Skills are not only run by cicy-code on Linux. The same directory is pushed to
+every Windows matrix machine as `%USERPROFILE%\.agents\skills\<name>\` and used
+from **dsh** (DeepSeek Harness): `/<name>` loads `SKILL.md`, and a generated
+shim `%USERPROFILE%\.agents\bin\<name>.cmd` runs `bin/<name>` with the bundled
+`cicy-node\node.exe` (hidden console). **Every new skill must work there.**
+
+Rules (the scaffold already follows them):
+
+1. **Pure Node, zero deps, no Linux-only commands.** If the skill genuinely
+   needs a Linux binary (autossh, systemctl, docker…), list it in
+   `manifest.system_requirements` — a non-empty list marks the skill
+   *Linux-only* and fleet pushers skip it on Windows. Empty list = runs
+   wherever Node runs.
+2. **Never hard-code `127.0.0.1:8008` or read `~/cicy-ai/global.json`
+   directly.** Resolve the cicy-code API in this order:
+   `CICY_API_BASE` / `CICY_API_TOKEN` env → `~/cicy-ai/global.json`
+   (`api_token`) → error with exit code 3. On Windows the launcher sets these
+   for you (the local cicy-code lives in WSL/Docker with its own token, or does
+   not exist at all). Use the `cicyApi()` helper the scaffold puts in
+   `bin/<name>`.
+3. **Desktop control goes through `agent-desktop` / `agent-electron`** (they
+   speak `fleet-self` to the hub and work without a local cicy-code); do not
+   open your own chat/RPC socket to 8008.
+4. **Paths:** build with `path.join(os.homedir(), …)`, never `/home/...`;
+   never assume `/tmp`, `bash`, or a POSIX shell.
+5. **Verify before publishing:** `node bin/<name> --help` must work on any OS,
+   and on a matrix machine `<name> --help` inside dsh must print the same.
+
+`compatible_agents` stays `["*"]` — dsh is one of the agents.
+
+---
+
 ## Maintaining cicy-skill-spec itself
 
 `cicy-skill-spec` is in cicy-code's `preinstalledSkills` (api/mgr/setup.go) and
@@ -158,7 +192,7 @@ overwrite a version — always bump.
 cicy-skill-spec spec                  # print these conventions
 cicy-skill-spec paths                 # print the directory layout
 cicy-skill-spec scaffold foo --private   # new private skill in ~/cicy-ai/skills/private/foo
-cicy-skill-spec scaffold foo             # new public skill in ./foo for a PR
+cicy-skill-spec scaffold foo             # new public skill in ./foo for a PR (dsh-ready by default, see §4)
 ```
 
 ## References

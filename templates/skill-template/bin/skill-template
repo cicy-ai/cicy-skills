@@ -9,6 +9,20 @@ import { join } from 'node:path';
 const NAME = 'skill-template';
 const DB_DIR = process.env.CICY_DB_OVERRIDE || join(homedir(), 'cicy-ai/db');
 
+// ── cicy-code API resolution (works on Linux cicy-code AND inside dsh on Windows) ──
+// Order: CICY_API_BASE / CICY_API_TOKEN env → ~/cicy-ai/global.json → exit 3.
+// Never hard-code 127.0.0.1:8008 or read global.json elsewhere (see cicy-skill-spec §4).
+function cicyApi() {
+  const base = (process.env.CICY_API_BASE || 'http://127.0.0.1:' + (process.env.CICY_API_PORT || '8008')).replace(/\/+$/, '');
+  let token = process.env.CICY_API_TOKEN || '';
+  if (!token) {
+    try { token = JSON.parse(readFileSync(process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', 'global.json'), 'utf8')).api_token || ''; } catch {}
+  }
+  if (!token) { process.stderr.write(NAME + ': no cicy-code token (set CICY_API_TOKEN or log in)\n'); process.exit(3); }
+  return { base, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' } };
+}
+
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function die(message, code = 1) {

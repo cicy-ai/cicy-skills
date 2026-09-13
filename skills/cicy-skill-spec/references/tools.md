@@ -9,6 +9,8 @@
 └── team/<team>/<name>/   TEAM    — another team's private registry
 ```
 
+On Windows matrix machines the same skill dirs are pushed to `%USERPROFILE%\.agents\skills\<name>\` for dsh, with shims in `%USERPROFILE%\.agents\bin\`.
+
 ## Environment
 
 | Var | Meaning |
@@ -16,6 +18,7 @@
 | `CICY_SKILLS_ROOT` | Override `~/cicy-ai/skills` (where skills install) |
 | `CICY_SKILLS_REGISTRY` | Single-source override (ignores registries.json) |
 | `CICY_SKILLS_REGISTRY_TOKEN` | Bearer token for the override registry |
+| `CICY_API_BASE` / `CICY_API_TOKEN` | Where a skill finds cicy-code (env first, then `~/cicy-ai/global.json`); set by the dsh launcher on Windows |
 
 ## Related cicy-code commands
 
