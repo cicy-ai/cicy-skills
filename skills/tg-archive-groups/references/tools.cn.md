@@ -19,7 +19,8 @@
 | `appChatsManager.getChat(-peerId)` | 分类:`_==='chat'` 或 `channel` 且 `pFlags.megagroup` = 群;其它 `channel` = 频道;`left / kicked / deactivated` 跳过 |
 | `appUsersManager.getSelf()` | 当前操作的是哪个号 |
 | `appMessagesManager.editPeerFolders(peerIds[], folderId)` | 即 `folders.editPeerFolders`,1 = 归档,0 = 主列表;分批调 |
-| `dialogsStorage.getDialogOnly(peerId)` → `folder_id` | 核对每个会话确实到了目标文件夹 |
+| `dialogsStorage.getDialogOnly(peerId)` → `folder_id` | 本地快速核对 |
+| `apiManager.invokeApi('messages.getPeerDialogs', {peers})` | 本地缓存仍显示旧文件夹的,直接问服务器(缓存有时收不到 `updateFolderPeers`);服务器也说没动的逐个重试 —— 一批里混进一个服务端不认的 peer,整批会被静默丢掉 |
 | `apiManager.invokeApi('account.getGlobalPrivacySettings')` / `setGlobalPrivacySettings` | 归档前先打开 `keep_archived_unmuted` + `keep_archived_folders`,否则未静音会话一来新消息 Telegram 就自动取消归档(实测:431 个刚归档,一分钟内跳回 3 个) |
 
 已知拒绝:对官方「Telegram」通知号(user 777000)调 `folders.editPeerFolders` 服务端返回空 `updates`,会话留在 folder 0 —— Telegram 不允许客户端归档它,skill 直接跳过。

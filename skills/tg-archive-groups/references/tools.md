@@ -19,7 +19,8 @@ No socket of its own, nothing written on the machine, nothing patched in the pag
 | `appChatsManager.getChat(-peerId)` | classify: `_==='chat'` or `channel` + `pFlags.megagroup` = group; other `channel` = broadcast channel; `left / kicked / deactivated` are skipped |
 | `appUsersManager.getSelf()` | which account we are operating on |
 | `appMessagesManager.editPeerFolders(peerIds[], folderId)` | `folders.editPeerFolders` — 1 = Archive, 0 = main list; batched |
-| `dialogsStorage.getDialogOnly(peerId)` → `folder_id` | verify each peer landed in the target folder |
+| `dialogsStorage.getDialogOnly(peerId)` → `folder_id` | fast local check that a peer landed in the target folder |
+| `apiManager.invokeApi('messages.getPeerDialogs', {peers})` | server-side truth for peers the local cache still shows in the old folder (the cache sometimes never applies `updateFolderPeers`); peers the server also reports unmoved are retried one by one — a batch that contains one peer the server dislikes is silently dropped as a whole |
 | `apiManager.invokeApi('account.getGlobalPrivacySettings')` / `setGlobalPrivacySettings` | turn on `keep_archived_unmuted` + `keep_archived_folders` before archiving — otherwise Telegram un-archives unmuted chats on the next incoming message (seen live: 431 archived, 3 back within a minute) |
 
 Known refusal: `folders.editPeerFolders` on the official "Telegram" service chat (user 777000) returns an empty `updates` and the dialog stays in folder 0 — Telegram does not let clients archive it, so the skill skips it.

@@ -21,13 +21,14 @@ function fakeAgent() {
     { peerId: '600', title: 'Alice', kind: 'user', folder: 0 }], calls: [] }));
   fs.writeFileSync(fake, `#!/usr/bin/env node
 const fs=require('node:fs'); const sp=process.env.FAKE_STATE; const s=JSON.parse(fs.readFileSync(sp,'utf8'));
-const a=process.argv.slice(2); s.calls.push(a); let out;
+const a=process.argv.slice(2); s.calls.push(a); let out, out2;
 if(a.includes('webcontents')) out={ok:true,data:[{webContentsId:113,url:'https://web.telegram.org/k/',title:'TG'},{webContentsId:9,url:'https://example.com/'}]};
 else if(a.includes('Runtime.evaluate')){
   const p=JSON.parse(a.at(-1)); const ex=p.expression;
   if(ex.includes('getDialogs')){ const inc=ex.includes('!true'); const bots=ex.includes('if (true) out.push'); const all=ex.includes("kind: 'user'") && ex.includes("else { users++; if (true)"); const items=s.items.filter(x=>x.kind!=='service').filter(x=>x.kind==='user'?all:(x.kind==='bot'?bots:(inc||x.kind==='group'))).map(x=>({...x,unread:0}));
     out={success:true,result:{result:{type:'string',value:JSON.stringify({ok:true,self:{id:'1',phone:'8801709299917',username:'x'},total:5,users:1,groups:3,channels:1,items})}}}; }
   else if(ex.includes('getGlobalPrivacySettings')){ s.keep=(s.keep||0)+1; out={success:true,result:{result:{type:'string',value:JSON.stringify({ok:true,changed:true})}}}; }
+  else if(ex.includes('messages.getPeerDialogs')){ const m=/const ids = (\[[^\]]*\])/.exec(ex); const ids=JSON.parse(m[1]).map(String); const out={}; for(const id of ids){ const x=s.items.find(y=>y.peerId===id); if(x) out[id]=x.folder; } out2=out; out={success:true,result:{result:{type:'string',value:JSON.stringify(out2)}}}; }
   else if(ex.includes('editPeerFolders')){ const m=/const ids = (\\[[^\\]]*\\]); const f = (\\d)/.exec(ex); const ids=JSON.parse(m[1]).map(String); const f=Number(m[2]);
     for(const x of s.items) if(ids.includes(x.peerId)) x.folder=f; out={success:true,result:{result:{type:'string',value:JSON.stringify({ok:true,moved:ids.length,bad:[]})}}}; }
   else out={success:false};

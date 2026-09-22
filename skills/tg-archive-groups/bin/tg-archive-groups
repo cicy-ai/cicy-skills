@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-archive-groups';
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 
 const HELP = `${NAME} ${VERSION} — archive all groups and channels of a Telegram Web K session
 
@@ -141,6 +141,22 @@ const KEEP_JS = `(async () => {
   } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
 })()`;
 
+// 服务端核对:本地 dialogsStorage 有时收不到 updateFolderPeers(folder 一直显示 0),不能只信它;
+// 用 messages.getPeerDialogs 直接问服务器每个会话现在在哪个文件夹(≤100 个一批)。
+const verifyJs = (peerIds) => `(async () => {
+  const M = window.rootScope.managers; const ids = ${JSON.stringify(peerIds.map(Number))}; const out = {};
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100); const peers = [];
+    for (const id of chunk) { try { const ip = await M.appPeersManager.getInputPeerById(id); if (ip) peers.push({ id, ip }); } catch (e) {} }
+    try {
+      const r = await M.apiManager.invokeApi('messages.getPeerDialogs', { peers: peers.map((p) => ({ _: 'inputDialogPeer', peer: p.ip })) });
+      const ds = (r && r.dialogs) || [];
+      ds.forEach((d, k) => { const p = d.peer || {}; const id = p.user_id != null ? Number(p.user_id) : p.chat_id != null ? -Number(p.chat_id) : p.channel_id != null ? -Number(p.channel_id) : null; if (id != null) out[String(id)] = d.folder_id || 0; });
+    } catch (e) { for (const p of peers) out[String(p.id)] = 'err:' + String(e && (e.type || e.message) || e).slice(0, 60); }
+  }
+  return JSON.stringify(out);
+})()`;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
@@ -206,8 +222,26 @@ async function main() {
     if (moved === attempted.length) break;
     if (moved === lastMoved) { if (++stable >= 3) break; } else { stable = 0; lastMoved = moved; }
   }
-  const failed = attempted.length - moved;
-  const remaining = after && after.ok ? after.items.filter((x) => x.folder !== wantFolder).length : null;
+  // 本地缓存说没到位的,问服务器;服务器也说没到位的,逐个再试一次(整批里混进一个坏 peer 时服务端会把整批丢掉)
+  let stubborn = [];
+  if (moved < attempted.length) {
+    const folderOfLocal = new Map(after && after.ok ? after.items.map((x) => [x.peerId, x.folder]) : []);
+    const unsure = attempted.filter((id) => folderOfLocal.get(id) !== wantFolder);
+    let srv = JSON.parse(evaluate(o, target, verifyJs(unsure)));
+    stubborn = unsure.filter((id) => srv[id] !== wantFolder);
+    moved = attempted.length - stubborn.length;
+    if (stubborn.length) {
+      if (!o.json) process.stdout.write(`  ${stubborn.length} not moved on the server, retrying one by one…\n`);
+      for (const id of stubborn) { const r = JSON.parse(evaluate(o, target, moveJs([id], wantFolder))); if (!r.ok) errors.push({ peers: [id], err: r.err }); await sleep(300); }
+      await sleep(1000);
+      srv = JSON.parse(evaluate(o, target, verifyJs(stubborn)));
+      stubborn = stubborn.filter((id) => srv[id] !== wantFolder);
+      moved = attempted.length - stubborn.length;
+      if (stubborn.length) errors.push({ peers: stubborn, err: 'server still reports old folder after individual retry' });
+    }
+  }
+  const failed = stubborn.length;
+  const remaining = after && after.ok ? Math.max(0, after.items.filter((x) => x.folder !== wantFolder).length - (attempted.length - failed - attempted.filter((id) => (new Map(after.items.map((x) => [x.peerId, x.folder]))).get(id) === wantFolder).length)) : null;
   if (o.json) process.stdout.write(JSON.stringify({ ok: failed === 0, target, self: scan.self, moved, failed, remaining, keep, errors }) + '\n');
   else process.stdout.write(`${target} ${who}: ${label}d ${moved}, failed ${failed}, remaining ${remaining ?? '?'}\n`);
   return failed ? 2 : 0;
