@@ -6,8 +6,8 @@
 |---|---|
 | `tg-set-name targets [--client <id>] [--json]` | List Telegram Web K webContents (`wc:<id>` + window title) that can be operated on. |
 | `tg-set-name show [--target wc:<id>] [--client <id>] [--json]` | Print which account the page is logged in as (name, phone, id, @username). |
-| `tg-set-name suggest [--count <n>] [--seed <s>] [--emoji] [--no-last] [--json]` | Print cute girl names. Offline, no page needed. Same seed → same list. |
-| `tg-set-name set [<first> [<last>]] [--target wc:<id>] [--client <id>] [--seed <s>] [--emoji] [--no-last] [--yes] [--json]` | Set the display name (`account.updateProfile`). Without `<first>` a cute girl name is picked, seeded by the account id. Without `--yes` it only prints what it would set. |
+| `tg-set-name suggest [--count <n>] [--seed <s>] [--lang zh\|en] [--emoji] [--no-last] [--json]` | Print cute girl names (Chinese by default). Offline, no page needed. Same seed → same list. |
+| `tg-set-name set [<first> [<last>]] [--target wc:<id>] [--client <id>] [--seed <s>] [--lang zh\|en] [--emoji] [--no-last] [--yes] [--json]` | Set the display name (`account.updateProfile`). Without `<first>` a cute girl name is picked, seeded by the account id. Without `--yes` it only prints what it would set. |
 
 ## Options
 
@@ -16,8 +16,9 @@
 | `--target wc:<id>` | Telegram Web K webContents id (a bare number is accepted). Auto-picked only when exactly one Telegram Web K target exists. |
 | `--client <id>` | cicy-desktop client id, passed through to `agent-electron --client`. |
 | `--seed <s>` | Seed for the name pick. Default for `set`: the account id (stable per account). Default for `suggest`: the current time. |
-| `--emoji` | Append a cute emoji to the last name (`🌸 🎀 🍓 🍑 🐰 …`). |
-| `--no-last` | First name only (last name empty; with `--emoji` the last name is just the emoji). |
+| `--lang zh\|en` | `zh` (default): a cute Chinese girl name (`糖糖`, `小桃`, `棉花糖`, …, 110 names) as the first name, last name empty. `en`: English first name + cute last name (`Luna Peach`). |
+| `--emoji` | Put a cute emoji in the last name (`🌸 🎀 🍓 🍑 🐰 …`). |
+| `--no-last` | (en) First name only (last name empty; with `--emoji` the last name is just the emoji). |
 | `--count <n>` | Number of names `suggest` prints (1–200, default 10). |
 | `--yes` | Actually change the name (`set`). |
 | `--dry-run` | Explicitly keep it a dry run (default). |

@@ -6,8 +6,8 @@
 |---|---|
 | `tg-set-name targets [--client <id>] [--json]` | 列出可操作的 Telegram Web K webContents(`wc:<id>` + 窗口标题)。 |
 | `tg-set-name show [--target wc:<id>] [--client <id>] [--json]` | 显示这个页面登录的是哪个账号(名字、手机号、id、@用户名)。 |
-| `tg-set-name suggest [--count <n>] [--seed <s>] [--emoji] [--no-last] [--json]` | 列出可爱的女生名字。离线,不需要页面;同一个 seed 结果相同。 |
-| `tg-set-name set [<名> [<姓>]] [--target wc:<id>] [--client <id>] [--seed <s>] [--emoji] [--no-last] [--yes] [--json]` | 设置显示名(`account.updateProfile`)。不给名字时按账号 id 挑一个可爱女生名字。不带 `--yes` 只打印将要设置的名字,不改。 |
+| `tg-set-name suggest [--count <n>] [--seed <s>] [--lang zh\|en] [--emoji] [--no-last] [--json]` | 列出可爱的女生名字(默认中文)。离线,不需要页面;同一个 seed 结果相同。 |
+| `tg-set-name set [<名> [<姓>]] [--target wc:<id>] [--client <id>] [--seed <s>] [--lang zh\|en] [--emoji] [--no-last] [--yes] [--json]` | 设置显示名(`account.updateProfile`)。不给名字时按账号 id 挑一个可爱女生名字。不带 `--yes` 只打印将要设置的名字,不改。 |
 
 ## 选项
 
@@ -16,8 +16,9 @@
 | `--target wc:<id>` | Telegram Web K 的 webContents id(也接受纯数字)。只有恰好一个目标时才会自动选。 |
 | `--client <id>` | cicy-desktop 客户端 id,透传给 `agent-electron --client`。 |
 | `--seed <s>` | 挑名字用的种子。`set` 默认用账号 id(每个号固定一个名字,重跑不变);`suggest` 默认用当前时间。 |
-| `--emoji` | 在姓后面加一个可爱 emoji(`🌸 🎀 🍓 🍑 🐰 …`)。 |
-| `--no-last` | 只设名,姓留空(配合 `--emoji` 时姓只放 emoji)。 |
+| `--lang zh\|en` | `zh`(默认):可爱的中文女生名字(`糖糖`、`小桃`、`棉花糖` … 共 110 个)放在名里,姓留空。`en`:英文名 + 可爱的姓(`Luna Peach`)。 |
+| `--emoji` | 在姓里放一个可爱 emoji(`🌸 🎀 🍓 🍑 🐰 …`)。 |
+| `--no-last` | (en)只设名,姓留空(配合 `--emoji` 时姓只放 emoji)。 |
 | `--count <n>` | `suggest` 输出几个(1–200,默认 10)。 |
 | `--yes` | 真正修改(`set`)。 |
 | `--dry-run` | 显式保持只看不改(默认)。 |

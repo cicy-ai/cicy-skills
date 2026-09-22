@@ -1,9 +1,9 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-set-name",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "TG Set Name",
-  "description": "Use when a Telegram account running in Telegram Web K needs its display name (first + last name) shown or set through agent-electron, defaulting to a cute girl name picked per account.",
+  "description": "Use when a Telegram account running in Telegram Web K needs its display name (first + last name) shown or set through agent-electron, defaulting to a cute Chinese girl name picked per account.",
   "category": "productivity",
   "tags": [
     "telegram",

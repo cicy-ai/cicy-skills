@@ -6,17 +6,17 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-set-name';
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
-const HELP = `${NAME} ${VERSION} — show / suggest / set the display name of a Telegram Web K account (cute girl names by default)
+const HELP = `${NAME} ${VERSION} — show / suggest / set the display name of a Telegram Web K account (cute Chinese girl names by default)
 
 Usage:
   ${NAME} targets [--client <id>] [--json]                 list Telegram Web K webContents to operate on
   ${NAME} show    [--target wc:<id>] [--client <id>] [--json]
                                                            which account is logged in + its current name
-  ${NAME} suggest [--count <n>] [--seed <s>] [--emoji] [--json]
+  ${NAME} suggest [--count <n>] [--seed <s>] [--lang zh|en] [--emoji] [--json]
                                                            print cute girl names (offline, no page needed)
-  ${NAME} set     [<first> [<last>]] [--target wc:<id>] [--client <id>] [--seed <s>] [--emoji] [--no-last] [--yes] [--json]
+  ${NAME} set     [<first> [<last>]] [--target wc:<id>] [--client <id>] [--seed <s>] [--lang zh|en] [--emoji] [--no-last] [--yes] [--json]
                                                            set the name; without <first> a cute girl name is picked
                                                            (dry run without --yes)
 
@@ -24,8 +24,10 @@ Options:
   --target wc:<id>   Telegram Web K webContents id (from "targets"); auto-picked when exactly one exists
   --client <id>      cicy-desktop client id (agent-electron --client)
   --seed <s>         seed for the name pick (default: the account id, so every account gets its own stable name)
-  --emoji            add a cute emoji to the last name (e.g. "Luna" "Peach 🍑")
-  --no-last          only a first name, empty last name
+  --lang zh|en       zh (default): cute Chinese girl name as the first name, last name empty (e.g. "糖糖", "小桃");
+                     en: English first + cute last name (e.g. "Luna" "Peach")
+  --emoji            add a cute emoji as / to the last name (e.g. "糖糖" "🍓")
+  --no-last          (en) only a first name, empty last name
   --count <n>        how many names "suggest" prints (default 10)
   --yes              actually change the name (set is a dry run without it)
   --json             machine-readable output
@@ -35,7 +37,22 @@ Name rules (checked before any request): first name 1–64 characters, last name
 Exit codes: 0 ok · 1 usage / invalid name · 2 agent-electron / page error · 3 refused by Telegram
 `;
 
-// ── cute girl names ──────────────────────────────────────────────────────
+// ── cute girl names ──
+// zh: 可爱的中文女生名字(叠字 / 小X / 两字昵称),只放在 first_name,last_name 留空。
+const ZH = [
+  '糖糖', '桃桃', '甜甜', '朵朵', '诺诺', '萌萌', '软软', '七七', '乐乐', '安安',
+  '暖暖', '可可', '悠悠', '念念', '若若', '芊芊', '依依', '楚楚', '苏苏', '米米',
+  '果果', '圆圆', '点点', '豆豆', '妞妞', '贝贝', '晶晶', '莉莉', '琪琪', '欣欣',
+  '瑶瑶', '婷婷', '菲菲', '露露', '蜜蜜', '茜茜', '恬恬', '沫沫', '汐汐', '柚柚',
+  '梨梨', '莓莓', '栗栗', '橙橙', '棠棠', '樱樱', '桐桐', '宝宝', '囡囡', '兜兜',
+  '小桃', '小鹿', '小兔', '小雪', '小雨', '小柚', '小梨', '小樱', '小糖', '小米',
+  '小暖', '小萌', '小星', '小月', '小鱼', '小橘', '小葵', '小荷', '小茉', '小铃',
+  '甜心', '奶糖', '布丁', '棉花糖', '小奶猫', '软糖', '蜜桃', '草莓', '樱桃', '芒果',
+  '桃子', '橘子', '柚子', '梨涡', '酒窝', '团子', '丸子', '饭团', '奶茶', '可颂',
+  '星星', '月亮', '初夏', '晚晚', '一一', '十一', '小满', '知夏', '南栀', '栀子',
+  '安然', '若曦', '语桐', '心怡', '诗涵', '梓萱', '一诺', '欣怡', '雨桐', '可馨',
+];
+const ZH_EMOJI = ['🌸', '🎀', '🍓', '🍑', '🐰', '🌷', '💕', '✨', '🧸', '🌙', '🍒', '🦋', '🌼', '💖', '🍭', '🐱', '🍬'];
 const FIRST = [
   'Luna', 'Mia', 'Lily', 'Coco', 'Ella', 'Chloe', 'Zoe', 'Bella', 'Sophie', 'Emma',
   'Ava', 'Ivy', 'Rosie', 'Daisy', 'Lulu', 'Nina', 'Kiki', 'Mimi', 'Cici', 'Lola',
@@ -53,8 +70,9 @@ const EMOJI = ['🌸', '🎀', '🍓', '🍑', '🐰', '🌷', '💕', '✨', '�
 
 // Deterministic 32-bit FNV-1a so the same seed (account id) always yields the same name.
 function hash(s) { let h = 0x811c9dc5; for (const ch of String(s)) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
-function cuteName(seed, { emoji = false, last = true } = {}) {
+function cuteName(seed, { emoji = false, last = true, lang = 'zh' } = {}) {
   const h = hash(seed), h2 = hash(seed + '#last'), h3 = hash(seed + '#emoji');
+  if (lang === 'zh') return { first: ZH[h % ZH.length], last: emoji ? ZH_EMOJI[h3 % ZH_EMOJI.length] : '' };
   const first = FIRST[h % FIRST.length];
   let l = last ? LAST[h2 % LAST.length] : '';
   if (l && l === first) l = LAST[(h2 + 1) % LAST.length];
@@ -63,13 +81,14 @@ function cuteName(seed, { emoji = false, last = true } = {}) {
 }
 
 function parseArgs(argv) {
-  const o = { cmd: argv[0] || '', names: [], target: '', client: '', seed: '', count: 10, emoji: false, noLast: false, json: false, yes: false };
+  const o = { cmd: argv[0] || '', names: [], target: '', client: '', seed: '', lang: 'zh', count: 10, emoji: false, noLast: false, json: false, yes: false };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--target') o.target = argv[++i] || '';
     else if (a === '--client') o.client = argv[++i] || '';
     else if (a === '--seed') o.seed = argv[++i] || '';
     else if (a === '--count') o.count = Number(argv[++i]);
+    else if (a === '--lang') o.lang = argv[++i] || '';
     else if (a === '--emoji') o.emoji = true;
     else if (a === '--no-last') o.noLast = true;
     else if (a === '--json') o.json = true;
@@ -81,6 +100,7 @@ function parseArgs(argv) {
     else { process.stderr.write(`${NAME}: unexpected argument ${a} (quote names that contain spaces)\n`); process.exit(1); }
   }
   if (o.target && /^\d+$/.test(o.target)) o.target = 'wc:' + o.target;
+  if (!['zh', 'en'].includes(o.lang)) { process.stderr.write(`${NAME}: --lang must be zh or en\n`); process.exit(1); }
   if (!Number.isInteger(o.count) || o.count < 1 || o.count > 200) { process.stderr.write(`${NAME}: --count must be 1–200\n`); process.exit(1); }
   return o;
 }
@@ -161,7 +181,7 @@ async function main() {
     const base = o.seed || String(Date.now());
     const seen = new Set(), names = [];
     for (let i = 0; names.length < o.count && i < o.count * 20; i++) {
-      const n = cuteName(base + ':' + i, { emoji: o.emoji, last: !o.noLast });
+      const n = cuteName(base + ':' + i, { emoji: o.emoji, last: !o.noLast, lang: o.lang });
       const k = full(n.first, n.last); if (seen.has(k)) continue; seen.add(k); names.push(n);
     }
     if (o.json) process.stdout.write(JSON.stringify({ ok: true, names }) + '\n');
@@ -198,7 +218,7 @@ async function main() {
 
   // set
   const picked = !o.names.length;
-  const n = picked ? cuteName(o.seed || self.id, { emoji: o.emoji, last: !o.noLast })
+  const n = picked ? cuteName(o.seed || self.id, { emoji: o.emoji, last: !o.noLast, lang: o.lang })
     : { first: o.names[0].trim(), last: (o.names[1] || '').trim() };
   if (self.first === n.first && self.last === n.last) {
     if (o.json) process.stdout.write(JSON.stringify({ ok: true, target, self, first: n.first, last: n.last, picked, unchanged: true }) + '\n');

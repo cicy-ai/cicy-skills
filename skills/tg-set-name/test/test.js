@@ -37,13 +37,29 @@ fs.writeFileSync(sp,JSON.stringify(s)); process.stdout.write(JSON.stringify(out)
 test('--help prints usage', () => { assert.match(execFileSync('node', [cli, '--help'], { encoding: 'utf8' }), /Usage:/); });
 
 test('suggest is offline, deterministic per seed, unique', () => {
-  const a = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '20', '--seed', 'x', '--json'], { encoding: 'utf8' })).names;
-  const b = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '20', '--seed', 'x', '--json'], { encoding: 'utf8' })).names;
+  const a = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '20', '--seed', 'x', '--lang', 'en', '--json'], { encoding: 'utf8' })).names;
+  const b = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '20', '--seed', 'x', '--lang', 'en', '--json'], { encoding: 'utf8' })).names;
   assert.equal(a.length, 20); assert.deepEqual(a, b);
   assert.equal(new Set(a.map((n) => n.first + ' ' + n.last)).size, 20);
   for (const n of a) { assert.ok(n.first); assert.ok(n.last); assert.notEqual(n.first, n.last); }
-  const e = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '3', '--emoji', '--no-last', '--json'], { encoding: 'utf8' })).names;
+  const e = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '3', '--lang', 'en', '--emoji', '--no-last', '--json'], { encoding: 'utf8' })).names;
   for (const n of e) assert.match(n.last, /^\p{Extended_Pictographic}/u);
+});
+
+test('default names are cute Chinese first names with an empty last name', () => {
+  const z = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '30', '--seed', 'z', '--json'], { encoding: 'utf8' })).names;
+  assert.equal(z.length, 30);
+  for (const n of z) { assert.match(n.first, /^\p{Script=Han}{2,3}$/u); assert.equal(n.last, ''); }
+  const e = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '3', '--emoji', '--json'], { encoding: 'utf8' })).names;
+  for (const n of e) assert.match(n.last, /^\p{Extended_Pictographic}$/u);
+  const bad = (() => { try { execFileSync('node', [cli, 'suggest', '--lang', 'fr'], { stdio: 'pipe' }); return 0; } catch (x) { return x.status; } })();
+  assert.equal(bad, 1);
+});
+
+test('set picks a Chinese name by default (dry run)', () => {
+  const { run } = fakeAgent();
+  const r = JSON.parse(run(['set', '--json']).out);
+  assert.match(r.first, /^\p{Script=Han}+$/u); assert.equal(r.last, '');
 });
 
 test('targets lists only Telegram Web K webContents', () => {
