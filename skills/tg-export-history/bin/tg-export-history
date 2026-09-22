@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const NAME = 'tg-export-history';
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 const HELP = `${NAME} ${VERSION} — export a Telegram chat's messages to JSON / JSONL / CSV (read-only, no media download)
 
@@ -34,7 +34,7 @@ Options:
   --batch N          getHistory calls per page evaluation (default 8, i.e. 800 messages per round trip)
   --json             machine-readable summary on stdout (progress goes to stderr)
 
-Record fields: id, date (ISO), from, from_id, text, media, file, reply_to, fwd, views, service, edit_date, grouped_id
+Record fields: id, date (ISO), from, from_id, text, media, media_id, mime, size, file, reply_to, fwd, views, service, edit_date, grouped_id
 
 Exit codes: 0 ok · 1 usage · 2 agent-electron / page error · 3 chat not found or not readable
 `;
@@ -168,11 +168,16 @@ const chunkJs = (offsetId, batch, minId, since) => `(async () => {
         if (${Number(since) || 0} && m.date < ${Number(since) || 0}) { stop = true; break; }
         const fk = key(m.from_id) || key(m.peer_id);
         const media = m.media ? String(m.media._).replace(/^messageMedia/, '').toLowerCase() : '';
-        const doc = m.media && m.media.document;
+        const doc = m.media && m.media.document, photo = m.media && m.media.photo;
         const file = doc ? ((doc.attributes || []).map((a) => a.file_name).filter(Boolean)[0] || '') : '';
+        // attachment identity: Telegram's photo/document id (stable), plus mime/size for documents
+        const att = doc || photo || null;
+        const media_id = att && att.id != null ? String(att.id) : '';
+        const mime = doc ? (doc.mime_type || '') : (photo ? 'image/jpeg' : '');
+        const size = doc ? (doc.size != null ? Number(doc.size) : '') : (photo ? Math.max(0, ...((photo.sizes || []).map((z) => Number(z.size) || 0))) || '' : '');
         const fwd = m.fwd_from ? (m.fwd_from.from_name || names[key(m.fwd_from.from_id)] || 'forwarded') : '';
         out.push({ id: m.id, date: new Date(m.date * 1000).toISOString(), from: names[fk] || fk, from_id: fk, text: m.message || '',
-          media, file, reply_to: m.reply_to && m.reply_to.reply_to_msg_id || '', fwd, views: m.views != null ? m.views : '',
+          media, media_id, mime, size, file, reply_to: m.reply_to && m.reply_to.reply_to_msg_id || '', fwd, views: m.views != null ? m.views : '',
           service: m._ === 'messageService' ? String(m.action && m.action._ || 'service').replace(/^messageAction/, '') : '',
           edit_date: m.edit_date ? new Date(m.edit_date * 1000).toISOString() : '', grouped_id: m.grouped_id ? String(m.grouped_id) : '' });
         off = m.id;
@@ -183,7 +188,7 @@ const chunkJs = (offsetId, batch, minId, since) => `(async () => {
   } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200), rows: out, next: off }); }
 })()`;
 
-const FIELDS = ['id', 'date', 'from', 'from_id', 'text', 'media', 'file', 'reply_to', 'fwd', 'views', 'service', 'edit_date', 'grouped_id'];
+const FIELDS = ['id', 'date', 'from', 'from_id', 'text', 'media', 'media_id', 'mime', 'size', 'file', 'reply_to', 'fwd', 'views', 'service', 'edit_date', 'grouped_id'];
 const csvEsc = (v) => { v = String(v ?? ''); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
 const describeLine = (t, r) => `${t} ${r.info.title || '?'}${r.info.username ? ' @' + r.info.username : ''} (${r.info.type}, id ${r.info.id}${r.info.members ? ', ' + r.info.members + ' members' : ''}${r.info.member ? '' : ', not a member'}) — ${r.count} messages${r.latest ? ', latest #' + r.latest.id + ' ' + r.latest.date.slice(0, 10) : ''}`;
 

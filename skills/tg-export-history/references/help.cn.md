@@ -26,7 +26,7 @@
 
 ## 记录字段
 
-`id`、`date`(ISO 8601 UTC)、`from`(发送者昵称 + @用户名,频道消息则为频道)、`from_id`(`u<id>` / `c<id>`)、`text`、`media`(`photo`、`document`、`webpage`、`poll`… 或空)、`file`(文件名)、`reply_to`(被回复的消息 id)、`fwd`(转发来源)、`views`、`service`(系统消息动作,如 `ChatAddUser`)、`edit_date`、`grouped_id`(相册 id)。按时间从旧到新写出。
+`id`、`date`(ISO 8601 UTC)、`from`(发送者昵称 + @用户名,频道消息则为频道)、`from_id`(`u<id>` / `c<id>`)、`text`、`media`(`photo`、`document`、`webpage`、`poll`… 或空)、`media_id`(Telegram 的 photo / document id)、`mime`、`size`(字节)、`file`(文件名)、`reply_to`(被回复的消息 id)、`fwd`(转发来源)、`views`、`service`(系统消息动作,如 `ChatAddUser`)、`edit_date`、`grouped_id`(相册 id)。按时间从旧到新写出。
 
 ## 输出
 
