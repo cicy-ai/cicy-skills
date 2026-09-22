@@ -15,7 +15,7 @@
 |---|---|
 | `--target wc:<id>` | Telegram Web K 的 webContents id(也可只写数字)。只有恰好一个 Telegram Web K 窗口时才自动选。 |
 | `--client <id>` | cicy-desktop 客户端 id,透传给 `agent-electron --client`。 |
-| `--bots` | 连 bot 会话一起处理(真人私聊永远不动)。 |
+| `--bots` | 连 bot 会话和官方「Telegram」服务通知号(id 777000)一起处理(真人私聊永远不动)。 |
 | `--groups-only` | 只动群,频道不动(默认群 + 频道都归档)。 |
 | `--channels` | 兼容旧写法;默认已包含频道。 |
 | `--yes` | 真移动。 |
