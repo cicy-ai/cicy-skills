@@ -25,6 +25,7 @@ const a=process.argv.slice(2); s.calls.push(a); let out, out2;
 if(a.includes('webcontents')) out={ok:true,data:[{webContentsId:113,url:'https://web.telegram.org/k/',title:'TG'},{webContentsId:9,url:'https://example.com/'}]};
 else if(a.includes('Runtime.evaluate')){
   const p=JSON.parse(a.at(-1)); const ex=p.expression;
+  if(ex.includes('/*clear-drafts*/')){ out={success:true,result:{result:{type:'string',value:JSON.stringify({drafts:0,cleared:0,failed:0})}}}; fs.writeFileSync(sp,JSON.stringify(s)); process.stdout.write(JSON.stringify(out)); process.exit(0); }
   if(ex.includes('/*drop-fixed*/')){ out={success:true,result:{result:{type:'string',value:JSON.stringify({service:'gone',saved:'gone'})}}}; fs.writeFileSync(sp,JSON.stringify(s)); process.stdout.write(JSON.stringify(out)); process.exit(0); }
   if(ex.includes('/*server-sweep*/')){ out={success:true,result:{result:{type:'string',value:JSON.stringify({seen:0,todo:0,moved:0,failed:[]})}}}; fs.writeFileSync(sp,JSON.stringify(s)); process.stdout.write(JSON.stringify(out)); process.exit(0); }
   if(ex.includes('getDialogs')){ const inc=ex.includes('!true'); const bots=ex.includes('if (true) out.push'); const all=ex.includes("kind: 'user'") && ex.includes("else { users++; if (true)"); const items=s.items.filter(x=>x.kind!=='service').filter(x=>x.kind==='user'?all:(x.kind==='bot'?bots:(inc||x.kind==='group'))).map(x=>({...x,unread:0}));
