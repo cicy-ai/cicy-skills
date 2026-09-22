@@ -44,26 +44,28 @@ test('targets lists only Telegram Web K webContents', () => {
   assert.equal(r.targets.length, 1); assert.equal(r.targets[0].target, 'wc:113');
 });
 
-test('scan counts groups only by default, channels with --channels', () => {
+test('scan counts groups + channels by default, groups only with --groups-only', () => {
   const { run } = fakeAgent();
   let r = JSON.parse(run(['scan', '--json']));
-  assert.equal(r.included, 3); assert.equal(r.archived, 1); assert.equal(r.not_archived, 2);
-  r = JSON.parse(run(['scan', '--channels', '--json']));
-  assert.equal(r.included, 4); assert.equal(r.not_archived, 3);
+  assert.equal(r.included, 4); assert.equal(r.archived, 1); assert.equal(r.not_archived, 3);
+  r = JSON.parse(run(['scan', '--groups-only', '--json']));
+  assert.equal(r.included, 3); assert.equal(r.not_archived, 2);
 });
 
 test('archive is a dry run without --yes', () => {
   const { run, st } = fakeAgent();
   const r = JSON.parse(run(['archive', '--target', '113', '--json']));
-  assert.equal(r.dryRun, true); assert.equal(r.would_move.length, 2); assert.equal(st().items.filter((x) => x.folder === 1).length, 1);
+  assert.equal(r.dryRun, true); assert.equal(r.would_move.length, 3); assert.equal(st().items.filter((x) => x.folder === 1).length, 1);
 });
 
-test('archive --yes moves the not-yet-archived groups; unarchive brings all back', () => {
+test('archive --yes moves groups + channels; --groups-only spares channels; unarchive brings all back', () => {
   const { run, st } = fakeAgent();
-  let r = JSON.parse(run(['archive', '--target', 'wc:113', '--yes', '--batch', '1', '--delay', '0', '--json']));
+  let r = JSON.parse(run(['archive', '--target', 'wc:113', '--yes', '--groups-only', '--batch', '1', '--delay', '0', '--json']));
   assert.equal(r.moved, 2); assert.equal(r.failed, 0); assert.equal(r.remaining, 0);
   assert.deepEqual(st().items.filter((x) => x.kind === 'group').map((x) => x.folder), [1, 1, 1]);
   assert.equal(st().items.find((x) => x.kind === 'channel').folder, 0);
+  r = JSON.parse(run(['archive', '--target', 'wc:113', '--yes', '--delay', '0', '--json']));
+  assert.equal(r.moved, 1); assert.equal(st().items.find((x) => x.kind === 'channel').folder, 1);
   r = JSON.parse(run(['unarchive', '--target', 'wc:113', '--yes', '--delay', '0', '--json']));
-  assert.equal(r.moved, 3); assert.deepEqual(st().items.filter((x) => x.kind === 'group').map((x) => x.folder), [0, 0, 0]);
+  assert.equal(r.moved, 4); assert.deepEqual(st().items.map((x) => x.folder), [0, 0, 0, 0]);
 });
