@@ -15,7 +15,7 @@
 
 | 调用 | 用途 |
 |---|---|
-| `appUsersManager.getSelf()` | 当前操作的是哪个账号(id / 手机号 / 昵称 / 现有用户名) |
+| `apiManager.invokeApi('users.getFullUser', {id: inputUserSelf})`(兜底 `appUsersManager.getSelf()`) | 当前操作的是哪个账号(id / 手机号 / 昵称 / 现有用户名)—— 以服务器为准,页面缓存在刚改完时会滞后 |
 | `apiManager.invokeApi('account.checkUsername', {username})` | 可用时返回 `true`;RPC 错误(`USERNAME_INVALID`、`USERNAME_OCCUPIED`、`USERNAME_PURCHASE_AVAILABLE`、`FLOOD_WAIT_n`)原样放进 `err` |
 | `apiManager.invokeApi('account.updateUsername', {username})` | 设置(传 `''` 即删除)用户名,返回更新后的 `User` |
 | `appUsersManager.saveApiUser(user, true)` | 同步页面自己的用户缓存,界面不用刷新就显示新用户名 |

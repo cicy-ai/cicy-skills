@@ -1,13 +1,14 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
-  "name": "tg-set-username",
-  "version": "0.1.1",
-  "title": "TG Set Username",
-  "description": "Use when a Telegram account running in Telegram Web K needs its public @username shown, checked, set or cleared through agent-electron, no patch required.",
+  "name": "tg-set-name",
+  "version": "0.1.0",
+  "title": "TG Set Name",
+  "description": "Use when a Telegram account running in Telegram Web K needs its display name (first + last name) shown or set through agent-electron, defaulting to a cute girl name picked per account.",
   "category": "productivity",
   "tags": [
     "telegram",
-    "username",
+    "name",
+    "profile",
     "electron",
     "cdp",
     "account"
@@ -21,7 +22,7 @@
     "agent-electron"
   ],
   "npm_dependencies": false,
-  "entry": "bin/tg-set-username",
+  "entry": "bin/tg-set-name",
   "permissions": [
     "network"
   ],
@@ -38,5 +39,5 @@
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
   },
-  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-username"
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-name"
 }

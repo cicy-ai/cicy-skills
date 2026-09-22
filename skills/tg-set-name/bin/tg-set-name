@@ -1,0 +1,225 @@
+#!/usr/bin/env node
+// tg-set-name — show / suggest / set the display name (first + last name) of the account logged in to a
+// Telegram Web K page, defaulting to a cute girl's name. Talks to the page through agent-electron
+// (CDP Runtime.evaluate) and Telegram Web K's own window.rootScope.managers API, so no patch is needed.
+// Zero deps, pure ESM, Node 18+. Runs on Linux cicy-code and inside dsh on Windows (cicy-skill-spec §4).
+import { execFileSync } from 'node:child_process';
+
+const NAME = 'tg-set-name';
+const VERSION = '0.1.0';
+
+const HELP = `${NAME} ${VERSION} — show / suggest / set the display name of a Telegram Web K account (cute girl names by default)
+
+Usage:
+  ${NAME} targets [--client <id>] [--json]                 list Telegram Web K webContents to operate on
+  ${NAME} show    [--target wc:<id>] [--client <id>] [--json]
+                                                           which account is logged in + its current name
+  ${NAME} suggest [--count <n>] [--seed <s>] [--emoji] [--json]
+                                                           print cute girl names (offline, no page needed)
+  ${NAME} set     [<first> [<last>]] [--target wc:<id>] [--client <id>] [--seed <s>] [--emoji] [--no-last] [--yes] [--json]
+                                                           set the name; without <first> a cute girl name is picked
+                                                           (dry run without --yes)
+
+Options:
+  --target wc:<id>   Telegram Web K webContents id (from "targets"); auto-picked when exactly one exists
+  --client <id>      cicy-desktop client id (agent-electron --client)
+  --seed <s>         seed for the name pick (default: the account id, so every account gets its own stable name)
+  --emoji            add a cute emoji to the last name (e.g. "Luna" "Peach 🍑")
+  --no-last          only a first name, empty last name
+  --count <n>        how many names "suggest" prints (default 10)
+  --yes              actually change the name (set is a dry run without it)
+  --json             machine-readable output
+
+Name rules (checked before any request): first name 1–64 characters, last name 0–64 characters.
+
+Exit codes: 0 ok · 1 usage / invalid name · 2 agent-electron / page error · 3 refused by Telegram
+`;
+
+// ── cute girl names ──────────────────────────────────────────────────────
+const FIRST = [
+  'Luna', 'Mia', 'Lily', 'Coco', 'Ella', 'Chloe', 'Zoe', 'Bella', 'Sophie', 'Emma',
+  'Ava', 'Ivy', 'Rosie', 'Daisy', 'Lulu', 'Nina', 'Kiki', 'Mimi', 'Cici', 'Lola',
+  'Ruby', 'Hazel', 'Stella', 'Sadie', 'Molly', 'Penny', 'Poppy', 'Millie', 'Elsie', 'Gigi',
+  'Amelia', 'Aria', 'Mila', 'Nora', 'Layla', 'Hannah', 'Lucy', 'Grace', 'Alice', 'Clara',
+  'Isla', 'Maya', 'Lena', 'Sasha', 'Yuki', 'Hana', 'Momo', 'Sakura', 'Nana', 'Fifi',
+  'Bonnie', 'Honey', 'Candy', 'Cherry', 'Tina', 'Jenny', 'Cindy', 'Katie', 'Abby', 'Emily',
+];
+const LAST = [
+  'Rose', 'Bloom', 'Bunny', 'Peach', 'Berry', 'Honey', 'Sweet', 'Star', 'Moon', 'Sunny',
+  'Belle', 'Joy', 'Dream', 'Mochi', 'Pearl', 'Lovely', 'Candy', 'Cupcake', 'Petal', 'Kitty',
+  'Sugar', 'Angel', 'Daisy', 'Blossom', 'Cherry', 'Muffin', 'Snow', 'Rain', 'Melody', 'Pudding',
+];
+const EMOJI = ['🌸', '🎀', '🍓', '🍑', '🐰', '🌷', '💕', '✨', '🧸', '🌙', '🍒', '🦋', '🌼', '💖', '🍭'];
+
+// Deterministic 32-bit FNV-1a so the same seed (account id) always yields the same name.
+function hash(s) { let h = 0x811c9dc5; for (const ch of String(s)) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+function cuteName(seed, { emoji = false, last = true } = {}) {
+  const h = hash(seed), h2 = hash(seed + '#last'), h3 = hash(seed + '#emoji');
+  const first = FIRST[h % FIRST.length];
+  let l = last ? LAST[h2 % LAST.length] : '';
+  if (l && l === first) l = LAST[(h2 + 1) % LAST.length];
+  if (emoji) l = (l ? l + ' ' : '') + EMOJI[h3 % EMOJI.length];
+  return { first, last: l };
+}
+
+function parseArgs(argv) {
+  const o = { cmd: argv[0] || '', names: [], target: '', client: '', seed: '', count: 10, emoji: false, noLast: false, json: false, yes: false };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--target') o.target = argv[++i] || '';
+    else if (a === '--client') o.client = argv[++i] || '';
+    else if (a === '--seed') o.seed = argv[++i] || '';
+    else if (a === '--count') o.count = Number(argv[++i]);
+    else if (a === '--emoji') o.emoji = true;
+    else if (a === '--no-last') o.noLast = true;
+    else if (a === '--json') o.json = true;
+    else if (a === '--yes') o.yes = true;
+    else if (a === '--dry-run') o.yes = false;
+    else if (a === '--help' || a === '-h') o.cmd = 'help';
+    else if (a.startsWith('--')) { process.stderr.write(`${NAME}: unknown option ${a}\n`); process.exit(1); }
+    else if (o.names.length < 2) o.names.push(a);
+    else { process.stderr.write(`${NAME}: unexpected argument ${a} (quote names that contain spaces)\n`); process.exit(1); }
+  }
+  if (o.target && /^\d+$/.test(o.target)) o.target = 'wc:' + o.target;
+  if (!Number.isInteger(o.count) || o.count < 1 || o.count > 200) { process.stderr.write(`${NAME}: --count must be 1–200\n`); process.exit(1); }
+  return o;
+}
+
+// Telegram's profile name limits (account.updateProfile): first_name required, both ≤ 64.
+function validateName(first, last) {
+  if (!first || !first.trim()) return 'first name is empty';
+  if ([...first].length > 64) return 'first name too long (max 64 characters)';
+  if ([...(last || '')].length > 64) return 'last name too long (max 64 characters)';
+  return '';
+}
+
+// ── agent-electron transport ─────────────────────────────────────────────
+function runAgent(o, args) {
+  const bin = process.env.AGENT_ELECTRON_BIN || 'agent-electron';
+  const full = o.client ? ['--client', o.client, ...args] : args;
+  let out;
+  try { out = execFileSync(bin, full, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); }
+  catch (e) { throw new Error('agent-electron failed: ' + (e.stderr ? String(e.stderr).trim() : e.message)); }
+  try { return JSON.parse(out); } catch { throw new Error('agent-electron returned invalid JSON: ' + out.slice(0, 200)); }
+}
+function listTargets(o) {
+  const r = runAgent(o, ['webcontents', '--json']);
+  if (!r.ok || !Array.isArray(r.data)) throw new Error('could not list Electron webContents');
+  return r.data.filter((w) => /^https:\/\/web\.telegram\.org\/k\//.test(w.url || ''))
+    .map((w) => ({ target: 'wc:' + w.webContentsId, webContentsId: w.webContentsId, url: w.url, title: w.title || '', profile: w.profileId ?? w.accountIdx ?? null }));
+}
+function pickTarget(o) {
+  if (o.target) return o.target;
+  const t = listTargets(o);
+  if (!t.length) throw new Error('no Telegram Web K target found (open web.telegram.org/k in a cicy-desktop window first)');
+  if (t.length > 1) throw new Error(`multiple Telegram Web targets (${t.map((x) => x.target).join(', ')}); pass --target wc:<id>`);
+  return t[0].target;
+}
+function evaluate(o, target, expression) {
+  const r = runAgent(o, ['cdp', target, 'Runtime.evaluate', JSON.stringify({ expression, awaitPromise: true, returnByValue: true })]);
+  const res = r && r.result && r.result.result;
+  if (!r.success || !res) throw new Error('CDP Runtime.evaluate returned no result');
+  if (r.result.exceptionDetails) throw new Error(res.description || r.result.exceptionDetails.text || 'page evaluation failed');
+  return res.value;
+}
+
+// ── page-side scripts (run inside Telegram Web K) ────────────────────────
+const SHOW_JS = `(async () => {
+  const R = window.rootScope, M = R && R.managers;
+  if (!M) return JSON.stringify({ ok: false, err: 'rootScope.managers not available (page not logged in / not Telegram Web K?)' });
+  if (!R.myId) return JSON.stringify({ ok: false, err: 'page is still starting or not logged in (rootScope.myId is empty)' });
+  const me = await M.appUsersManager.getSelf();
+  return JSON.stringify({ ok: true, self: { id: String(me.id), phone: me.phone || '', username: me.username || '',
+    first: me.first_name || '', last: me.last_name || '' } });
+})()`;
+// account.updateProfile returns the updated User; saveApiUser keeps the page's own cache in sync
+// so the settings screen / chat list show the new name without a reload. "about" is not touched.
+const setJs = (first, last) => `(async () => {
+  const M = window.rootScope.managers; const first = ${JSON.stringify(first)}, last = ${JSON.stringify(last)};
+  try {
+    const user = await M.apiManager.invokeApi('account.updateProfile', { first_name: first, last_name: last });
+    try { if (user && typeof M.appUsersManager.saveApiUser === 'function') await M.appUsersManager.saveApiUser(user, true); } catch (e) {}
+    const f = (user && user.first_name) || '', l = (user && user.last_name) || '';
+    const same = f === first && l === last;
+    return JSON.stringify({ ok: same, first: f, last: l, err: same ? '' : 'server returned a different name: ' + [f, l].filter(Boolean).join(' ') });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
+})()`;
+
+const ERR_HINT = {
+  FIRSTNAME_INVALID: 'Telegram rejected the first name',
+  LASTNAME_INVALID: 'Telegram rejected the last name',
+};
+const explain = (err) => { const k = String(err || '').split(/[^A-Z_]/)[0]; const fw = /^FLOOD_WAIT_(\d+)/.exec(err || ''); return fw ? `rate-limited by Telegram, wait ${fw[1]}s` : (ERR_HINT[k] || err); };
+const full = (f, l) => [f, l].filter(Boolean).join(' ');
+const who = (s) => s ? `"${full(s.first, s.last) || '?'}" +${s.phone || '?'} (id ${s.id})${s.username ? ' @' + s.username : ''}` : 'unknown account';
+
+async function main() {
+  const o = parseArgs(process.argv.slice(2));
+  if (!o.cmd || o.cmd === 'help' || o.cmd === '--help' || o.cmd === '-h') { process.stdout.write(HELP); return 0; }
+
+  if (o.cmd === 'suggest') {
+    const base = o.seed || String(Date.now());
+    const seen = new Set(), names = [];
+    for (let i = 0; names.length < o.count && i < o.count * 20; i++) {
+      const n = cuteName(base + ':' + i, { emoji: o.emoji, last: !o.noLast });
+      const k = full(n.first, n.last); if (seen.has(k)) continue; seen.add(k); names.push(n);
+    }
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, names }) + '\n');
+    else for (const n of names) process.stdout.write(full(n.first, n.last) + '\n');
+    return 0;
+  }
+  if (o.cmd === 'targets') {
+    const t = listTargets(o);
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, targets: t }) + '\n');
+    else if (!t.length) process.stdout.write('no Telegram Web K webContents found\n');
+    else for (const x of t) process.stdout.write(`${x.target.padEnd(8)} ${x.title}\n`);
+    return 0;
+  }
+  if (!['show', 'set'].includes(o.cmd)) { process.stderr.write(`${NAME}: unknown command "${o.cmd}"\n\n` + HELP); return 1; }
+  if (o.cmd === 'set' && o.names.length) {
+    const bad = validateName(o.names[0], o.names[1] || '');
+    if (bad) {
+      if (o.json) process.stdout.write(JSON.stringify({ ok: false, valid: false, reason: bad }) + '\n');
+      else process.stderr.write(`${NAME}: invalid name: ${bad}\n`);
+      return 1;
+    }
+  }
+
+  const target = pickTarget(o);
+  const show = JSON.parse(evaluate(o, target, SHOW_JS));
+  if (!show.ok) throw new Error(show.err);
+  const self = show.self;
+
+  if (o.cmd === 'show') {
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, target, self }) + '\n');
+    else process.stdout.write(`${target} ${who(self)}\n`);
+    return 0;
+  }
+
+  // set
+  const picked = !o.names.length;
+  const n = picked ? cuteName(o.seed || self.id, { emoji: o.emoji, last: !o.noLast })
+    : { first: o.names[0].trim(), last: (o.names[1] || '').trim() };
+  if (self.first === n.first && self.last === n.last) {
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, target, self, first: n.first, last: n.last, picked, unchanged: true }) + '\n');
+    else process.stdout.write(`${target} ${who(self)}\n  already "${full(n.first, n.last)}", nothing to do\n`);
+    return 0;
+  }
+  if (!o.yes) {
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, dryRun: true, target, self, first: n.first, last: n.last, picked }) + '\n');
+    else process.stdout.write(`${target} ${who(self)}\n  would rename to "${full(n.first, n.last)}" (dry run; add --yes to apply)\n`);
+    return 0;
+  }
+  const r = JSON.parse(evaluate(o, target, setJs(n.first, n.last)));
+  if (!r.ok) {
+    if (o.json) process.stdout.write(JSON.stringify({ ok: false, target, self, first: n.first, last: n.last, err: r.err, hint: explain(r.err) }) + '\n');
+    else process.stdout.write(`${target} ${who(self)}\n  FAILED to rename to "${full(n.first, n.last)}": ${explain(r.err)} (${r.err})\n`);
+    return 3;
+  }
+  const previous = { first: self.first, last: self.last };
+  if (o.json) process.stdout.write(JSON.stringify({ ok: true, target, self: { ...self, first: r.first, last: r.last }, first: r.first, last: r.last, previous, picked }) + '\n');
+  else process.stdout.write(`${target} ${who(self)}\n  name set: "${full(r.first, r.last)}" (was "${full(previous.first, previous.last)}")\n`);
+  return 0;
+}
+
+main().then((code) => process.exit(code)).catch((e) => { process.stderr.write(`${NAME}: ${e.message}\n`); process.exit(2); });
