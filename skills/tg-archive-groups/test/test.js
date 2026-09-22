@@ -25,6 +25,7 @@ else if(a.includes('Runtime.evaluate')){
   const p=JSON.parse(a.at(-1)); const ex=p.expression;
   if(ex.includes('getDialogs')){ const inc=ex.includes('!true'); const items=s.items.filter(x=>inc||x.kind==='group').map(x=>({...x,unread:0}));
     out={success:true,result:{result:{type:'string',value:JSON.stringify({ok:true,self:{id:'1',phone:'8801709299917',username:'x'},total:5,users:1,groups:3,channels:1,items})}}}; }
+  else if(ex.includes('getGlobalPrivacySettings')){ s.keep=(s.keep||0)+1; out={success:true,result:{result:{type:'string',value:JSON.stringify({ok:true,changed:true})}}}; }
   else if(ex.includes('editPeerFolders')){ const m=/const ids = (\\[[^\\]]*\\]); const f = (\\d)/.exec(ex); const ids=JSON.parse(m[1]).map(String); const f=Number(m[2]);
     for(const x of s.items) if(ids.includes(x.peerId)) x.folder=f; out={success:true,result:{result:{type:'string',value:JSON.stringify({ok:true,moved:ids.length,bad:[]})}}}; }
   else out={success:false};
@@ -62,6 +63,7 @@ test('archive --yes moves groups + channels; --groups-only spares channels; unar
   const { run, st } = fakeAgent();
   let r = JSON.parse(run(['archive', '--target', 'wc:113', '--yes', '--groups-only', '--batch', '1', '--delay', '0', '--json']));
   assert.equal(r.moved, 2); assert.equal(r.failed, 0); assert.equal(r.remaining, 0);
+  assert.deepEqual(r.keep, { ok: true, changed: true }); assert.equal(st().keep, 1);
   assert.deepEqual(st().items.filter((x) => x.kind === 'group').map((x) => x.folder), [1, 1, 1]);
   assert.equal(st().items.find((x) => x.kind === 'channel').folder, 0);
   r = JSON.parse(run(['archive', '--target', 'wc:113', '--yes', '--delay', '0', '--json']));

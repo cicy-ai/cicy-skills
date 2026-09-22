@@ -18,6 +18,7 @@
 | `--groups-only` | Only move groups; leave broadcast channels where they are (default: groups + channels). |
 | `--channels` | Accepted for compatibility; channels are included by default. |
 | `--yes` | Actually move chats. |
+| `--no-keep` | Do not change the account's keep-archived settings (default: `archive` turns on `keep_archived_unmuted` + `keep_archived_folders`, otherwise chats un-archive themselves on the next message). |
 | `--dry-run` | Explicitly keep it a dry run (default). |
 | `--limit N` | Move at most N chats in this run. |
 | `--batch N` | Peers per `folders.editPeerFolders` call (default 20). |
@@ -27,7 +28,7 @@
 ## Output
 
 `scan --json`: `{ ok, target, self:{id,phone,username}, total, users, groups, channels, included, archived, not_archived, items:[{peerId,title,kind,folder,unread}] }`
-`archive|unarchive --json`: `{ ok, target, self, moved, failed, remaining, errors:[{peers,err}] }` (dry run: `{ ok, dryRun:true, would_move:[...], already }`)
+`archive|unarchive --json`: `{ ok, target, self, moved, failed, remaining, keep:{ok,changed}|null, errors:[{peers,err}] }` (dry run: `{ ok, dryRun:true, would_move:[...], already }`)
 
 ## Exit codes
 

@@ -36,7 +36,12 @@ Archive folder; membership, history and notifications are unchanged.
    chats are never included.
 4. **Go through `agent-electron`**, never open your own RPC/CDP socket
    (cicy-skill-spec §4). `--client <id>` targets a specific cicy-desktop host.
-5. Batches of 20 peers per `editPeerFolders` call with a 500 ms pause (`--batch`,
+5. **`archive` also switches on the account's "keep archived" settings**
+   (`keep_archived_unmuted` + `keep_archived_folders`). Without them Telegram
+   un-archives an unmuted chat the moment a new message arrives, so a spammy
+   channel is back in the main list within minutes and the run looks like it
+   never happened. `--no-keep` skips that.
+6. Batches of 20 peers per `editPeerFolders` call with a 500 ms pause (`--batch`,
    `--delay`); use `--limit` to do very large accounts in slices.
 
 ## Quick start
