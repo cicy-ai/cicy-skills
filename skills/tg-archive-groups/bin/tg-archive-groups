@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-archive-groups';
-const VERSION = '0.2.1';
+const VERSION = '0.2.2';
 
 const HELP = `${NAME} ${VERSION} — archive all groups and channels of a Telegram Web K session
 
@@ -157,6 +157,43 @@ const verifyJs = (peerIds) => `(async () => {
   return JSON.stringify(out);
 })()`;
 
+// 服务端扫尾:本地 dialogsStorage 刚启动时可能还没把会话全拉下来,按它扫会漏。最后直接翻服务器主列表
+// (messages.getDialogs folder_id=0),把还留在主列表、且属于本次范围的会话逐个归档(用服务器给的 access_hash)。
+const serverSweepJs = (includeChannels, includeBots, includeUsers, folderId) => `(async () => { /*server-sweep*/
+  const M = window.rootScope.managers; const me = window.rootScope.myId; const want = ${Number(folderId)};
+  let od = 0, oi = 0, op = { _: 'inputPeerEmpty' }, rounds = 0, moved = 0, failed = [], seen = 0;
+  const srcFolder = want === 1 ? 0 : 1;
+  const todo = [];
+  while (rounds++ < 60) {
+    const r = await M.apiManager.invokeApi('messages.getDialogs', { folder_id: srcFolder, offset_date: od, offset_id: oi, offset_peer: op, limit: 100, hash: 0 });
+    const ds = r.dialogs || []; if (!ds.length) break;
+    const users = new Map((r.users || []).map((u) => [String(u.id), u])), chats = new Map((r.chats || []).map((c) => [String(c.id), c]));
+    for (const d of ds) {
+      seen++; const p = d.peer; let ip = null, ok = false, title = '';
+      if (p._ === 'peerUser') {
+        if (String(p.user_id) === '777000' || String(p.user_id) === String(me)) continue;
+        const u = users.get(String(p.user_id)); if (!u) continue;
+        const isBot = !!(u.pFlags && u.pFlags.bot);
+        ok = isBot ? ${includeBots ? 'true' : 'false'} : ${includeUsers ? 'true' : 'false'};
+        ip = { _: 'inputPeerUser', user_id: p.user_id, access_hash: u.access_hash || 0 }; title = u.first_name || u.username || '';
+      } else if (p._ === 'peerChat') { const c = chats.get(String(p.chat_id)); if (!c || (c.pFlags && (c.pFlags.left || c.pFlags.kicked || c.pFlags.deactivated))) continue; ok = true; ip = { _: 'inputPeerChat', chat_id: p.chat_id }; title = c.title || ''; }
+      else { const c = chats.get(String(p.channel_id)); if (!c || (c.pFlags && (c.pFlags.left || c.pFlags.kicked))) continue; const isChannel = !(c.pFlags && c.pFlags.megagroup); ok = isChannel ? ${includeChannels ? 'true' : 'false'} : true; ip = { _: 'inputPeerChannel', channel_id: p.channel_id, access_hash: c.access_hash || 0 }; title = c.title || ''; }
+      if (ok && ip) todo.push({ ip, title: String(title).slice(0, 40), key: String(p.user_id || p.chat_id || p.channel_id) });
+    }
+    if (r._ === 'messages.dialogs' || ds.length < 100) break;
+    const last = ds[ds.length - 1]; const m = (r.messages || []).find((x) => x.id === last.top_message);
+    od = m ? m.date : 0; oi = last.top_message;
+    op = last.peer._ === 'peerUser' ? { _: 'inputPeerUser', user_id: last.peer.user_id, access_hash: (users.get(String(last.peer.user_id)) || {}).access_hash || 0 } : last.peer._ === 'peerChat' ? { _: 'inputPeerChat', chat_id: last.peer.chat_id } : { _: 'inputPeerChannel', channel_id: last.peer.channel_id, access_hash: (chats.get(String(last.peer.channel_id)) || {}).access_hash || 0 };
+    if (!od) break;
+  }
+  for (const t of todo) {
+    try { await M.apiManager.invokeApi('folders.editPeerFolders', { folder_peers: [{ _: 'inputFolderPeer', peer: t.ip, folder_id: want }] }); } catch (e) { failed.push(t.title + ' (' + String(e && (e.type || e.message) || e).slice(0, 40) + ')'); continue; }
+    await new Promise((r) => setTimeout(r, 250));
+    try { const v = await M.apiManager.invokeApi('messages.getPeerDialogs', { peers: [{ _: 'inputDialogPeer', peer: t.ip }] }); const f = (v.dialogs && v.dialogs[0] && v.dialogs[0].folder_id) || 0; if (f === want) moved++; else failed.push(t.title + ' (server keeps it in folder ' + f + ')'); } catch (e) { failed.push(t.title + ' (verify: ' + String(e && (e.type || e.message) || e).slice(0, 40) + ')'); }
+  }
+  return JSON.stringify({ seen, todo: todo.length, moved, failed });
+})()`;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
@@ -240,9 +277,17 @@ async function main() {
       if (stubborn.length) errors.push({ peers: stubborn, err: 'server still reports old folder after individual retry' });
     }
   }
+  // 服务端扫尾:本地缓存没见到、但服务器主列表里还有的,补一遍
+  let sweep = null;
+  try { sweep = JSON.parse(evaluate(o, target, serverSweepJs(o.channels, o.bots, o.all, wantFolder))); } catch (e) { sweep = { err: String(e.message).slice(0, 120) }; }
+  if (sweep && !sweep.err) {
+    if (sweep.todo && !o.json) process.stdout.write(`  server sweep: ${sweep.todo} chat(s) still in the ${o.cmd === 'unarchive' ? 'archive' : 'main list'} on the server → moved ${sweep.moved}${sweep.failed.length ? ', refused: ' + sweep.failed.join('; ') : ''}\n`);
+    moved += sweep.moved; for (const f of sweep.failed) errors.push({ peers: [], err: 'server sweep: ' + f });
+    stubborn = stubborn.concat(sweep.failed);
+  } else if (sweep && sweep.err) errors.push({ peers: [], err: 'server sweep failed: ' + sweep.err });
   const failed = stubborn.length;
   const remaining = after && after.ok ? Math.max(0, after.items.filter((x) => x.folder !== wantFolder).length - (attempted.length - failed - attempted.filter((id) => (new Map(after.items.map((x) => [x.peerId, x.folder]))).get(id) === wantFolder).length)) : null;
-  if (o.json) process.stdout.write(JSON.stringify({ ok: failed === 0, target, self: scan.self, moved, failed, remaining, keep, errors }) + '\n');
+  if (o.json) process.stdout.write(JSON.stringify({ ok: failed === 0, target, self: scan.self, moved, failed, remaining, keep, sweep, errors }) + '\n');
   else process.stdout.write(`${target} ${who}: ${label}d ${moved}, failed ${failed}, remaining ${remaining ?? '?'}\n`);
   return failed ? 2 : 0;
 }
