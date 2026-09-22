@@ -26,7 +26,7 @@
 
 ## Record fields
 
-`id`, `date` (ISO 8601 UTC), `from` (display name + @username of the sender, or the channel), `from_id` (`u<id>` / `c<id>`), `text`, `media` (`photo`, `document`, `webpage`, `poll`, … or empty), `file` (document file name), `reply_to` (replied message id), `fwd` (forward origin), `views`, `service` (service-message action, e.g. `ChatAddUser`), `edit_date`, `grouped_id` (album id). Records are written oldest first.
+`id`, `date` (ISO 8601 UTC), `from` (display name + @username of the sender, or the channel), `from_id` (`u<id>` / `c<id>`), `text`, `media` (`photo`, `document`, `webpage`, `poll`, … or empty), `media_id` (Telegram's photo / document id), `mime`, `size` (bytes), `file` (document file name), `reply_to` (replied message id), `fwd` (forward origin), `views`, `service` (service-message action, e.g. `ChatAddUser`), `edit_date`, `grouped_id` (album id). Records are written oldest first.
 
 ## Output
 
