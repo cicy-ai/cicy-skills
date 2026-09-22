@@ -1,0 +1,44 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "tg-set-avatar",
+  "version": "0.1.0",
+  "title": "TG Set Avatar",
+  "description": "Use when a Telegram account running in Telegram Web K needs its profile photo (avatar) shown, previewed or set through agent-electron, defaulting to a smiling cartoon girl avatar picked per account.",
+  "category": "productivity",
+  "tags": [
+    "telegram",
+    "avatar",
+    "profile",
+    "photo",
+    "electron",
+    "cdp",
+    "account"
+  ],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "agent-electron"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/tg-set-avatar",
+  "permissions": [
+    "network"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-avatar"
+}
