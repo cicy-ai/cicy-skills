@@ -16,7 +16,7 @@
 | `--target wc:<id>` | Telegram Web K 的 webContents id(也接受纯数字)。只有恰好一个目标时才会自动选。 |
 | `--client <id>` | cicy-desktop 客户端 id,透传给 `agent-electron --client`。 |
 | `--seed <s>` | 挑名字用的种子。`set` 默认用账号 id(每个号固定一个名字,重跑不变);`suggest` 默认用当前时间。 |
-| `--lang zh\|en` | `zh`(默认):可爱的中文女生名字(`糖糖`、`小桃`、`棉花糖` … 共 110 个)放在名里,姓留空。`en`:英文名 + 可爱的姓(`Luna Peach`)。 |
+| `--lang zh\|en` | `zh`(默认):可爱的中文女生名字2–5 个字(`糖糖`、`棉花糖`、`小熊软糖`、`樱桃小丸子` … 共 120 个,每种长度 30 个)放在名里,姓留空。`en`:英文名 + 可爱的姓(`Luna Peach`)。 |
 | `--emoji` | 在姓里放一个可爱 emoji(`🌸 🎀 🍓 🍑 🐰 …`)。 |
 | `--no-last` | (en)只设名,姓留空(配合 `--emoji` 时姓只放 emoji)。 |
 | `--count <n>` | `suggest` 输出几个(1–200,默认 10)。 |

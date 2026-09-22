@@ -49,7 +49,9 @@ test('suggest is offline, deterministic per seed, unique', () => {
 test('default names are cute Chinese first names with an empty last name', () => {
   const z = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '30', '--seed', 'z', '--json'], { encoding: 'utf8' })).names;
   assert.equal(z.length, 30);
-  for (const n of z) { assert.match(n.first, /^\p{Script=Han}{2,3}$/u); assert.equal(n.last, ''); }
+  for (const n of z) { assert.match(n.first, /^\p{Script=Han}{2,5}$/u); assert.equal(n.last, ''); }
+  const all = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '120', '--seed', 'z', '--json'], { encoding: 'utf8' })).names;
+  const lens = new Set(all.map((n) => [...n.first].length)); assert.deepEqual([...lens].sort(), [2, 3, 4, 5]);
   const e = JSON.parse(execFileSync('node', [cli, 'suggest', '--count', '3', '--emoji', '--json'], { encoding: 'utf8' })).names;
   for (const n of e) assert.match(n.last, /^\p{Extended_Pictographic}$/u);
   const bad = (() => { try { execFileSync('node', [cli, 'suggest', '--lang', 'fr'], { stdio: 'pipe' }); return 0; } catch (x) { return x.status; } })();
