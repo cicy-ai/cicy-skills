@@ -7,8 +7,8 @@ description: Use when a Telegram Web K account should have all its groups and ch
 
 Moves every **group** (basic groups + supergroups) **and every broadcast
 channel** of a Telegram Web K session into the **Archive** folder in one go — or
-brings them back. `--groups-only` leaves channels alone. Private chats and bots
-are never touched.
+brings them back. `--groups-only` leaves channels alone; `--bots` also moves
+chats with bots. Chats with people are never touched.
 
 It drives the page through `agent-electron` (CDP `Runtime.evaluate`) and calls
 Telegram Web K's own `window.rootScope.managers` API
@@ -32,8 +32,8 @@ Archive folder; membership, history and notifications are unchanged.
    `tg-archive-groups targets`, then pass `--target wc:<id>`; auto-selection only
    works when exactly one Telegram Web K webContents exists.
 3. **Groups and channels both move by default** (that is what "archive all my
-   groups" means to users); `--groups-only` restricts it to groups. Private
-   chats are never included.
+   groups" means to users); `--groups-only` restricts it to groups; `--bots`
+   adds bot chats. Chats with people are never included.
 4. **Go through `agent-electron`**, never open your own RPC/CDP socket
    (cicy-skill-spec §4). `--client <id>` targets a specific cicy-desktop host.
 5. **`archive` also switches on the account's "keep archived" settings**
@@ -52,6 +52,7 @@ tg-archive-groups scan    --target wc:113            # groups / channels, what i
 tg-archive-groups archive --target wc:113            # dry run
 tg-archive-groups archive --target wc:113 --yes      # archive all groups + channels
 tg-archive-groups archive --target wc:113 --yes --groups-only
+tg-archive-groups archive --target wc:113 --yes --bots        # bots too
 tg-archive-groups unarchive --target wc:113 --yes    # bring them back
 ```
 
