@@ -19,7 +19,9 @@ No socket of its own, no file written to the machine, nothing patched in the pag
 
 ## Cute name pick
 
-60 girl first names (`Luna`, `Mia`, `Coco`, `Lily`, `Momo`, …) × 30 cute last names
+`zh` (default): 110 cute Chinese girl names — reduplicated (`糖糖` `桃桃` `朵朵`), `小X` (`小桃` `小鹿`), sweet nicknames (`棉花糖` `布丁` `团子`) and soft two-character names (`南栀` `若曦`) — as the first name, last name empty.
+
+`en`: 60 girl first names (`Luna`, `Mia`, `Coco`, `Lily`, `Momo`, …) × 30 cute last names
 (`Rose`, `Bunny`, `Peach`, `Mochi`, `Bloom`, …), optional emoji. The pick is an FNV-1a hash
 of the seed (default: the account id), so the same account always gets the same name and a
 second `set --yes` reports "nothing to do".

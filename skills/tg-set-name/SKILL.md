@@ -1,14 +1,15 @@
 ---
 name: tg-set-name
-description: Use when a Telegram account running in Telegram Web K needs its display name (first + last name) shown or set through agent-electron, defaulting to a cute girl name picked per account.
+description: Use when a Telegram account running in Telegram Web K needs its display name (first + last name) shown or set through agent-electron, defaulting to a cute Chinese girl name picked per account.
 ---
 
 # TG Set Name
 
 Shows or sets the **display name** (first name + last name) of the Telegram
 account logged in to a Telegram Web K page inside cicy-desktop (a matrix cell
-or a normal window). When no name is given it picks a **cute girl name** —
-e.g. `Luna Peach`, `Mia Bunny`, `Coco Rose 🌸` — seeded by the account id, so
+or a normal window). When no name is given it picks a **cute Chinese girl
+name** — e.g. `糖糖`, `小桃`, `棉花糖`, `南栀` (first name only, last name empty;
+`--lang en` gives `Luna Peach` style) — seeded by the account id, so
 every account gets its own stable name and re-running is a no-op. It drives
 the page through `agent-electron` (CDP `Runtime.evaluate`) and calls Telegram
 Web K's own `window.rootScope.managers` API — nothing is patched or installed.
@@ -18,7 +19,7 @@ Web K's own `window.rootScope.managers` API — nothing is patched or installed.
 Use this skill when the task involves:
 
 - reading which account a Telegram Web K webContents is logged in as and its current name
-- giving an account a cute girl display name (`account.updateProfile`)
+- giving an account a cute Chinese (or English) girl display name (`account.updateProfile`)
 - setting an explicit first / last name
 - listing cute girl name suggestions offline (`suggest`)
 
@@ -29,7 +30,7 @@ profile photo, or other users' names.
 
 1. **`set` changes nothing without `--yes`.** Without it, it prints the account
    and the name it would set.
-2. **Default to a cute girl name.** Run `set` without a name to let the skill
+2. **Default to a cute Chinese girl name.** Run `set` without a name to let the skill
    pick one; only pass explicit names when the user asked for a specific one.
 3. **Pick the target explicitly when several Telegram Web pages are open**
    (`targets`, then `--target wc:<id>`); auto-selection only works with exactly one.
@@ -49,8 +50,9 @@ tg-set-name targets                              # which Telegram Web pages exis
 tg-set-name show --target wc:121                 # who is logged in, current name
 tg-set-name set --target wc:121                  # dry run: shows the cute name it would pick
 tg-set-name set --target wc:121 --yes            # apply it
-tg-set-name set --target wc:121 --emoji --yes    # e.g. "Luna" "Peach 🍑"
-tg-set-name set Lily Bloom --target wc:121 --yes # explicit name
+tg-set-name set --target wc:121 --emoji --yes    # e.g. "糖糖" "🍓"
+tg-set-name set --target wc:121 --lang en --yes  # e.g. "Luna" "Peach"
+tg-set-name set 小桃 --target wc:121 --yes        # explicit name
 ```
 
 ## References
