@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-archive-groups';
-const VERSION = '0.2.2';
+const VERSION = '0.2.3';
 
 const HELP = `${NAME} ${VERSION} — archive all groups and channels of a Telegram Web K session
 
@@ -176,8 +176,8 @@ const serverSweepJs = (includeChannels, includeBots, includeUsers, folderId) => 
         const isBot = !!(u.pFlags && u.pFlags.bot);
         ok = isBot ? ${includeBots ? 'true' : 'false'} : ${includeUsers ? 'true' : 'false'};
         ip = { _: 'inputPeerUser', user_id: p.user_id, access_hash: u.access_hash || 0 }; title = u.first_name || u.username || '';
-      } else if (p._ === 'peerChat') { const c = chats.get(String(p.chat_id)); if (!c || (c.pFlags && (c.pFlags.left || c.pFlags.kicked || c.pFlags.deactivated))) continue; ok = true; ip = { _: 'inputPeerChat', chat_id: p.chat_id }; title = c.title || ''; }
-      else { const c = chats.get(String(p.channel_id)); if (!c || (c.pFlags && (c.pFlags.left || c.pFlags.kicked))) continue; const isChannel = !(c.pFlags && c.pFlags.megagroup); ok = isChannel ? ${includeChannels ? 'true' : 'false'} : true; ip = { _: 'inputPeerChannel', channel_id: p.channel_id, access_hash: c.access_hash || 0 }; title = c.title || ''; }
+      } else if (p._ === 'peerChat') { const c = chats.get(String(p.chat_id)); if (!c) continue; ok = true; ip = { _: 'inputPeerChat', chat_id: p.chat_id }; title = c.title || ''; }
+      else { const c = chats.get(String(p.channel_id)); if (!c) continue; const isChannel = !(c.pFlags && c.pFlags.megagroup); ok = isChannel ? ${includeChannels ? 'true' : 'false'} : true; ip = { _: 'inputPeerChannel', channel_id: p.channel_id, access_hash: c.access_hash || 0 }; title = c.title || ''; }
       if (ok && ip) todo.push({ ip, title: String(title).slice(0, 40), key: String(p.user_id || p.chat_id || p.channel_id) });
     }
     if (r._ === 'messages.dialogs' || ds.length < 100) break;
@@ -232,6 +232,15 @@ async function main() {
   if (o.cmd === 'archive' && o.keep && o.yes) {
     keep = JSON.parse(evaluate(o, target, KEEP_JS));
     if (!o.json) process.stdout.write(keep.ok ? (keep.changed ? '  keep-archived settings: turned on\n' : '  keep-archived settings: already on\n') : `  keep-archived settings: FAILED (${keep.err})\n`);
+  }
+  if (!todo.length && o.yes) {
+    // 本地缓存没东西可动,但服务器主列表可能还有(只有草稿的会话、缓存没拉到的会话):直接跑服务端扫尾
+    let sweep = null;
+    try { sweep = JSON.parse(evaluate(o, target, serverSweepJs(o.channels, o.bots, o.all, wantFolder))); } catch (e) { sweep = { err: String(e.message).slice(0, 120) }; }
+    const moved = sweep && sweep.moved || 0, failedList = (sweep && sweep.failed) || [];
+    if (o.json) process.stdout.write(JSON.stringify({ ok: !sweep.err && failedList.length === 0, target, self: scan.self, moved, failed: failedList.length, remaining: failedList.length, already, keep, sweep, errors: failedList.map((f) => ({ peers: [], err: 'server sweep: ' + f })) }) + '\n');
+    else process.stdout.write(`${target} ${who}: nothing to ${label} in the local list (${already} already there)${sweep.err ? `; server sweep failed: ${sweep.err}` : sweep.todo ? `; server sweep: ${sweep.todo} more on the server → ${label}d ${moved}${failedList.length ? ', refused: ' + failedList.join('; ') : ''}` : '; server agrees'}\n`);
+    return failedList.length || sweep.err ? 2 : 0;
   }
   if (!todo.length) { process.stdout.write(o.json ? JSON.stringify({ ok: true, target, moved: 0, failed: 0, already, keep }) + '\n' : `${target} ${who}: nothing to ${label} (${already} already there)\n`); return 0; }
   if (!o.yes) {
