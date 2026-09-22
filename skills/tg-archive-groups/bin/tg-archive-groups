@@ -6,17 +6,19 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-archive-groups';
-const VERSION = '0.1.5';
+const VERSION = '0.2.0';
 
 const HELP = `${NAME} ${VERSION} — archive all groups and channels of a Telegram Web K session
 
 Usage:
   ${NAME} targets  [--client <id>] [--json]                       list Telegram Web K webContents
-  ${NAME} scan     [--target wc:<id>] [--groups-only] [--bots] [--json]     what would move (not yet archived)
-  ${NAME} archive  [--target wc:<id>] [--groups-only] [--bots] [--yes] [--limit N] [--batch N] [--delay ms] [--json]
-  ${NAME} unarchive [--target wc:<id>] [--groups-only] [--bots] [--yes] [--limit N] [--batch N] [--delay ms] [--json]
+  ${NAME} scan     [--target wc:<id>] [--groups-only|--bots|--all] [--json]     what would move (not yet archived)
+  ${NAME} archive  [--target wc:<id>] [--groups-only|--bots|--all] [--yes] [--limit N] [--batch N] [--delay ms] [--json]
+  ${NAME} unarchive [--target wc:<id>] [--groups-only|--bots|--all] [--yes] [--limit N] [--batch N] [--delay ms] [--json]
 
-By default every group (basic + supergroup) AND every broadcast channel moves; chats with people are never touched.
+By default every group (basic + supergroup) AND every broadcast channel moves; chats with people are left alone
+unless you pass --all.
+  --all              archive EVERYTHING: groups, channels, bots and private chats with people (the whole main list)
   --groups-only      leave broadcast channels where they are
   --bots             also move chats with bots (never people). The official "Telegram" service chat (777000) cannot
                      be archived: the server accepts folders.editPeerFolders for it but returns no update
@@ -36,7 +38,7 @@ Exit codes: 0 ok · 1 usage · 2 agent-electron / page error or a batch failed
 `;
 
 function parseArgs(argv) {
-  const o = { cmd: argv[0] || '', target: '', client: '', json: false, yes: false, channels: true, bots: false, keep: true, limit: 0, batch: 20, delay: 500 };
+  const o = { cmd: argv[0] || '', target: '', client: '', json: false, yes: false, channels: true, bots: false, all: false, keep: true, limit: 0, batch: 20, delay: 500 };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--target') o.target = argv[++i] || '';
@@ -48,6 +50,7 @@ function parseArgs(argv) {
     else if (a === '--groups-only') o.channels = false;
     else if (a === '--no-keep') o.keep = false;
     else if (a === '--bots') o.bots = true;
+    else if (a === '--all') { o.all = true; o.bots = true; o.channels = true; }
     else if (a === '--limit') o.limit = Number(argv[++i] || 0) || 0;
     else if (a === '--batch') o.batch = Math.max(1, Number(argv[++i] || 20) || 20);
     else if (a === '--delay') o.delay = Number(argv[++i] || 500) || 0;
@@ -90,7 +93,7 @@ function evaluate(o, target, expression) {
 
 // ── page-side scripts (Telegram Web K) ───────────────────────────────────
 // folder_id: 0 = main list, 1 = Archive. Groups = basic "chat" + "channel" with pFlags.megagroup; channels = the rest.
-const scanJs = (includeChannels, includeBots) => `(async () => {
+const scanJs = (includeChannels, includeBots, includeUsers) => `(async () => {
   const M = window.rootScope && window.rootScope.managers;
   if (!M) return JSON.stringify({ ok: false, err: 'rootScope.managers not available (page not logged in / not Telegram Web K?)' });
   const me = await M.appUsersManager.getSelf().catch(() => null);
@@ -104,8 +107,9 @@ const scanJs = (includeChannels, includeBots) => `(async () => {
       const u = await M.appUsersManager.getUser(pid).catch(() => null);
       if (pid === 777000) continue;   // 官方「Telegram」通知号:服务端接受 editPeerFolders 但不动它(返回空 updates),归不了档,直接跳过
       const isBot = !!(u && u.pFlags && u.pFlags.bot);
-      if (isBot) { bots++; if (${includeBots ? 'true' : 'false'}) out.push({ peerId: String(pid), title: String((u && (u.first_name || u.username)) || '').slice(0, 60), kind: 'bot', folder: d.folder_id || 0, unread: d.unread_count || 0 }); }
-      else users++;
+      const title = String((u && ([u.first_name, u.last_name].filter(Boolean).join(' ') || u.username)) || '').slice(0, 60);
+      if (isBot) { bots++; if (${includeBots ? 'true' : 'false'}) out.push({ peerId: String(pid), title, kind: 'bot', folder: d.folder_id || 0, unread: d.unread_count || 0 }); }
+      else { users++; if (${includeUsers ? 'true' : 'false'}) out.push({ peerId: String(pid), title, kind: 'user', folder: d.folder_id || 0, unread: d.unread_count || 0 }); }
       continue;
     }
     const ch = await M.appChatsManager.getChat(-pid).catch(() => null); if (!ch) continue;
@@ -152,7 +156,7 @@ async function main() {
   if (!['scan', 'archive', 'unarchive'].includes(o.cmd)) { process.stderr.write(`${NAME}: unknown command "${o.cmd}"\n\n` + HELP); return 1; }
 
   const target = pickTarget(o);
-  const scan = JSON.parse(evaluate(o, target, scanJs(o.channels, o.bots)));
+  const scan = JSON.parse(evaluate(o, target, scanJs(o.channels, o.bots, o.all)));
   if (!scan.ok) throw new Error(scan.err);
   const who = scan.self ? `+${scan.self.phone || '?'}${scan.self.username ? ' @' + scan.self.username : ''}` : 'unknown account';
   const wantFolder = o.cmd === 'unarchive' ? 0 : 1;
@@ -163,7 +167,7 @@ async function main() {
   if (o.cmd === 'scan') {
     if (o.json) { process.stdout.write(JSON.stringify({ ok: true, target, self: scan.self, total: scan.total, users: scan.users, groups: scan.groups, channels: scan.channels, included: scan.items.length, archived: scan.items.filter((x) => x.folder === 1).length, not_archived: todo.length, items: scan.items }) + '\n'); return 0; }
     process.stdout.write(`${target} ${who}: ${scan.total} chats — ${scan.groups} groups, ${scan.channels} channels, ${scan.bots} bots, ${scan.users} people\n`);
-    process.stdout.write(`${o.channels ? 'groups + channels' : 'groups'}${o.bots ? ' + bots' : ''}: ${scan.items.length}, already archived ${scan.items.filter((x) => x.folder === 1).length}, to archive ${todo.length}\n`);
+    process.stdout.write(`${o.all ? 'everything (groups + channels + bots + people)' : (o.channels ? 'groups + channels' : 'groups') + (o.bots ? ' + bots' : '')}: ${scan.items.length}, already archived ${scan.items.filter((x) => x.folder === 1).length}, to archive ${todo.length}\n`);
     for (const x of todo.slice(0, 50)) process.stdout.write(`  ${x.kind.padEnd(7)} ${x.peerId.padEnd(15)} ${x.title}\n`);
     if (todo.length > 50) process.stdout.write(`  … ${todo.length - 50} more\n`);
     return 0;
@@ -196,7 +200,7 @@ async function main() {
   let after = null, moved = 0, lastMoved = -1, stable = 0;
   for (let k = 0; k < 10; k++) {
     await sleep(k === 0 ? Math.max(800, o.delay) : 2000);
-    after = JSON.parse(evaluate(o, target, scanJs(o.channels, o.bots)));
+    after = JSON.parse(evaluate(o, target, scanJs(o.channels, o.bots, o.all)));
     const folderOf = new Map(after.ok ? after.items.map((x) => [x.peerId, x.folder]) : []);
     moved = attempted.filter((id) => folderOf.get(id) === wantFolder).length;
     if (moved === attempted.length) break;

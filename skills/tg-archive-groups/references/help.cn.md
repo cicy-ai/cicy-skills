@@ -5,7 +5,7 @@
 | 命令 | 作用 |
 |---|---|
 | `tg-archive-groups targets [--client <id>] [--json]` | 列出 Telegram Web K webContents(`wc:<id>` + 窗口标题)。 |
-| `tg-archive-groups scan [--target wc:<id>] [--groups-only] [--bots] [--json]` | 统计群 / 频道 / 私聊数量,显示哪些群和频道(加 `--groups-only` 只看群)已在归档、哪些会被移动。 |
+| `tg-archive-groups scan [--target wc:<id>] [--groups-only|--bots|--all] [--json]` | 统计群 / 频道 / 私聊数量,显示哪些群和频道(加 `--groups-only` 只看群)已在归档、哪些会被移动。 |
 | `tg-archive-groups archive [...] [--yes]` | 把还没归档的群和频道(加 `--groups-only` 只动群)移进「已归档」文件夹。不加 `--yes` 只看不动。 |
 | `tg-archive-groups unarchive [...] [--yes]` | 移回主列表。不加 `--yes` 只看不动。 |
 
@@ -15,6 +15,7 @@
 |---|---|
 | `--target wc:<id>` | Telegram Web K 的 webContents id(也可只写数字)。只有恰好一个 Telegram Web K 窗口时才自动选。 |
 | `--client <id>` | cicy-desktop 客户端 id,透传给 `agent-electron --client`。 |
+| `--all` | 主列表里的全部会话都归档:群、频道、bot、真人私聊(隐含 `--bots`)。 |
 | `--bots` | 连 bot 会话一起处理(真人私聊永远不动)。官方「Telegram」服务通知号(777000)会跳过:服务端接受请求但不归档。 |
 | `--groups-only` | 只动群,频道不动(默认群 + 频道都归档)。 |
 | `--channels` | 兼容旧写法;默认已包含频道。 |
