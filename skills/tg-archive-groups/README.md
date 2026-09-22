@@ -1,11 +1,11 @@
 # tg-archive-groups
 
-Use when a Telegram Web K account should have all its groups (optionally channels) moved into the Archive folder or brought back, in bulk, through agent-electron.
+Use when a Telegram Web K account should have all its groups and channels moved into the Archive folder or brought back, in bulk, through agent-electron.
 
 ```sh
 tg-archive-groups targets
 tg-archive-groups scan    --target wc:<id>
-tg-archive-groups archive --target wc:<id> --yes [--channels]
+tg-archive-groups archive --target wc:<id> --yes [--groups-only]
 tg-archive-groups unarchive --target wc:<id> --yes
 ```
 

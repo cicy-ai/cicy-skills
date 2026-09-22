@@ -5,8 +5,8 @@
 | Command | What it does |
 |---|---|
 | `tg-archive-groups targets [--client <id>] [--json]` | List Telegram Web K webContents (`wc:<id>` + window title). |
-| `tg-archive-groups scan [--target wc:<id>] [--channels] [--json]` | Count groups / channels / private chats, show which groups (and channels with `--channels`) are already in the Archive and which would move. |
-| `tg-archive-groups archive [...] [--yes]` | Move groups (and channels with `--channels`) that are not yet archived into the Archive folder. Dry run without `--yes`. |
+| `tg-archive-groups scan [--target wc:<id>] [--groups-only] [--json]` | Count groups / channels / private chats, show which groups and channels (groups only with `--groups-only`) are already in the Archive and which would move. |
+| `tg-archive-groups archive [...] [--yes]` | Move groups and channels (groups only with `--groups-only`) that are not yet archived into the Archive folder. Dry run without `--yes`. |
 | `tg-archive-groups unarchive [...] [--yes]` | Move them back to the main list. Dry run without `--yes`. |
 
 ## Options
@@ -15,7 +15,8 @@
 |---|---|
 | `--target wc:<id>` | Telegram Web K webContents id (a bare number is accepted). Auto-picked only when exactly one Telegram Web K target exists. |
 | `--client <id>` | cicy-desktop client id, passed through to `agent-electron --client`. |
-| `--channels` | Also include broadcast channels (default: groups only). |
+| `--groups-only` | Only move groups; leave broadcast channels where they are (default: groups + channels). |
+| `--channels` | Accepted for compatibility; channels are included by default. |
 | `--yes` | Actually move chats. |
 | `--dry-run` | Explicitly keep it a dry run (default). |
 | `--limit N` | Move at most N chats in this run. |

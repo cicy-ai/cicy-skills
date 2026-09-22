@@ -5,8 +5,8 @@
 | 命令 | 作用 |
 |---|---|
 | `tg-archive-groups targets [--client <id>] [--json]` | 列出 Telegram Web K webContents(`wc:<id>` + 窗口标题)。 |
-| `tg-archive-groups scan [--target wc:<id>] [--channels] [--json]` | 统计群 / 频道 / 私聊数量,显示哪些群(加 `--channels` 含频道)已在归档、哪些会被移动。 |
-| `tg-archive-groups archive [...] [--yes]` | 把还没归档的群(加 `--channels` 含频道)移进「已归档」文件夹。不加 `--yes` 只看不动。 |
+| `tg-archive-groups scan [--target wc:<id>] [--groups-only] [--json]` | 统计群 / 频道 / 私聊数量,显示哪些群和频道(加 `--groups-only` 只看群)已在归档、哪些会被移动。 |
+| `tg-archive-groups archive [...] [--yes]` | 把还没归档的群和频道(加 `--groups-only` 只动群)移进「已归档」文件夹。不加 `--yes` 只看不动。 |
 | `tg-archive-groups unarchive [...] [--yes]` | 移回主列表。不加 `--yes` 只看不动。 |
 
 ## 选项
@@ -15,7 +15,8 @@
 |---|---|
 | `--target wc:<id>` | Telegram Web K 的 webContents id(也可只写数字)。只有恰好一个 Telegram Web K 窗口时才自动选。 |
 | `--client <id>` | cicy-desktop 客户端 id,透传给 `agent-electron --client`。 |
-| `--channels` | 连频道一起处理(默认只有群)。 |
+| `--groups-only` | 只动群,频道不动(默认群 + 频道都归档)。 |
+| `--channels` | 兼容旧写法;默认已包含频道。 |
 | `--yes` | 真移动。 |
 | `--dry-run` | 显式声明只看不动(默认就是)。 |
 | `--limit N` | 本次最多移 N 个。 |
