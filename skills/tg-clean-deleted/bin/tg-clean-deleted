@@ -1,0 +1,161 @@
+#!/usr/bin/env node
+// tg-clean-deleted — find and remove "Deleted Account" chats from a Telegram Web K session.
+// Talks to the page through agent-electron (CDP Runtime.evaluate) and Telegram Web K's own
+// window.rootScope.managers API, so no patch is needed. Zero deps, pure ESM, Node 18+.
+// Runs on Linux cicy-code and inside dsh on Windows (cicy-skill-spec §4).
+import { execFileSync } from 'node:child_process';
+
+const NAME = 'tg-clean-deleted';
+const VERSION = '0.1.0';
+
+const HELP = `${NAME} ${VERSION} — remove "Deleted Account" chats from a Telegram Web K session
+
+Usage:
+  ${NAME} targets [--client <id>] [--json]          list Telegram Web K webContents to operate on
+  ${NAME} scan   [--target wc:<id>] [--client <id>] [--json]
+                                                    list chats whose peer is a deleted account
+  ${NAME} clean  [--target wc:<id>] [--client <id>] [--yes] [--dry-run] [--limit N] [--delay ms] [--json]
+                                                    delete those chats (local + server, no revoke needed)
+
+Options:
+  --target wc:<id>   Telegram Web K webContents id (from "targets"); auto-picked when exactly one exists
+  --client <id>      cicy-desktop client id (agent-electron --client)
+  --yes              actually delete (without it "clean" only prints what it would do)
+  --dry-run          same as omitting --yes
+  --limit N          delete at most N chats this run
+  --delay ms         pause between deletions (default 400)
+  --json             machine-readable output
+
+Exit codes: 0 ok · 1 usage · 2 agent-electron / page error
+`;
+
+function parseArgs(argv) {
+  const o = { cmd: argv[0] || '', target: '', client: '', json: false, yes: false, limit: 0, delay: 400 };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--target') o.target = argv[++i] || '';
+    else if (a === '--client') o.client = argv[++i] || '';
+    else if (a === '--json') o.json = true;
+    else if (a === '--yes') o.yes = true;
+    else if (a === '--dry-run') o.yes = false;
+    else if (a === '--limit') o.limit = Number(argv[++i] || 0) || 0;
+    else if (a === '--delay') o.delay = Number(argv[++i] || 400) || 400;
+    else if (a === '--help' || a === '-h') o.cmd = 'help';
+    else { process.stderr.write(`${NAME}: unknown option ${a}\n`); process.exit(1); }
+  }
+  if (o.target && /^\d+$/.test(o.target)) o.target = 'wc:' + o.target;
+  return o;
+}
+
+// ── agent-electron transport ─────────────────────────────────────────────
+function runAgent(o, args) {
+  const bin = process.env.AGENT_ELECTRON_BIN || 'agent-electron';
+  const full = o.client ? ['--client', o.client, ...args] : args;
+  let out;
+  try { out = execFileSync(bin, full, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); }
+  catch (e) { throw new Error('agent-electron failed: ' + (e.stderr ? String(e.stderr).trim() : e.message)); }
+  try { return JSON.parse(out); } catch { throw new Error('agent-electron returned invalid JSON: ' + out.slice(0, 200)); }
+}
+function listTargets(o) {
+  const r = runAgent(o, ['webcontents', '--json']);
+  if (!r.ok || !Array.isArray(r.data)) throw new Error('could not list Electron webContents');
+  return r.data.filter((w) => /^https:\/\/web\.telegram\.org\/k\//.test(w.url || ''))
+    .map((w) => ({ target: 'wc:' + w.webContentsId, webContentsId: w.webContentsId, url: w.url, title: w.title || '', profile: w.profileId ?? w.accountIdx ?? null }));
+}
+function pickTarget(o) {
+  if (o.target) return o.target;
+  const t = listTargets(o);
+  if (!t.length) throw new Error('no Telegram Web K target found (open web.telegram.org/k in a cicy-desktop window first)');
+  if (t.length > 1) throw new Error(`multiple Telegram Web targets (${t.map((x) => x.target).join(', ')}); pass --target wc:<id>`);
+  return t[0].target;
+}
+function evaluate(o, target, expression) {
+  const r = runAgent(o, ['cdp', target, 'Runtime.evaluate', JSON.stringify({ expression, awaitPromise: true, returnByValue: true })]);
+  const res = r && r.result && r.result.result;
+  if (!r.success || !res) throw new Error('CDP Runtime.evaluate returned no result');
+  if (r.result.exceptionDetails) throw new Error(res.description || r.result.exceptionDetails.text || 'page evaluation failed');
+  return res.value;
+}
+
+// ── page-side scripts (run inside Telegram Web K) ────────────────────────
+// Deleted accounts: user.pFlags.deleted. We page through dialogsStorage (folder 0 = all chats).
+const SCAN_JS = `(async () => {
+  const M = window.rootScope && window.rootScope.managers;
+  if (!M) return JSON.stringify({ ok: false, err: 'rootScope.managers not available (page not logged in / not Telegram Web K?)' });
+  const me = await M.appUsersManager.getSelf().catch(() => null);
+  const out = []; let total = 0;
+  // one big page: dialogsStorage answers from its in-memory cache (thousands of chats in a few ms)
+  const r = await M.dialogsStorage.getDialogs({ query: '', offsetIndex: 0, limit: 20000, filterId: 0 });
+  const ds = r.dialogs || []; total = ds.length;
+  for (const d of ds) {
+    const pid = d.peerId; if (!(pid > 0)) continue;
+    const u = await M.appUsersManager.getUser(pid).catch(() => null);
+    if (u && u.pFlags && u.pFlags.deleted) out.push({ peerId: String(pid), date: (d.topMessage && d.topMessage.date) || 0, unread: d.unread_count || 0 });
+  }
+  return JSON.stringify({ ok: true, self: me ? { id: String(me.id), phone: me.phone || '', username: me.username || '' } : null, total, deleted: out });
+})()`;
+// Delete one private chat with a deleted account = "Delete chat" in the UI:
+// appMessagesManager.flushHistory({peerId, justClear:false, revoke:false}) → messages.deleteHistory + drop the dialog.
+// (Current tweb takes an options object; the old positional form throws "reading 'isUser'".)
+const deleteJs = (peerId) => `(async () => {
+  const M = window.rootScope.managers; const pid = ${JSON.stringify(Number(peerId))};
+  try {
+    await M.appMessagesManager.flushHistory({ peerId: pid, justClear: false, revoke: false });
+    const still = await M.dialogsStorage.getDialogOnly(pid).catch(() => null);
+    return JSON.stringify({ ok: !still, err: still ? 'dialog still present after flushHistory' : '' });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
+})()`;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const fmtDate = (t) => (t ? new Date(t * 1000).toISOString().slice(0, 10) : '—');
+
+async function main() {
+  const o = parseArgs(process.argv.slice(2));
+  if (!o.cmd || o.cmd === 'help' || o.cmd === '--help' || o.cmd === '-h') { process.stdout.write(HELP); return 0; }
+
+  if (o.cmd === 'targets') {
+    const t = listTargets(o);
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, targets: t }) + '\n');
+    else if (!t.length) process.stdout.write('no Telegram Web K webContents found\n');
+    else for (const x of t) process.stdout.write(`${x.target.padEnd(8)} ${x.title}\n`);
+    return 0;
+  }
+
+  if (o.cmd !== 'scan' && o.cmd !== 'clean') { process.stderr.write(`${NAME}: unknown command "${o.cmd}"\n\n` + HELP); return 1; }
+  const target = pickTarget(o);
+  const scan = JSON.parse(evaluate(o, target, SCAN_JS));
+  if (!scan.ok) throw new Error(scan.err);
+  scan.deleted.sort((a, b) => (b.date || 0) - (a.date || 0));
+  const who = scan.self ? `+${scan.self.phone || '?'}${scan.self.username ? ' @' + scan.self.username : ''}` : 'unknown account';
+
+  if (o.cmd === 'scan') {
+    if (o.json) { process.stdout.write(JSON.stringify({ ok: true, target, self: scan.self, total: scan.total, count: scan.deleted.length, deleted: scan.deleted }) + '\n'); return 0; }
+    process.stdout.write(`${target} ${who}: ${scan.total} chats, ${scan.deleted.length} with deleted accounts\n`);
+    for (const d of scan.deleted) process.stdout.write(`  ${d.peerId.padEnd(12)} last ${fmtDate(d.date)}${d.unread ? `  unread ${d.unread}` : ''}\n`);
+    if (scan.deleted.length) process.stdout.write(`\nrun: ${NAME} clean --target ${target} --yes\n`);
+    return 0;
+  }
+
+  // clean
+  let list = scan.deleted; if (o.limit > 0) list = list.slice(0, o.limit);
+  if (!list.length) { process.stdout.write(o.json ? JSON.stringify({ ok: true, target, deleted: 0, failed: 0 }) + '\n' : `${target} ${who}: nothing to clean\n`); return 0; }
+  if (!o.yes) {
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, dryRun: true, target, self: scan.self, would_delete: list }) + '\n');
+    else process.stdout.write(`${target} ${who}: would delete ${list.length} chat(s) (dry run; add --yes to delete)\n` + list.map((d) => `  ${d.peerId}  last ${fmtDate(d.date)}`).join('\n') + '\n');
+    return 0;
+  }
+  let done = 0, failed = 0; const errors = [];
+  for (const d of list) {
+    const r = JSON.parse(evaluate(o, target, deleteJs(d.peerId)));
+    if (r.ok) { done++; if (!o.json) process.stdout.write(`  deleted ${d.peerId} (last ${fmtDate(d.date)})\n`); }
+    else { failed++; errors.push({ peerId: d.peerId, err: r.err }); if (!o.json) process.stdout.write(`  FAILED ${d.peerId}: ${r.err}\n`); }
+    if (o.delay > 0) await sleep(o.delay);
+  }
+  const left = JSON.parse(evaluate(o, target, SCAN_JS));
+  const remaining = left.ok ? left.deleted.length : null;
+  if (o.json) process.stdout.write(JSON.stringify({ ok: failed === 0, target, self: scan.self, deleted: done, failed, remaining, errors }) + '\n');
+  else process.stdout.write(`${target} ${who}: deleted ${done}, failed ${failed}, remaining ${remaining ?? '?'}\n`);
+  return failed ? 2 : 0;
+}
+
+main().then((code) => process.exit(code)).catch((e) => { process.stderr.write(`${NAME}: ${e.message}\n`); process.exit(2); });
