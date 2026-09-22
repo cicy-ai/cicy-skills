@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-export-history",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "title": "TG Export History",
   "description": "Use when the messages of a Telegram group, channel or chat must be exported to JSON, JSONL or CSV through a logged-in Telegram Web K page via agent-electron, no patch and no media download.",
   "category": "productivity",

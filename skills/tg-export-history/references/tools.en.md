@@ -19,6 +19,8 @@ No socket of its own, nothing patched in the page. The only thing left on the pa
 | `apiManager.invokeApi('messages.checkChatInvite', {hash})` | invite link → the chat, only when it answers `chatInviteAlready` (member) |
 | `appChatsManager.getChat(id)` / `appUsersManager.getUser(id)` | numeric peer id → cached chat / user (must already be known to the page) |
 | `apiManager.invokeApi('messages.getHistory', {peer, offset_id, limit:100, min_id})` | the paging itself, newest → oldest; `count` on the first answer is the total |
+| `apiManager.invokeApi('messages.getReplies', {peer, msg_id:<topic root>, offset_id, limit:100})` | the same paging restricted to one forum topic (`--topic`) |
+| `channels.getMessages` on the linked message | detects `messageActionTopicCreate` so a topic link is exported as that topic |
 | `users` / `chats` arrays of each `messages.getHistory` answer | sender / forward names |
 
 ## Notes

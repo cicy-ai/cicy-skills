@@ -51,6 +51,8 @@ tg-export-history export @Shakethemap --target wc:121                      # ./S
 tg-export-history export https://t.me/Shakethemap/3894 --format csv --out ~/exports/
 tg-export-history export @Shakethemap --limit 500 --format all --out ./dump   # newest 500, json+jsonl+csv
 tg-export-history export -1002101513995 --since 2026-09-01 --json           # by peer id, machine output
+tg-export-history export https://t.me/Shakethemap/4546 --format all         # a forum topic (link to its root) → *-topic4546-messages.*
+tg-export-history export @Shakethemap --topic 4546 --out ./topics/
 ```
 
 ## References

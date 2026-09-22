@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const NAME = 'tg-export-history';
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 const HELP = `${NAME} ${VERSION} — export a Telegram chat's messages to JSON / JSONL / CSV (read-only, no media download)
 
@@ -17,7 +17,7 @@ Usage:
   ${NAME} info   <chat> [--target wc:<id>] [--client <id>] [--json]
                                                                  what <chat> resolves to: title, type, message count
   ${NAME} export <chat> [--target wc:<id>] [--client <id>] [--out <file|dir>] [--format json|jsonl|csv|all]
-                        [--limit N] [--since YYYY-MM-DD] [--min-id N] [--batch N] [--json]
+                        [--topic <msgid>] [--limit N] [--since YYYY-MM-DD] [--min-id N] [--batch N] [--json]
                                                                  export the messages (newest first while paging, written oldest first)
 
 <chat> is @username, https://t.me/<username>[/<msgid>], t.me/+<invitehash> (only if already a member),
@@ -28,6 +28,8 @@ Options:
   --client <id>      cicy-desktop client id (agent-electron --client)
   --out <path>       output file (extension decides the format) or directory; default: ./<chat>-messages.<ext>
   --format <f>       json (default) | jsonl | csv | all (json+jsonl+csv, --out must then be a directory or a base name)
+  --topic <msgid>    forum topic: export only the messages of the topic whose root message id is <msgid>
+                     (a t.me/<chat>/<id> link that points at a topic root is picked up automatically)
   --limit N          stop after the newest N messages
   --since DATE       only messages on/after this date (YYYY-MM-DD, UTC) — or a unix timestamp
   --min-id N         only messages with id > N (incremental exports)
@@ -40,13 +42,14 @@ Exit codes: 0 ok · 1 usage · 2 agent-electron / page error · 3 chat not found
 `;
 
 function parseArgs(argv) {
-  const o = { cmd: argv[0] || '', chat: '', target: '', client: '', out: '', format: 'json', limit: 0, since: 0, minId: 0, batch: 8, json: false };
+  const o = { cmd: argv[0] || '', chat: '', target: '', client: '', out: '', format: 'json', limit: 0, since: 0, minId: 0, batch: 8, json: false, topic: 0 };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--target') o.target = argv[++i] || '';
     else if (a === '--client') o.client = argv[++i] || '';
     else if (a === '--out') o.out = argv[++i] || '';
     else if (a === '--format') o.format = String(argv[++i] || 'json').toLowerCase();
+    else if (a === '--topic') o.topic = Math.max(0, Number(argv[++i] || 0) || 0);
     else if (a === '--limit') o.limit = Math.max(0, Number(argv[++i] || 0) || 0);
     else if (a === '--since') o.since = parseSince(argv[++i] || '');
     else if (a === '--min-id') o.minId = Math.max(0, Number(argv[++i] || 0) || 0);
@@ -76,7 +79,7 @@ function parseChatRef(s) {
   let m;
   if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/\+([A-Za-z0-9_-]+)/i.exec(s))) return { kind: 'invite', value: m[1] };
   if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/joinchat\/([A-Za-z0-9_-]+)/i.exec(s))) return { kind: 'invite', value: m[1] };
-  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/([A-Za-z][A-Za-z0-9_]{3,31})(?:\/\d+)?\/?(?:\?.*)?$/i.exec(s))) return { kind: 'username', value: m[1] };
+  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/([A-Za-z][A-Za-z0-9_]{3,31})(?:\/(\d+))?\/?(?:\?.*)?$/i.exec(s))) return { kind: 'username', value: m[1], msgId: m[2] ? Number(m[2]) : 0 };
   if ((m = /^@?([A-Za-z][A-Za-z0-9_]{3,31})$/.exec(s))) return { kind: 'username', value: m[1] };
   if (/^-?\d+$/.test(s)) return { kind: 'peer', value: s };
   return null;
@@ -144,15 +147,25 @@ const resolveJs = (ref) => `(async () => {
     }
     if (!peer) return JSON.stringify({ ok: false, err: 'could not resolve ' + JSON.stringify(ref) });
     window.__tgExportPeer = peer;
-    const h = await M.apiManager.invokeApi('messages.getHistory', { peer, offset_id: 0, offset_date: 0, add_offset: 0, limit: 1, max_id: 0, min_id: 0, hash: 0 });
+    const topic = ${JSON.stringify(ref.topic || 0)};
+    let topicInfo = null;
+    if (ref.msgId && !topic) {
+      // a t.me/<chat>/<id> link: if that message is a topic root, offer it as the topic
+      try { const g = peer._ === 'inputPeerChannel' ? await M.apiManager.invokeApi('channels.getMessages', { channel: { _: 'inputChannel', channel_id: peer.channel_id, access_hash: peer.access_hash }, id: [{ _: 'inputMessageID', id: ref.msgId }] }) : null;
+        const m = g && (g.messages || [])[0]; if (m && m._ === 'messageService' && m.action && m.action._ === 'messageActionTopicCreate') topicInfo = { id: m.id, title: m.action.title || '' }; } catch (e) {}
+    }
+    const h = topic
+      ? await M.apiManager.invokeApi('messages.getReplies', { peer, msg_id: topic, offset_id: 0, offset_date: 0, add_offset: 0, limit: 1, max_id: 0, min_id: 0, hash: 0 })
+      : await M.apiManager.invokeApi('messages.getHistory', { peer, offset_id: 0, offset_date: 0, add_offset: 0, limit: 1, max_id: 0, min_id: 0, hash: 0 });
     const top = (h.messages || [])[0] || null;
-    return JSON.stringify({ ok: true, info, count: h.count != null ? h.count : (h.messages || []).length,
+    if (topic) { try { const g = await M.apiManager.invokeApi('channels.getMessages', { channel: { _: 'inputChannel', channel_id: peer.channel_id, access_hash: peer.access_hash }, id: [{ _: 'inputMessageID', id: topic }] }); const m = (g.messages || [])[0]; if (m && m.action && m.action.title) topicInfo = { id: topic, title: m.action.title }; } catch (e) {} }
+    return JSON.stringify({ ok: true, info, topic: topic || 0, topicInfo, count: h.count != null ? h.count : (h.messages || []).length,
       latest: top ? { id: top.id, date: new Date(top.date * 1000).toISOString() } : null });
   } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
 })()`;
 // One round trip = up to <batch> getHistory calls of 100, walking backwards from offset_id.
 // Names for senders come from the users/chats arrays that ride along with every page.
-const chunkJs = (offsetId, batch, minId, since) => `(async () => {
+const chunkJs = (offsetId, batch, minId, since, topic) => `(async () => {
   const M = window.rootScope.managers, peer = window.__tgExportPeer;
   if (!peer) return JSON.stringify({ ok: false, err: 'no resolved peer on the page, run info first' });
   const names = {}, out = []; let off = ${Number(offsetId) || 0}, stop = false;
@@ -160,7 +173,9 @@ const chunkJs = (offsetId, batch, minId, since) => `(async () => {
   const key = (p) => p ? (p.user_id != null ? 'u' + p.user_id : p.channel_id != null ? 'c' + p.channel_id : p.chat_id != null ? 'c' + p.chat_id : '') : '';
   try {
     for (let k = 0; k < ${Number(batch) || 8} && !stop; k++) {
-      const h = await M.apiManager.invokeApi('messages.getHistory', { peer, offset_id: off, offset_date: 0, add_offset: 0, limit: 100, max_id: 0, min_id: ${Number(minId) || 0}, hash: 0 });
+      const h = ${Number(topic) || 0}
+        ? await M.apiManager.invokeApi('messages.getReplies', { peer, msg_id: ${Number(topic) || 0}, offset_id: off, offset_date: 0, add_offset: 0, limit: 100, max_id: 0, min_id: ${Number(minId) || 0}, hash: 0 })
+        : await M.apiManager.invokeApi('messages.getHistory', { peer, offset_id: off, offset_date: 0, add_offset: 0, limit: 100, max_id: 0, min_id: ${Number(minId) || 0}, hash: 0 });
       const ms = h.messages || []; if (!ms.length) break;
       for (const u of (h.users || [])) names['u' + u.id] = nm(u);
       for (const c of (h.chats || [])) names['c' + c.id] = nm(c);
@@ -190,10 +205,10 @@ const chunkJs = (offsetId, batch, minId, since) => `(async () => {
 
 const FIELDS = ['id', 'date', 'from', 'from_id', 'text', 'media', 'media_id', 'mime', 'size', 'file', 'reply_to', 'fwd', 'views', 'service', 'edit_date', 'grouped_id'];
 const csvEsc = (v) => { v = String(v ?? ''); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-const describeLine = (t, r) => `${t} ${r.info.title || '?'}${r.info.username ? ' @' + r.info.username : ''} (${r.info.type}, id ${r.info.id}${r.info.members ? ', ' + r.info.members + ' members' : ''}${r.info.member ? '' : ', not a member'}) — ${r.count} messages${r.latest ? ', latest #' + r.latest.id + ' ' + r.latest.date.slice(0, 10) : ''}`;
+const describeLine = (t, r) => `${t} ${r.info.title || '?'}${r.info.username ? ' @' + r.info.username : ''} (${r.info.type}, id ${r.info.id}${r.info.members ? ', ' + r.info.members + ' members' : ''}${r.info.member ? '' : ', not a member'})${r.topic ? ` › topic #${r.topic}${r.topicInfo && r.topicInfo.title ? ' 「' + r.topicInfo.title + '」' : ''}` : ''} — ${r.count} messages${r.latest ? ', latest #' + r.latest.id + ' ' + r.latest.date.slice(0, 10) : ''}`;
 
 function outputPaths(o, info) {
-  const base = (info.username || info.id || 'chat').replace(/[^A-Za-z0-9_-]/g, '_') + '-messages';
+  const base = (info.username || info.id || 'chat').replace(/[^A-Za-z0-9_-]/g, '_') + (o.topic ? '-topic' + o.topic : '') + '-messages';
   const formats = o.format === 'all' ? ['json', 'jsonl', 'csv'] : [o.format];
   let dir = process.cwd(), stem = base;
   if (o.out) {
@@ -222,9 +237,12 @@ async function main() {
   if (o.cmd !== 'info' && o.cmd !== 'export') { process.stderr.write(`${NAME}: unknown command "${o.cmd}"\n\n` + HELP); return 1; }
   const ref = parseChatRef(o.chat);
   if (!ref) { process.stderr.write(`${NAME}: ${o.cmd} needs a <chat> (@username, t.me link or peer id)\n`); return 1; }
+  ref.topic = o.topic || 0;
 
   const target = pickTarget(o);
-  const r = JSON.parse(evaluate(o, target, resolveJs(ref)));
+  let r = JSON.parse(evaluate(o, target, resolveJs(ref)));
+  // the link pointed at a forum topic root and no --topic was given → export that topic
+  if (r.ok && !ref.topic && r.topicInfo && r.topicInfo.id) { ref.topic = r.topicInfo.id; o.topic = ref.topic; r = JSON.parse(evaluate(o, target, resolveJs(ref))); }
   if (!r.ok) {
     if (/not available|still starting|not logged in/.test(r.err)) throw new Error(r.err);
     if (o.json) process.stdout.write(JSON.stringify({ ok: false, target, chat: o.chat, err: r.err }) + '\n');
@@ -244,7 +262,7 @@ async function main() {
   const t0 = Date.now(); let total = 0, off = 0, err = '';
   if (!o.json) process.stderr.write(describeLine(target, r) + '\n');
   while (true) {
-    const c = JSON.parse(evaluate(o, target, chunkJs(off, o.batch, o.minId, o.since)));
+    const c = JSON.parse(evaluate(o, target, chunkJs(off, o.batch, o.minId, o.since, o.topic)));
     let rows = c.rows || [];
     if (o.limit && total + rows.length > o.limit) rows = rows.slice(0, o.limit - total);
     if (rows.length) fs.appendFileSync(jsonl, rows.map((x) => JSON.stringify(x)).join('\n') + '\n');
@@ -256,7 +274,7 @@ async function main() {
   }
   // finalize: oldest first, then the requested formats
   const all = fs.readFileSync(jsonl, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).sort((a, b) => a.id - b.id);
-  const meta = { chat: r.info, source: o.chat, exported_at: new Date().toISOString(), count: all.length, total_in_chat: r.count, fields: FIELDS, tool: `${NAME} ${VERSION}` };
+  const meta = { chat: r.info, topic: o.topic ? (r.topicInfo || { id: o.topic }) : undefined, source: o.chat, exported_at: new Date().toISOString(), count: all.length, total_in_chat: r.count, fields: FIELDS, tool: `${NAME} ${VERSION}` };
   if (paths.jsonl) fs.writeFileSync(paths.jsonl, all.map((x) => JSON.stringify(x)).join('\n') + (all.length ? '\n' : ''));
   else fs.unlinkSync(jsonl);
   if (paths.json) fs.writeFileSync(paths.json, JSON.stringify({ meta, messages: all }, null, 1));
