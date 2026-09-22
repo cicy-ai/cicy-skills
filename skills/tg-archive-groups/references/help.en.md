@@ -15,7 +15,7 @@
 |---|---|
 | `--target wc:<id>` | Telegram Web K webContents id (a bare number is accepted). Auto-picked only when exactly one Telegram Web K target exists. |
 | `--client <id>` | cicy-desktop client id, passed through to `agent-electron --client`. |
-| `--bots` | Also move chats with bots (people are never touched). |
+| `--bots` | Also move chats with bots and the official "Telegram" service-notification chat (id 777000); people are never touched. |
 | `--groups-only` | Only move groups; leave broadcast channels where they are (default: groups + channels). |
 | `--channels` | Accepted for compatibility; channels are included by default. |
 | `--yes` | Actually move chats. |
