@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-archive-groups';
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 
 const HELP = `${NAME} ${VERSION} — archive all groups and channels of a Telegram Web K session
 
@@ -22,6 +22,8 @@ unless you pass --all.
   --drop-service     delete the official "Telegram" service chat (777000) — it cannot be archived; deleting its
                      history removes it from the list until the next service notification arrives
   --drop-saved       delete Saved Messages (clears everything saved!) — likewise not archivable
+  --clear-drafts     discard unsent drafts: a chat that exists only because of a draft has no server-side
+                     dialog to archive, so clearing the draft is the only way to get it off the main list
   --groups-only      leave broadcast channels where they are
   --bots             also move chats with bots (never people). The official "Telegram" service chat (777000) cannot
                      be archived: the server accepts folders.editPeerFolders for it but returns no update
@@ -41,7 +43,7 @@ Exit codes: 0 ok · 1 usage · 2 agent-electron / page error or a batch failed
 `;
 
 function parseArgs(argv) {
-  const o = { cmd: argv[0] || '', target: '', client: '', json: false, yes: false, channels: true, bots: false, all: false, keep: true, dropService: false, dropSaved: false, limit: 0, batch: 20, delay: 500 };
+  const o = { cmd: argv[0] || '', target: '', client: '', json: false, yes: false, channels: true, bots: false, all: false, keep: true, dropService: false, dropSaved: false, clearDrafts: false, limit: 0, batch: 20, delay: 500 };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--target') o.target = argv[++i] || '';
@@ -56,6 +58,7 @@ function parseArgs(argv) {
     else if (a === '--all') { o.all = true; o.bots = true; o.channels = true; }
     else if (a === '--drop-service') o.dropService = true;
     else if (a === '--drop-saved') o.dropSaved = true;
+    else if (a === '--clear-drafts') o.clearDrafts = true;
     else if (a === '--limit') o.limit = Number(argv[++i] || 0) || 0;
     else if (a === '--batch') o.batch = Math.max(1, Number(argv[++i] || 20) || 20);
     else if (a === '--delay') o.delay = Number(argv[++i] || 500) || 0;
@@ -214,6 +217,20 @@ const dropJs = (service, saved) => `(async () => { /*drop-fixed*/
   return JSON.stringify(out);
 })()`;
 
+// 清草稿:只有草稿、没有消息的会话在服务器上没有 dialog,归不了档;把草稿清掉它就从主列表消失
+const DRAFTS_JS = `(async () => { /*clear-drafts*/
+  const M = window.rootScope.managers; let cleared = 0, failed = 0;
+  let upd; try { upd = await M.apiManager.invokeApi('messages.getAllDrafts', {}); } catch (e) { return JSON.stringify({ err: String(e && (e.type || e.message) || e).slice(0, 80) }); }
+  const peers = ((upd && upd.updates) || []).filter((u) => u._ === 'updateDraftMessage' && u.draft && u.draft._ === 'draftMessage').map((u) => u.peer);
+  for (const p of peers) {
+    const id = p.user_id != null ? Number(p.user_id) : p.chat_id != null ? -Number(p.chat_id) : -Number(p.channel_id);
+    let ip = null; try { ip = await M.appPeersManager.getInputPeerById(id); } catch (e) {}
+    if (!ip) { failed++; continue; }
+    try { await M.apiManager.invokeApi('messages.saveDraft', { peer: ip, message: '' }); cleared++; } catch (e) { failed++; }
+  }
+  return JSON.stringify({ drafts: peers.length, cleared, failed });
+})()`;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
@@ -254,8 +271,13 @@ async function main() {
     if (!o.json) process.stdout.write(keep.ok ? (keep.changed ? '  keep-archived settings: turned on\n' : '  keep-archived settings: already on\n') : `  keep-archived settings: FAILED (${keep.err})\n`);
   }
   let drop = null;
+  if (o.yes && o.cmd === 'archive' && o.clearDrafts) {
+    let d = null; try { d = JSON.parse(evaluate(o, target, DRAFTS_JS)); } catch (e) { d = { err: String(e.message).slice(0, 80) }; }
+    if (!o.json) process.stdout.write(`  drafts: ${d.err ? 'failed: ' + d.err : d.drafts + ' found, ' + d.cleared + ' cleared' + (d.failed ? ', ' + d.failed + ' failed' : '')}\n`);
+    drop = { ...(drop || {}), drafts: d.err ? 'err' : `${d.cleared}/${d.drafts}` };
+  }
   if (o.yes && o.cmd === 'archive' && (o.dropService || o.dropSaved)) {
-    try { drop = JSON.parse(evaluate(o, target, dropJs(o.dropService, o.dropSaved))); } catch (e) { drop = { err: String(e.message).slice(0, 80) }; }
+    try { drop = { ...(drop || {}), ...JSON.parse(evaluate(o, target, dropJs(o.dropService, o.dropSaved))) }; } catch (e) { drop = { ...(drop || {}), err: String(e.message).slice(0, 80) }; }
     if (!o.json) process.stdout.write(`  drop: ${Object.entries(drop).map(([k, v]) => k + '=' + v).join(', ')}\n`);
   }
   if (!todo.length && o.yes) {
