@@ -1,0 +1,43 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "tg-download-media",
+  "version": "0.1.0",
+  "title": "TG Download Media",
+  "description": "Use when photos, videos or documents attached to Telegram messages must be saved to disk by message id through a logged-in Telegram Web K page via agent-electron, resumable, no patch.",
+  "category": "productivity",
+  "tags": [
+    "telegram",
+    "download",
+    "media",
+    "electron",
+    "cdp"
+  ],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "agent-electron"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/tg-download-media",
+  "permissions": [
+    "network",
+    "filesystem:home"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-download-media"
+}
