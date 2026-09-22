@@ -16,7 +16,7 @@
 | `--target wc:<id>` | Telegram Web K webContents id (a bare number is accepted). Auto-picked only when exactly one Telegram Web K target exists. |
 | `--client <id>` | cicy-desktop client id, passed through to `agent-electron --client`. |
 | `--seed <s>` | Seed for the name pick. Default for `set`: the account id (stable per account). Default for `suggest`: the current time. |
-| `--lang zh\|en` | `zh` (default): a cute Chinese girl name (`糖糖`, `小桃`, `棉花糖`, …, 110 names) as the first name, last name empty. `en`: English first name + cute last name (`Luna Peach`). |
+| `--lang zh\|en` | `zh` (default): a cute Chinese girl name of 2–5 characters (`糖糖`, `棉花糖`, `小熊软糖`, `樱桃小丸子`, … 120 names, 30 per length) as the first name, last name empty. `en`: English first name + cute last name (`Luna Peach`). |
 | `--emoji` | Put a cute emoji in the last name (`🌸 🎀 🍓 🍑 🐰 …`). |
 | `--no-last` | (en) First name only (last name empty; with `--emoji` the last name is just the emoji). |
 | `--count <n>` | Number of names `suggest` prints (1–200, default 10). |

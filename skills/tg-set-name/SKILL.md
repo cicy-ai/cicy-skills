@@ -8,7 +8,7 @@ description: Use when a Telegram account running in Telegram Web K needs its dis
 Shows or sets the **display name** (first name + last name) of the Telegram
 account logged in to a Telegram Web K page inside cicy-desktop (a matrix cell
 or a normal window). When no name is given it picks a **cute Chinese girl
-name** — e.g. `糖糖`, `小桃`, `棉花糖`, `南栀` (first name only, last name empty;
+name** of 2–5 characters — e.g. `糖糖`, `棉花糖`, `小熊软糖`, `樱桃小丸子` (first name only, last name empty;
 `--lang en` gives `Luna Peach` style) — seeded by the account id, so
 every account gets its own stable name and re-running is a no-op. It drives
 the page through `agent-electron` (CDP `Runtime.evaluate`) and calls Telegram

@@ -19,7 +19,7 @@ No socket of its own, no file written to the machine, nothing patched in the pag
 
 ## Cute name pick
 
-`zh` (default): 110 cute Chinese girl names — reduplicated (`糖糖` `桃桃` `朵朵`), `小X` (`小桃` `小鹿`), sweet nicknames (`棉花糖` `布丁` `团子`) and soft two-character names (`南栀` `若曦`) — as the first name, last name empty.
+`zh` (default): 120 cute Chinese girl names, 30 each of 2, 3, 4 and 5 characters (`糖糖` `小桃` · `棉花糖` `林小鹿` · `小熊软糖` `草莓牛奶` · `樱桃小丸子` `今天也很甜`), so name lengths come out random — as the first name, last name empty.
 
 `en`: 60 girl first names (`Luna`, `Mia`, `Coco`, `Lily`, `Momo`, …) × 30 cute last names
 (`Rose`, `Bunny`, `Peach`, `Mochi`, `Bloom`, …), optional emoji. The pick is an FNV-1a hash
