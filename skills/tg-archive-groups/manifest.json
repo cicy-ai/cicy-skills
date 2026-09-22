@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-archive-groups",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "title": "TG Archive Groups",
   "description": "Use when a Telegram Web K account should have its groups, channels, bots — or with --all every chat — moved into the Archive folder or brought back, in bulk, via agent-electron.",
   "category": "productivity",
