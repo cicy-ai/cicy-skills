@@ -5,7 +5,7 @@ Use when a Telegram Web K account should have all its groups and channels moved 
 ```sh
 tg-archive-groups targets
 tg-archive-groups scan    --target wc:<id>
-tg-archive-groups archive --target wc:<id> --yes [--groups-only]
+tg-archive-groups archive --target wc:<id> --yes [--groups-only] [--bots]
 tg-archive-groups unarchive --target wc:<id> --yes
 ```
 
