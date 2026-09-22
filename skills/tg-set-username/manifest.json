@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-set-username",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "title": "TG Set Username",
   "description": "Use when a Telegram account running in Telegram Web K needs its public @username shown, checked, set or cleared through agent-electron, no patch required.",
   "category": "productivity",

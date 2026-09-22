@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-set-username';
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 const HELP = `${NAME} ${VERSION} — show / check / set / clear the @username of a Telegram Web K account
 
@@ -95,11 +95,15 @@ function evaluate(o, target, expression) {
 
 // ── page-side scripts (run inside Telegram Web K) ────────────────────────
 // Who am I: appUsersManager.getSelf() is the cached self user (id / phone / username / name).
+// The page's cached self user can lag right after a change, so ask the server (users.getFullUser self)
+// and fall back to the cache only if that fails.
 const SHOW_JS = `(async () => {
   const R = window.rootScope, M = R && R.managers;
   if (!M) return JSON.stringify({ ok: false, err: 'rootScope.managers not available (page not logged in / not Telegram Web K?)' });
   if (!R.myId) return JSON.stringify({ ok: false, err: 'page is still starting or not logged in (rootScope.myId is empty)' });
-  const me = await M.appUsersManager.getSelf();
+  let me = null;
+  try { const f = await M.apiManager.invokeApi('users.getFullUser', { id: { _: 'inputUserSelf' } }); me = (f.users || [])[0] || null; } catch (e) {}
+  if (!me) me = await M.appUsersManager.getSelf();
   return JSON.stringify({ ok: true, self: { id: String(me.id), phone: me.phone || '', username: me.username || '',
     name: [me.first_name, me.last_name].filter(Boolean).join(' ') } });
 })()`;
@@ -119,11 +123,15 @@ const checkJs = (u) => `(async () => {
 const setJs = (u) => `(async () => {
   const M = window.rootScope.managers; const u = ${JSON.stringify(u)};
   try {
-    const user = await M.apiManager.invokeApi('account.updateUsername', { username: u });
+    let user = null, err = '';
+    try { user = await M.apiManager.invokeApi('account.updateUsername', { username: u }); }
+    catch (e) { err = String(e && (e.type || e.message) || e).slice(0, 200); if (!/USERNAME_NOT_MODIFIED/.test(err)) throw e; }
     try { if (user && typeof M.appUsersManager.saveApiUser === 'function') await M.appUsersManager.saveApiUser(user, true); } catch (e) {}
-    const me = await M.appUsersManager.getSelf();
-    const now = (user && user.username) || me.username || '';
-    return JSON.stringify({ ok: now.toLowerCase() === u.toLowerCase(), username: now, err: now.toLowerCase() === u.toLowerCase() ? '' : 'server returned a different username: ' + now });
+    // verify against the server; USERNAME_NOT_MODIFIED just means it was already this name
+    let now = (user && user.username) || '';
+    try { const f = await M.apiManager.invokeApi('users.getFullUser', { id: { _: 'inputUserSelf' } }); now = ((f.users || [])[0] || {}).username || ''; } catch (e) {}
+    const ok = now.toLowerCase() === u.toLowerCase();
+    return JSON.stringify({ ok, username: now, err: ok ? '' : (err || 'server returned a different username: ' + now) });
   } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
 })()`;
 

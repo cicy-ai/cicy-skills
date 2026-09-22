@@ -15,7 +15,7 @@ No socket of its own, no file written to the machine, nothing patched in the pag
 
 | Call | Used for |
 |---|---|
-| `appUsersManager.getSelf()` | which account we are operating on (id / phone / name / current username) |
+| `apiManager.invokeApi('users.getFullUser', {id: inputUserSelf})` (fallback `appUsersManager.getSelf()`) | which account we are operating on (id / phone / name / current username) — server truth, since the page cache lags right after a change |
 | `apiManager.invokeApi('account.checkUsername', {username})` | `true` when the username is free; RPC errors (`USERNAME_INVALID`, `USERNAME_OCCUPIED`, `USERNAME_PURCHASE_AVAILABLE`, `FLOOD_WAIT_n`) are passed through as `err` |
 | `apiManager.invokeApi('account.updateUsername', {username})` | set (or, with `''`, remove) the username; returns the updated `User` |
 | `appUsersManager.saveApiUser(user, true)` | keep the page's own user cache in sync so the UI shows the new name without a reload |
