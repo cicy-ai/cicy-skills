@@ -18,6 +18,7 @@
 | `--groups-only` | 只动群,频道不动(默认群 + 频道都归档)。 |
 | `--channels` | 兼容旧写法;默认已包含频道。 |
 | `--yes` | 真移动。 |
+| `--no-keep` | 不改账号的「保持归档」设置(默认 `archive` 会打开 `keep_archived_unmuted` + `keep_archived_folders`,否则未静音的会话一来新消息就自动跳回主列表,白干)。 |
 | `--dry-run` | 显式声明只看不动(默认就是)。 |
 | `--limit N` | 本次最多移 N 个。 |
 | `--batch N` | 每次 `folders.editPeerFolders` 带几个会话(默认 20)。 |
@@ -27,7 +28,7 @@
 ## 输出
 
 `scan --json`:`{ ok, target, self:{id,phone,username}, total, users, groups, channels, included, archived, not_archived, items:[{peerId,title,kind,folder,unread}] }`
-`archive|unarchive --json`:`{ ok, target, self, moved, failed, remaining, errors:[{peers,err}] }`(dry run 时 `{ ok, dryRun:true, would_move:[...], already }`)
+`archive|unarchive --json`:`{ ok, target, self, moved, failed, remaining, keep:{ok,changed}|null, errors:[{peers,err}] }`(dry run 时 `{ ok, dryRun:true, would_move:[...], already }`)
 
 ## 退出码
 

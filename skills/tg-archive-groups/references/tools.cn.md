@@ -20,6 +20,7 @@
 | `appUsersManager.getSelf()` | 当前操作的是哪个号 |
 | `appMessagesManager.editPeerFolders(peerIds[], folderId)` | 即 `folders.editPeerFolders`,1 = 归档,0 = 主列表;分批调 |
 | `dialogsStorage.getDialogOnly(peerId)` → `folder_id` | 核对每个会话确实到了目标文件夹 |
+| `apiManager.invokeApi('account.getGlobalPrivacySettings')` / `setGlobalPrivacySettings` | 归档前先打开 `keep_archived_unmuted` + `keep_archived_folders`,否则未静音会话一来新消息 Telegram 就自动取消归档(实测:431 个刚归档,一分钟内跳回 3 个) |
 
 归档只是换文件夹:群成员身份、历史、静音状态都不变。
 

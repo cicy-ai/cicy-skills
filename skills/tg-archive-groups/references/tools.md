@@ -20,6 +20,7 @@ No socket of its own, nothing written on the machine, nothing patched in the pag
 | `appUsersManager.getSelf()` | which account we are operating on |
 | `appMessagesManager.editPeerFolders(peerIds[], folderId)` | `folders.editPeerFolders` — 1 = Archive, 0 = main list; batched |
 | `dialogsStorage.getDialogOnly(peerId)` → `folder_id` | verify each peer landed in the target folder |
+| `apiManager.invokeApi('account.getGlobalPrivacySettings')` / `setGlobalPrivacySettings` | turn on `keep_archived_unmuted` + `keep_archived_folders` before archiving — otherwise Telegram un-archives unmuted chats on the next incoming message (seen live: 431 archived, 3 back within a minute) |
 
 Archiving is a folder move only: membership, history, mute state are untouched, and Telegram keeps the chat archived even when new messages arrive unless the peer is pinned/unmuted per Telegram's own rules.
 
