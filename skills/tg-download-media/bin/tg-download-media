@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+// tg-download-media — download the photos / documents attached to Telegram messages, by message id,
+// through a logged-in Telegram Web K page (agent-electron + the page's own apiFileManager).
+// The page re-fetches each message (fresh access_hash + file_reference), downloads the file to a Blob,
+// and hands it back over CDP in base64 chunks. Zero deps, pure ESM, Node 18+, works in dsh on Windows (cicy-skill-spec §4).
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const NAME = 'tg-download-media';
+const VERSION = '0.1.0';
+
+const HELP = `${NAME} ${VERSION} — download message attachments (photos / documents) from a Telegram chat, by message id
+
+Usage:
+  ${NAME} targets [--client <id>] [--json]                        list Telegram Web K webContents to operate on
+  ${NAME} download <chat> (--ids <a,b,c-d> | --from-jsonl <file> [--codes <x,y>] [--match <regex>])
+                   [--out <dir>] [--album] [--thumb] [--limit N] [--overwrite] [--target wc:<id>] [--client <id>] [--json]
+
+<chat> is @username, https://t.me/<username>[/<msgid>], t.me/+<invitehash> (member only) or a peer id known to the page.
+
+Selecting messages:
+  --ids a,b,c-d        message ids (ranges allowed); with a t.me/<user>/<id> link and no --ids, that one message
+  --from-jsonl <file>  read ids from a tg-export-history JSONL (uses "id", and "code"/"text" for the filters below)
+  --codes x,y          only records whose "code" is one of these (with --from-jsonl)
+  --match <regex>      only records whose "text" matches (with --from-jsonl)
+
+Options:
+  --out <dir>          output directory (default ./tg-media); files are named <msgid>_<media_id>.<ext> (documents keep their file name)
+  --album              put messages that belong to the same album (grouped_id) into a sub-folder per album
+  --thumb              for photos, fetch the small preview instead of the full size
+  --limit N            stop after N files
+  --overwrite          re-download files that already exist (default: skip them, so runs are resumable)
+  --target wc:<id>     Telegram Web K webContents id (from "targets"); auto-picked when exactly one exists
+  --client <id>        cicy-desktop client id (agent-electron --client)
+  --json               machine-readable summary on stdout (progress goes to stderr)
+
+Exit codes: 0 ok · 1 usage · 2 agent-electron / page error · 3 chat not found or not readable · 4 some files failed
+`;
+
+function parseArgs(argv) {
+  const o = { cmd: argv[0] || '', chat: '', ids: '', jsonl: '', codes: '', match: '', out: '', album: false, thumb: false, limit: 0, overwrite: false, target: '', client: '', json: false };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--ids') o.ids = argv[++i] || '';
+    else if (a === '--from-jsonl') o.jsonl = argv[++i] || '';
+    else if (a === '--codes') o.codes = argv[++i] || '';
+    else if (a === '--match') o.match = argv[++i] || '';
+    else if (a === '--out') o.out = argv[++i] || '';
+    else if (a === '--album') o.album = true;
+    else if (a === '--thumb') o.thumb = true;
+    else if (a === '--limit') o.limit = Math.max(0, Number(argv[++i] || 0) || 0);
+    else if (a === '--overwrite') o.overwrite = true;
+    else if (a === '--target') o.target = argv[++i] || '';
+    else if (a === '--client') o.client = argv[++i] || '';
+    else if (a === '--json') o.json = true;
+    else if (a === '--help' || a === '-h') o.cmd = 'help';
+    else if (a.startsWith('--')) { process.stderr.write(`${NAME}: unknown option ${a}\n`); process.exit(1); }
+    else if (!o.chat) o.chat = a;
+    else { process.stderr.write(`${NAME}: unexpected argument ${a}\n`); process.exit(1); }
+  }
+  if (o.target && /^\d+$/.test(o.target)) o.target = 'wc:' + o.target;
+  return o;
+}
+function parseIds(s) {
+  const out = new Set();
+  for (const part of String(s || '').split(/[,\s]+/).filter(Boolean)) {
+    const m = /^(\d+)-(\d+)$/.exec(part);
+    if (m) { const a = Number(m[1]), b = Number(m[2]); if (b - a > 100000) throw new Error('id range too large: ' + part); for (let i = Math.min(a, b); i <= Math.max(a, b); i++) out.add(i); }
+    else if (/^\d+$/.test(part)) out.add(Number(part));
+    else throw new Error('bad message id: ' + part);
+  }
+  return [...out].sort((x, y) => x - y);
+}
+function parseChatRef(s) {
+  s = String(s || '').trim(); if (!s) return null; let m;
+  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/\+([A-Za-z0-9_-]+)/i.exec(s))) return { kind: 'invite', value: m[1] };
+  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/joinchat\/([A-Za-z0-9_-]+)/i.exec(s))) return { kind: 'invite', value: m[1] };
+  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/([A-Za-z][A-Za-z0-9_]{3,31})(?:\/(\d+))?\/?(?:\?.*)?$/i.exec(s))) return { kind: 'username', value: m[1], msgId: m[2] ? Number(m[2]) : 0 };
+  if ((m = /^@?([A-Za-z][A-Za-z0-9_]{3,31})$/.exec(s))) return { kind: 'username', value: m[1] };
+  if (/^-?\d+$/.test(s)) return { kind: 'peer', value: s };
+  return null;
+}
+
+// ── agent-electron transport ─────────────────────────────────────────────
+function runAgent(o, args) {
+  const bin = process.env.AGENT_ELECTRON_BIN || 'agent-electron';
+  const full = o.client ? ['--client', o.client, ...args] : args;
+  let out;
+  try { out = execFileSync(bin, full, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }); }
+  catch (e) { throw new Error('agent-electron failed: ' + (e.stderr ? String(e.stderr).trim() : e.message)); }
+  try { return JSON.parse(out); } catch { throw new Error('agent-electron returned invalid JSON: ' + out.slice(0, 200)); }
+}
+function listTargets(o) {
+  const r = runAgent(o, ['webcontents', '--json']);
+  if (!r.ok || !Array.isArray(r.data)) throw new Error('could not list Electron webContents');
+  return r.data.filter((w) => /^https:\/\/web\.telegram\.org\/k\//.test(w.url || ''))
+    .map((w) => ({ target: 'wc:' + w.webContentsId, webContentsId: w.webContentsId, url: w.url, title: w.title || '', profile: w.profileId ?? w.accountIdx ?? null }));
+}
+function pickTarget(o) {
+  if (o.target) return o.target;
+  const t = listTargets(o);
+  if (!t.length) throw new Error('no Telegram Web K target found (open web.telegram.org/k in a cicy-desktop window first)');
+  if (t.length > 1) throw new Error(`multiple Telegram Web targets (${t.map((x) => x.target).join(', ')}); pass --target wc:<id>`);
+  return t[0].target;
+}
+function evaluate(o, target, expression) {
+  const r = runAgent(o, ['cdp', target, 'Runtime.evaluate', JSON.stringify({ expression, awaitPromise: true, returnByValue: true })]);
+  const res = r && r.result && r.result.result;
+  if (!r.success || !res) throw new Error('CDP Runtime.evaluate returned no result');
+  if (r.result.exceptionDetails) throw new Error(res.description || r.result.exceptionDetails.text || 'page evaluation failed');
+  return res.value;
+}
+
+// ── page-side scripts (run inside Telegram Web K) ────────────────────────
+const resolveJs = (ref) => `(async () => {
+  const R = window.rootScope, M = R && R.managers;
+  if (!M) return JSON.stringify({ ok: false, err: 'rootScope.managers not available (page not logged in / not Telegram Web K?)' });
+  if (!R.myId) return JSON.stringify({ ok: false, err: 'page is still starting or not logged in (rootScope.myId is empty)' });
+  const ref = ${JSON.stringify(ref)};
+  const describe = (c, u) => c ? { id: String(c.id), title: c.title || '', username: c.username || '', type: c._ === 'chat' ? 'group' : c.broadcast ? 'channel' : c.megagroup ? 'supergroup' : c._ }
+    : u ? { id: String(u.id), title: [u.first_name, u.last_name].filter(Boolean).join(' '), username: u.username || '', type: u.bot ? 'bot' : 'user' } : null;
+  const peerOfChat = (c) => c._ === 'chat' ? { _: 'inputPeerChat', chat_id: c.id } : { _: 'inputPeerChannel', channel_id: c.id, access_hash: c.access_hash };
+  try {
+    let peer = null, info = null, channel = null;
+    if (ref.kind === 'username') {
+      const r = await M.apiManager.invokeApi('contacts.resolveUsername', { username: ref.value });
+      const c = (r.chats || [])[0], u = (r.users || [])[0];
+      if (c) { peer = peerOfChat(c); info = describe(c, null); if (c._ === 'channel') channel = { _: 'inputChannel', channel_id: c.id, access_hash: c.access_hash }; }
+      else if (u) { peer = { _: 'inputPeerUser', user_id: u.id, access_hash: u.access_hash }; info = describe(null, u); }
+    } else if (ref.kind === 'invite') {
+      const r = await M.apiManager.invokeApi('messages.checkChatInvite', { hash: ref.value });
+      if (r._ === 'chatInviteAlready' && r.chat) { peer = peerOfChat(r.chat); info = describe(r.chat, null); if (r.chat._ === 'channel') channel = { _: 'inputChannel', channel_id: r.chat.id, access_hash: r.chat.access_hash }; }
+      else return JSON.stringify({ ok: false, err: 'invite link: this account is not a member (' + r._ + '), join first' });
+    } else {
+      let pid = Number(ref.value); if (pid < 0 && -pid > 1e12) pid = -(-pid - 1e12);
+      if (pid > 0) { const u = await M.appUsersManager.getUser(pid); if (u && u._ === 'user') { peer = { _: 'inputPeerUser', user_id: u.id, access_hash: u.access_hash }; info = describe(null, u); } }
+      else { const c = await M.appChatsManager.getChat(-pid); if (c && (c._ === 'channel' || c._ === 'chat')) { peer = peerOfChat(c); info = describe(c, null); if (c._ === 'channel') channel = { _: 'inputChannel', channel_id: c.id, access_hash: c.access_hash }; } }
+      if (!peer) return JSON.stringify({ ok: false, err: 'peer ' + pid + ' is unknown to this account (open the chat once in this page, or use its @username / link)' });
+    }
+    if (!peer) return JSON.stringify({ ok: false, err: 'could not resolve ' + JSON.stringify(ref) });
+    window.__tgDl = { peer, channel, media: {}, blobs: {} };
+    return JSON.stringify({ ok: true, info });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
+})()`;
+// Fetch a batch of messages (fresh access_hash + file_reference) and describe their attachments; media objects stay on the page.
+const fetchJs = (ids) => `(async () => {
+  const M = window.rootScope.managers, S = window.__tgDl; if (!S) return JSON.stringify({ ok: false, err: 'not resolved' });
+  const ids = ${JSON.stringify(ids)}; const out = [];
+  try {
+    const req = ids.map((id) => ({ _: 'inputMessageID', id }));
+    const r = S.channel ? await M.apiManager.invokeApi('channels.getMessages', { channel: S.channel, id: req })
+                        : await M.apiManager.invokeApi('messages.getMessages', { id: req });
+    for (const m of (r.messages || [])) {
+      if (!m || m._ !== 'message') continue;
+      const photo = m.media && m.media._ === 'messageMediaPhoto' && m.media.photo && m.media.photo._ === 'photo' ? m.media.photo : null;
+      const doc = m.media && m.media._ === 'messageMediaDocument' && m.media.document && m.media.document._ === 'document' ? m.media.document : null;
+      if (!photo && !doc) { out.push({ id: m.id, kind: '', reason: m.media ? 'unsupported media ' + m.media._ : 'no media' }); continue; }
+      // documents must go through appDocsManager.saveDoc (adds the fields apiFileManager expects); photos work raw but are normalized the same way when possible
+      let media = photo || doc;
+      try { media = doc ? await M.appDocsManager.saveDoc(doc) : ((M.appPhotosManager && M.appPhotosManager.savePhoto) ? (await M.appPhotosManager.savePhoto(photo)) || photo : photo); } catch (e) { media = photo || doc; }
+      S.media[m.id] = media;
+      const attrs = doc ? (doc.attributes || []) : [];
+      const file = attrs.map((a) => a.file_name).filter(Boolean)[0] || '';
+      const sizes = photo ? (photo.sizes || []).filter((z) => z.size) : [];
+      out.push({ id: m.id, kind: photo ? 'photo' : 'document', media_id: String((photo || doc).id), mime: doc ? (doc.mime_type || '') : 'image/jpeg',
+        size: doc ? Number(doc.size) || 0 : (sizes.length ? Math.max(...sizes.map((z) => Number(z.size) || 0)) : 0), file, grouped_id: m.grouped_id ? String(m.grouped_id) : '',
+        text: (m.message || '').slice(0, 80), date: m.date });
+    }
+    return JSON.stringify({ ok: true, items: out });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200), items: out }); }
+})()`;
+// Download one attachment to a Blob kept on the page; the node side then pulls it in base64 slices.
+const dlJs = (id, thumb) => `(async () => {
+  const M = window.rootScope.managers, S = window.__tgDl; const media = S && S.media[${Number(id)}];
+  if (!media) return JSON.stringify({ ok: false, err: 'media not fetched' });
+  try {
+    const opts = { media };
+    if (media._ === 'photo') { const sizes = (media.sizes || []).filter((z) => z.size); if (sizes.length) opts.thumb = ${thumb ? 'sizes[0]' : 'sizes[sizes.length - 1]'}; }
+    const blob = await M.apiFileManager.downloadMedia(opts);
+    S.blobs[${Number(id)}] = blob;
+    return JSON.stringify({ ok: true, size: blob.size, mime: blob.type || '' });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
+})()`;
+const sliceJs = (id, start, len) => `(async () => {
+  const S = window.__tgDl; const blob = S && S.blobs[${Number(id)}]; if (!blob) return '';
+  const part = blob.slice(${Number(start)}, ${Number(start) + Number(len)});
+  const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = () => rej(fr.error); fr.readAsDataURL(part); });
+  if (${Number(start) + Number(len)} >= blob.size) delete S.blobs[${Number(id)}];
+  return b64;
+})()`;
+const CHUNK = 4 * 1024 * 1024;
+
+const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'application/pdf': 'pdf', 'application/zip': 'zip', 'application/x-tgsticker': 'tgs', 'text/plain': 'txt' };
+const safe = (s) => String(s || '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
+function fileNameFor(it) {
+  if (it.file) return `${it.id}_${safe(it.file)}`;
+  const ext = EXT[it.mime] || (it.mime.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '') || 'bin';
+  return `${it.id}_${it.media_id}.${ext}`;
+}
+function selectIds(o, ref) {
+  if (o.ids) return parseIds(o.ids);
+  if (o.jsonl) {
+    const codes = o.codes ? new Set(o.codes.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+    const re = o.match ? new RegExp(o.match, 'i') : null;
+    const ids = [];
+    for (const line of fs.readFileSync(o.jsonl, 'utf8').split('\n')) {
+      if (!line.trim()) continue; let r; try { r = JSON.parse(line); } catch { continue; }
+      if (!Number.isInteger(r.id)) continue;
+      if (codes && !codes.has(String(r.code || ''))) continue;
+      if (re && !re.test(String(r.text || ''))) continue;
+      ids.push(r.id);
+    }
+    return [...new Set(ids)].sort((a, b) => a - b);
+  }
+  if (ref && ref.msgId) return [ref.msgId];
+  return [];
+}
+const fmtMB = (n) => (n / 1048576).toFixed(n >= 10485760 ? 0 : 1) + ' MB';
+
+async function main() {
+  const o = parseArgs(process.argv.slice(2));
+  if (!o.cmd || o.cmd === 'help' || o.cmd === '--help' || o.cmd === '-h') { process.stdout.write(HELP); return 0; }
+  if (o.cmd === 'targets') {
+    const t = listTargets(o);
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, targets: t }) + '\n');
+    else if (!t.length) process.stdout.write('no Telegram Web K webContents found\n');
+    else for (const x of t) process.stdout.write(`${x.target.padEnd(8)} ${x.title}\n`);
+    return 0;
+  }
+  if (o.cmd !== 'download') { process.stderr.write(`${NAME}: unknown command "${o.cmd}"\n\n` + HELP); return 1; }
+  const ref = parseChatRef(o.chat);
+  if (!ref) { process.stderr.write(`${NAME}: download needs a <chat> (@username, t.me link or peer id)\n`); return 1; }
+  let ids;
+  try { ids = selectIds(o, ref); } catch (e) { process.stderr.write(`${NAME}: ${e.message}\n`); return 1; }
+  if (!ids.length) { process.stderr.write(`${NAME}: no message ids selected (use --ids, --from-jsonl or a t.me/<user>/<id> link)\n`); return 1; }
+  const outDir = path.resolve(o.out || 'tg-media'); fs.mkdirSync(outDir, { recursive: true });
+
+  const target = pickTarget(o);
+  const r = JSON.parse(evaluate(o, target, resolveJs(ref)));
+  if (!r.ok) {
+    if (/not available|still starting|not logged in/.test(r.err)) throw new Error(r.err);
+    if (o.json) process.stdout.write(JSON.stringify({ ok: false, target, chat: o.chat, err: r.err }) + '\n'); else process.stderr.write(`${NAME}: ${r.err}\n`);
+    return 3;
+  }
+  const say = (s) => { if (!o.json) process.stderr.write(s + '\n'); };
+  say(`${target} ${r.info.title}${r.info.username ? ' @' + r.info.username : ''} (${r.info.type}) — ${ids.length} message id(s) → ${outDir}`);
+  const done = [], skipped = [], failed = []; let bytes = 0; const seen = new Set(); const t0 = Date.now();
+  outer: for (let i = 0; i < ids.length; i += 50) {
+    const batch = ids.slice(i, i + 50);
+    const f = JSON.parse(evaluate(o, target, fetchJs(batch)));
+    if (!f.ok && !(f.items || []).length) { failed.push(...batch.map((id) => ({ id, err: f.err }))); say(`  fetch ${batch[0]}..${batch[batch.length - 1]} failed: ${f.err}`); continue; }
+    const got = new Map((f.items || []).map((it) => [it.id, it]));
+    for (const id of batch) {
+      const it = got.get(id);
+      if (!it) { failed.push({ id, err: 'message not found' }); continue; }
+      if (!it.kind) { skipped.push({ id, reason: it.reason }); continue; }
+      if (seen.has(it.media_id)) { skipped.push({ id, reason: 'same media_id already downloaded (' + it.media_id + ')' }); continue; }
+      const dir = o.album && it.grouped_id ? path.join(outDir, 'album_' + it.grouped_id) : outDir;
+      const file = path.join(dir, fileNameFor(it));
+      if (!o.overwrite && fs.existsSync(file) && fs.statSync(file).size > 0) { skipped.push({ id, reason: 'exists', file }); seen.add(it.media_id); continue; }
+      if (o.limit && done.length >= o.limit) break outer;
+      const d = JSON.parse(evaluate(o, target, dlJs(id, o.thumb)));
+      if (!d.ok) { failed.push({ id, err: d.err }); say(`  #${id} FAILED ${d.err}`); continue; }
+      fs.mkdirSync(dir, { recursive: true });
+      const tmp = file + '.part'; const fd = fs.openSync(tmp, 'w');
+      try {
+        for (let off = 0; off < d.size; off += CHUNK) {
+          const b64 = evaluate(o, target, sliceJs(id, off, Math.min(CHUNK, d.size - off)));
+          if (!b64 && d.size > 0) throw new Error('empty chunk at ' + off);
+          fs.writeSync(fd, Buffer.from(b64, 'base64'));
+        }
+      } catch (e) { fs.closeSync(fd); try { fs.unlinkSync(tmp); } catch {} failed.push({ id, err: e.message }); say(`  #${id} FAILED ${e.message}`); continue; }
+      fs.closeSync(fd); fs.renameSync(tmp, file);
+      const st = fs.statSync(file); bytes += st.size; seen.add(it.media_id);
+      done.push({ id, file, size: st.size, media_id: it.media_id, kind: it.kind, mime: d.mime || it.mime, grouped_id: it.grouped_id });
+      say(`  #${id} ${it.kind} ${fmtMB(st.size)} → ${path.relative(outDir, file)}`);
+    }
+  }
+  const secs = Math.round((Date.now() - t0) / 1000);
+  const sum = { ok: failed.length === 0, target, chat: r.info, out: outDir, downloaded: done.length, bytes, skipped: skipped.length, failed: failed.length, seconds: secs, files: done, skipped_items: skipped, failed_items: failed };
+  if (o.json) process.stdout.write(JSON.stringify(sum) + '\n');
+  else process.stdout.write(`downloaded ${done.length} file(s), ${fmtMB(bytes)} in ${secs}s; skipped ${skipped.length}; failed ${failed.length} → ${outDir}\n`);
+  return failed.length ? 4 : 0;
+}
+
+main().then((code) => process.exit(code)).catch((e) => { process.stderr.write(`${NAME}: ${e.message}\n`); process.exit(2); });
