@@ -8,8 +8,9 @@ description: Use when a Telegram Web K account should have all its groups and ch
 Moves every **group** (basic groups + supergroups) **and every broadcast
 channel** of a Telegram Web K session into the **Archive** folder in one go — or
 brings them back. `--groups-only` leaves channels alone; `--bots` also moves
-chats with bots and the official "Telegram" service-notification chat (id 777000).
-Chats with people are never touched.
+chats with bots. Chats with people are never touched. The official "Telegram"
+service-notification chat (id 777000) is skipped: Telegram refuses to archive it
+(`folders.editPeerFolders` is accepted but returns no update).
 
 It drives the page through `agent-electron` (CDP `Runtime.evaluate`) and calls
 Telegram Web K's own `window.rootScope.managers` API

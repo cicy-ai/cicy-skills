@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 
 const NAME = 'tg-archive-groups';
-const VERSION = '0.1.4';
+const VERSION = '0.1.5';
 
 const HELP = `${NAME} ${VERSION} — archive all groups and channels of a Telegram Web K session
 
@@ -18,7 +18,8 @@ Usage:
 
 By default every group (basic + supergroup) AND every broadcast channel moves; chats with people are never touched.
   --groups-only      leave broadcast channels where they are
-  --bots             also move chats with bots and the official "Telegram" service-notification chat (id 777000); never people
+  --bots             also move chats with bots (never people). The official "Telegram" service chat (777000) cannot
+                     be archived: the server accepts folders.editPeerFolders for it but returns no update
   --no-keep          don't touch the account's "keep archived" settings (by default archive turns on
                      keep_archived_unmuted + keep_archived_folders, otherwise Telegram un-archives a chat
                      as soon as a new message arrives and the work silently undoes itself)
@@ -101,8 +102,9 @@ const scanJs = (includeChannels, includeBots) => `(async () => {
     const pid = d.peerId;
     if (pid > 0) {
       const u = await M.appUsersManager.getUser(pid).catch(() => null);
-      const isBot = !!(u && u.pFlags && u.pFlags.bot), isService = pid === 777000;   // 777000 = 官方「Telegram」通知号,和 bot 一样归档
-      if (isBot || isService) { bots++; if (${includeBots ? 'true' : 'false'}) out.push({ peerId: String(pid), title: String((u && (u.first_name || u.username)) || 'Telegram').slice(0, 60), kind: isService ? 'service' : 'bot', folder: d.folder_id || 0, unread: d.unread_count || 0 }); }
+      if (pid === 777000) continue;   // 官方「Telegram」通知号:服务端接受 editPeerFolders 但不动它(返回空 updates),归不了档,直接跳过
+      const isBot = !!(u && u.pFlags && u.pFlags.bot);
+      if (isBot) { bots++; if (${includeBots ? 'true' : 'false'}) out.push({ peerId: String(pid), title: String((u && (u.first_name || u.username)) || '').slice(0, 60), kind: 'bot', folder: d.folder_id || 0, unread: d.unread_count || 0 }); }
       else users++;
       continue;
     }
