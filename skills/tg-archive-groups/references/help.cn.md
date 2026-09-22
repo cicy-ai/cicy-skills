@@ -17,6 +17,8 @@
 | `--client <id>` | cicy-desktop 客户端 id,透传给 `agent-electron --client`。 |
 | `--all` | 主列表里的全部会话都归档:群、频道、bot、真人私聊(隐含 `--bots`)。 |
 | `--bots` | 连 bot 会话一起处理(真人私聊永远不动)。官方「Telegram」服务通知号(777000)会跳过:服务端接受请求但不归档。 |
+| `--drop-service` | 删除官方「Telegram」通知号会话(777000)—— 服务端不允许归档它;删历史后它从列表消失,下次有系统通知才会再出现。 |
+| `--drop-saved` | 删除 Saved Messages(会清空收藏的全部内容)—— 同样归不了档。 |
 | `--groups-only` | 只动群,频道不动(默认群 + 频道都归档)。 |
 | `--channels` | 兼容旧写法;默认已包含频道。 |
 | `--yes` | 真移动。 |

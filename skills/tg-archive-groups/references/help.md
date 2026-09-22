@@ -17,6 +17,8 @@
 | `--client <id>` | cicy-desktop client id, passed through to `agent-electron --client`. |
 | `--all` | Archive everything in the main list: groups, channels, bots and private chats with people (implies `--bots`). |
 | `--bots` | Also move chats with bots; people are never touched. The official "Telegram" service chat (777000) is skipped — the server silently refuses to archive it. |
+| `--drop-service` | Delete the official "Telegram" service chat (777000) — Telegram refuses to archive it; deleting its history removes it from the list until the next service message. |
+| `--drop-saved` | Delete Saved Messages (clears everything saved) — likewise not archivable. |
 | `--groups-only` | Only move groups; leave broadcast channels where they are (default: groups + channels). |
 | `--channels` | Accepted for compatibility; channels are included by default. |
 | `--yes` | Actually move chats. |

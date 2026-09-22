@@ -12,7 +12,9 @@ chats with bots; **`--all` archives the entire main list** — groups, channels,
 bots and private chats with people. Without `--all`, chats with people are
 never touched. The official "Telegram" service-notification chat (id 777000)
 is always skipped: Telegram refuses to archive it (`folders.editPeerFolders`
-is accepted but returns no update).
+is accepted but returns no update). Saved Messages cannot be archived either.
+`--drop-service` / `--drop-saved` delete those two chats instead (the latter
+wipes everything saved — opt in deliberately).
 
 It drives the page through `agent-electron` (CDP `Runtime.evaluate`) and calls
 Telegram Web K's own `window.rootScope.managers` API
