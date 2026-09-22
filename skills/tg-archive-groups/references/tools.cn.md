@@ -27,6 +27,10 @@
 
 归档只是换文件夹:群成员身份、历史、静音状态都不变。
 
+## 服务端扫尾
+
+本地缓存那轮跑完后,`archive`/`unarchive` 会再翻一遍服务器自己的会话列表(`messages.getDialogs`,源文件夹),把还留在里面、在本次范围内的会话用服务器给的 access_hash 逐个移动 —— 页面刚启动时本地 `dialogsStorage` 可能还没把会话全拉下来,只按缓存扫会漏。拒绝的按标题列出。
+
 ## 相关 skill
 
 - `agent-electron` — 本 skill 依赖的通道。

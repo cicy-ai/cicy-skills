@@ -27,6 +27,10 @@ Known refusal: `folders.editPeerFolders` on the official "Telegram" service chat
 
 Archiving is a folder move only: membership, history, mute state are untouched, and Telegram keeps the chat archived even when new messages arrive unless the peer is pinned/unmuted per Telegram's own rules.
 
+## Server sweep
+
+After the cache-driven pass, `archive`/`unarchive` walk the server's own dialog list (`messages.getDialogs` for the source folder) and move every chat that is still there and in scope, one by one, using the access_hash the server returned — the local `dialogsStorage` may not have loaded all dialogs yet right after the page booted, so a cache-only scan can miss chats. Refusals are reported by title.
+
 ## Related skills
 
 - `agent-electron` — the transport this skill relies on.
