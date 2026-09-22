@@ -1,0 +1,265 @@
+#!/usr/bin/env node
+// tg-export-history — export a chat's messages from a logged-in Telegram Web K page to JSON / JSONL / CSV.
+// Talks to the page through agent-electron (CDP Runtime.evaluate) and Telegram Web K's own
+// window.rootScope.managers API (messages.getHistory), so no patch is needed and nothing is downloaded.
+// Zero deps, pure ESM, Node 18+. Runs on Linux cicy-code and inside dsh on Windows (cicy-skill-spec §4).
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const NAME = 'tg-export-history';
+const VERSION = '0.1.0';
+
+const HELP = `${NAME} ${VERSION} — export a Telegram chat's messages to JSON / JSONL / CSV (read-only, no media download)
+
+Usage:
+  ${NAME} targets [--client <id>] [--json]                       list Telegram Web K webContents to operate on
+  ${NAME} info   <chat> [--target wc:<id>] [--client <id>] [--json]
+                                                                 what <chat> resolves to: title, type, message count
+  ${NAME} export <chat> [--target wc:<id>] [--client <id>] [--out <file|dir>] [--format json|jsonl|csv|all]
+                        [--limit N] [--since YYYY-MM-DD] [--min-id N] [--batch N] [--json]
+                                                                 export the messages (newest first while paging, written oldest first)
+
+<chat> is @username, https://t.me/<username>[/<msgid>], t.me/+<invitehash> (only if already a member),
+or a peer id (-100xxxxxxxxxx for channels/supergroups, -xxxx for basic groups, positive id for users).
+
+Options:
+  --target wc:<id>   Telegram Web K webContents id (from "targets"); auto-picked when exactly one exists
+  --client <id>      cicy-desktop client id (agent-electron --client)
+  --out <path>       output file (extension decides the format) or directory; default: ./<chat>-messages.<ext>
+  --format <f>       json (default) | jsonl | csv | all (json+jsonl+csv, --out must then be a directory or a base name)
+  --limit N          stop after the newest N messages
+  --since DATE       only messages on/after this date (YYYY-MM-DD, UTC) — or a unix timestamp
+  --min-id N         only messages with id > N (incremental exports)
+  --batch N          getHistory calls per page evaluation (default 8, i.e. 800 messages per round trip)
+  --json             machine-readable summary on stdout (progress goes to stderr)
+
+Record fields: id, date (ISO), from, from_id, text, media, file, reply_to, fwd, views, service, edit_date, grouped_id
+
+Exit codes: 0 ok · 1 usage · 2 agent-electron / page error · 3 chat not found or not readable
+`;
+
+function parseArgs(argv) {
+  const o = { cmd: argv[0] || '', chat: '', target: '', client: '', out: '', format: 'json', limit: 0, since: 0, minId: 0, batch: 8, json: false };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--target') o.target = argv[++i] || '';
+    else if (a === '--client') o.client = argv[++i] || '';
+    else if (a === '--out') o.out = argv[++i] || '';
+    else if (a === '--format') o.format = String(argv[++i] || 'json').toLowerCase();
+    else if (a === '--limit') o.limit = Math.max(0, Number(argv[++i] || 0) || 0);
+    else if (a === '--since') o.since = parseSince(argv[++i] || '');
+    else if (a === '--min-id') o.minId = Math.max(0, Number(argv[++i] || 0) || 0);
+    else if (a === '--batch') o.batch = Math.min(20, Math.max(1, Number(argv[++i] || 8) || 8));
+    else if (a === '--json') o.json = true;
+    else if (a === '--help' || a === '-h') o.cmd = 'help';
+    else if (a.startsWith('--')) { process.stderr.write(`${NAME}: unknown option ${a}\n`); process.exit(1); }
+    else if (!o.chat) o.chat = a;
+    else { process.stderr.write(`${NAME}: unexpected argument ${a}\n`); process.exit(1); }
+  }
+  if (o.target && /^\d+$/.test(o.target)) o.target = 'wc:' + o.target;
+  if (!['json', 'jsonl', 'csv', 'all'].includes(o.format)) { process.stderr.write(`${NAME}: --format must be json, jsonl, csv or all\n`); process.exit(1); }
+  return o;
+}
+function parseSince(s) {
+  if (!s) return 0;
+  if (/^\d{9,11}$/.test(s)) return Number(s);
+  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(s) ? s + 'T00:00:00Z' : s);
+  if (Number.isNaN(t)) { process.stderr.write(`${NAME}: cannot parse --since "${s}" (use YYYY-MM-DD)\n`); process.exit(1); }
+  return Math.floor(t / 1000);
+}
+
+// What the user typed → {kind:'username'|'invite'|'peer', value}
+function parseChatRef(s) {
+  s = String(s || '').trim();
+  if (!s) return null;
+  let m;
+  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/\+([A-Za-z0-9_-]+)/i.exec(s))) return { kind: 'invite', value: m[1] };
+  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/joinchat\/([A-Za-z0-9_-]+)/i.exec(s))) return { kind: 'invite', value: m[1] };
+  if ((m = /^(?:https?:\/\/)?(?:t\.me|telegram\.me|telegram\.dog)\/([A-Za-z][A-Za-z0-9_]{3,31})(?:\/\d+)?\/?(?:\?.*)?$/i.exec(s))) return { kind: 'username', value: m[1] };
+  if ((m = /^@?([A-Za-z][A-Za-z0-9_]{3,31})$/.exec(s))) return { kind: 'username', value: m[1] };
+  if (/^-?\d+$/.test(s)) return { kind: 'peer', value: s };
+  return null;
+}
+
+// ── agent-electron transport ─────────────────────────────────────────────
+function runAgent(o, args) {
+  const bin = process.env.AGENT_ELECTRON_BIN || 'agent-electron';
+  const full = o.client ? ['--client', o.client, ...args] : args;
+  let out;
+  try { out = execFileSync(bin, full, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+  catch (e) { throw new Error('agent-electron failed: ' + (e.stderr ? String(e.stderr).trim() : e.message)); }
+  try { return JSON.parse(out); } catch { throw new Error('agent-electron returned invalid JSON: ' + out.slice(0, 200)); }
+}
+function listTargets(o) {
+  const r = runAgent(o, ['webcontents', '--json']);
+  if (!r.ok || !Array.isArray(r.data)) throw new Error('could not list Electron webContents');
+  return r.data.filter((w) => /^https:\/\/web\.telegram\.org\/k\//.test(w.url || ''))
+    .map((w) => ({ target: 'wc:' + w.webContentsId, webContentsId: w.webContentsId, url: w.url, title: w.title || '', profile: w.profileId ?? w.accountIdx ?? null }));
+}
+function pickTarget(o) {
+  if (o.target) return o.target;
+  const t = listTargets(o);
+  if (!t.length) throw new Error('no Telegram Web K target found (open web.telegram.org/k in a cicy-desktop window first)');
+  if (t.length > 1) throw new Error(`multiple Telegram Web targets (${t.map((x) => x.target).join(', ')}); pass --target wc:<id>`);
+  return t[0].target;
+}
+function evaluate(o, target, expression) {
+  const r = runAgent(o, ['cdp', target, 'Runtime.evaluate', JSON.stringify({ expression, awaitPromise: true, returnByValue: true })]);
+  const res = r && r.result && r.result.result;
+  if (!r.success || !res) throw new Error('CDP Runtime.evaluate returned no result');
+  if (r.result.exceptionDetails) throw new Error(res.description || r.result.exceptionDetails.text || 'page evaluation failed');
+  return res.value;
+}
+
+// ── page-side scripts (run inside Telegram Web K) ────────────────────────
+// Resolve the chat reference to an InputPeer (kept on window.__tgExportPeer for the paging calls) + describe it.
+const resolveJs = (ref) => `(async () => {
+  const R = window.rootScope, M = R && R.managers;
+  if (!M) return JSON.stringify({ ok: false, err: 'rootScope.managers not available (page not logged in / not Telegram Web K?)' });
+  if (!R.myId) return JSON.stringify({ ok: false, err: 'page is still starting or not logged in (rootScope.myId is empty)' });
+  const ref = ${JSON.stringify(ref)};
+  const describe = (c, u) => c ? { id: String(c.id), title: c.title || '', username: c.username || '',
+      type: c._ === 'chat' ? 'group' : c.broadcast ? 'channel' : c.megagroup ? 'supergroup' : c._, members: c.participants_count || null, member: !c.left && !c.kicked }
+    : u ? { id: String(u.id), title: [u.first_name, u.last_name].filter(Boolean).join(' '), username: u.username || '', type: u.bot ? 'bot' : 'user', members: null, member: true } : null;
+  const peerOfChat = (c) => c._ === 'chat' ? { _: 'inputPeerChat', chat_id: c.id } : { _: 'inputPeerChannel', channel_id: c.id, access_hash: c.access_hash };
+  try {
+    let peer = null, info = null;
+    if (ref.kind === 'username') {
+      const r = await M.apiManager.invokeApi('contacts.resolveUsername', { username: ref.value });
+      const c = (r.chats || [])[0], u = (r.users || [])[0];
+      if (c) { peer = peerOfChat(c); info = describe(c, null); }
+      else if (u) { peer = { _: 'inputPeerUser', user_id: u.id, access_hash: u.access_hash }; info = describe(null, u); }
+    } else if (ref.kind === 'invite') {
+      const r = await M.apiManager.invokeApi('messages.checkChatInvite', { hash: ref.value });
+      if (r._ === 'chatInviteAlready' && r.chat) { peer = peerOfChat(r.chat); info = describe(r.chat, null); }
+      else return JSON.stringify({ ok: false, err: 'invite link: this account is not a member (' + r._ + '), join first' });
+    } else {
+      // Bot-API style -100<channel_id> → tweb peer id (-<channel_id>); basic groups are -<chat_id>, users positive
+      let pid = Number(ref.value); if (pid < 0 && -pid > 1e12) pid = -(-pid - 1e12);
+      // build the InputPeer from the page's own cache (getInputPeerById falls back to inputPeerChat for unknown ids)
+      if (pid > 0) { const u = await M.appUsersManager.getUser(pid); if (u && u._ === 'user') { peer = { _: 'inputPeerUser', user_id: u.id, access_hash: u.access_hash }; info = describe(null, u); } }
+      else { const c = await M.appChatsManager.getChat(-pid); if (c && (c._ === 'channel' || c._ === 'chat')) { peer = peerOfChat(c); info = describe(c, null); } }
+      if (!peer) return JSON.stringify({ ok: false, err: 'peer ' + pid + ' is unknown to this account (open the chat once in this page, or use its @username / link)' });
+    }
+    if (!peer) return JSON.stringify({ ok: false, err: 'could not resolve ' + JSON.stringify(ref) });
+    window.__tgExportPeer = peer;
+    const h = await M.apiManager.invokeApi('messages.getHistory', { peer, offset_id: 0, offset_date: 0, add_offset: 0, limit: 1, max_id: 0, min_id: 0, hash: 0 });
+    const top = (h.messages || [])[0] || null;
+    return JSON.stringify({ ok: true, info, count: h.count != null ? h.count : (h.messages || []).length,
+      latest: top ? { id: top.id, date: new Date(top.date * 1000).toISOString() } : null });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
+})()`;
+// One round trip = up to <batch> getHistory calls of 100, walking backwards from offset_id.
+// Names for senders come from the users/chats arrays that ride along with every page.
+const chunkJs = (offsetId, batch, minId, since) => `(async () => {
+  const M = window.rootScope.managers, peer = window.__tgExportPeer;
+  if (!peer) return JSON.stringify({ ok: false, err: 'no resolved peer on the page, run info first' });
+  const names = {}, out = []; let off = ${Number(offsetId) || 0}, stop = false;
+  const nm = (x) => x ? (([x.first_name, x.last_name].filter(Boolean).join(' ') || x.title || '') + (x.username ? ' @' + x.username : '')) : '';
+  const key = (p) => p ? (p.user_id != null ? 'u' + p.user_id : p.channel_id != null ? 'c' + p.channel_id : p.chat_id != null ? 'c' + p.chat_id : '') : '';
+  try {
+    for (let k = 0; k < ${Number(batch) || 8} && !stop; k++) {
+      const h = await M.apiManager.invokeApi('messages.getHistory', { peer, offset_id: off, offset_date: 0, add_offset: 0, limit: 100, max_id: 0, min_id: ${Number(minId) || 0}, hash: 0 });
+      const ms = h.messages || []; if (!ms.length) break;
+      for (const u of (h.users || [])) names['u' + u.id] = nm(u);
+      for (const c of (h.chats || [])) names['c' + c.id] = nm(c);
+      for (const m of ms) {
+        if (${Number(since) || 0} && m.date < ${Number(since) || 0}) { stop = true; break; }
+        const fk = key(m.from_id) || key(m.peer_id);
+        const media = m.media ? String(m.media._).replace(/^messageMedia/, '').toLowerCase() : '';
+        const doc = m.media && m.media.document;
+        const file = doc ? ((doc.attributes || []).map((a) => a.file_name).filter(Boolean)[0] || '') : '';
+        const fwd = m.fwd_from ? (m.fwd_from.from_name || names[key(m.fwd_from.from_id)] || 'forwarded') : '';
+        out.push({ id: m.id, date: new Date(m.date * 1000).toISOString(), from: names[fk] || fk, from_id: fk, text: m.message || '',
+          media, file, reply_to: m.reply_to && m.reply_to.reply_to_msg_id || '', fwd, views: m.views != null ? m.views : '',
+          service: m._ === 'messageService' ? String(m.action && m.action._ || 'service').replace(/^messageAction/, '') : '',
+          edit_date: m.edit_date ? new Date(m.edit_date * 1000).toISOString() : '', grouped_id: m.grouped_id ? String(m.grouped_id) : '' });
+        off = m.id;
+      }
+      if (ms.length < 100) break;
+    }
+    return JSON.stringify({ ok: true, rows: out, next: out.length ? off : 0, stop });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200), rows: out, next: off }); }
+})()`;
+
+const FIELDS = ['id', 'date', 'from', 'from_id', 'text', 'media', 'file', 'reply_to', 'fwd', 'views', 'service', 'edit_date', 'grouped_id'];
+const csvEsc = (v) => { v = String(v ?? ''); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+const describeLine = (t, r) => `${t} ${r.info.title || '?'}${r.info.username ? ' @' + r.info.username : ''} (${r.info.type}, id ${r.info.id}${r.info.members ? ', ' + r.info.members + ' members' : ''}${r.info.member ? '' : ', not a member'}) — ${r.count} messages${r.latest ? ', latest #' + r.latest.id + ' ' + r.latest.date.slice(0, 10) : ''}`;
+
+function outputPaths(o, info) {
+  const base = (info.username || info.id || 'chat').replace(/[^A-Za-z0-9_-]/g, '_') + '-messages';
+  const formats = o.format === 'all' ? ['json', 'jsonl', 'csv'] : [o.format];
+  let dir = process.cwd(), stem = base;
+  if (o.out) {
+    const isDir = /[\\/]$/.test(o.out) || (fs.existsSync(o.out) && fs.statSync(o.out).isDirectory());
+    if (isDir) dir = o.out;
+    else {
+      const ext = path.extname(o.out).toLowerCase().replace('.', '');
+      dir = path.dirname(o.out); stem = path.basename(o.out, path.extname(o.out));
+      if (o.format !== 'all' && ['json', 'jsonl', 'csv'].includes(ext)) formats[0] = ext;   // extension wins over --format default
+    }
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  return Object.fromEntries(formats.map((f) => [f, path.join(dir, stem + '.' + f)]));
+}
+
+async function main() {
+  const o = parseArgs(process.argv.slice(2));
+  if (!o.cmd || o.cmd === 'help' || o.cmd === '--help' || o.cmd === '-h') { process.stdout.write(HELP); return 0; }
+  if (o.cmd === 'targets') {
+    const t = listTargets(o);
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, targets: t }) + '\n');
+    else if (!t.length) process.stdout.write('no Telegram Web K webContents found\n');
+    else for (const x of t) process.stdout.write(`${x.target.padEnd(8)} ${x.title}\n`);
+    return 0;
+  }
+  if (o.cmd !== 'info' && o.cmd !== 'export') { process.stderr.write(`${NAME}: unknown command "${o.cmd}"\n\n` + HELP); return 1; }
+  const ref = parseChatRef(o.chat);
+  if (!ref) { process.stderr.write(`${NAME}: ${o.cmd} needs a <chat> (@username, t.me link or peer id)\n`); return 1; }
+
+  const target = pickTarget(o);
+  const r = JSON.parse(evaluate(o, target, resolveJs(ref)));
+  if (!r.ok) {
+    if (/not available|still starting|not logged in/.test(r.err)) throw new Error(r.err);
+    if (o.json) process.stdout.write(JSON.stringify({ ok: false, target, chat: o.chat, err: r.err }) + '\n');
+    else process.stderr.write(`${NAME}: ${r.err}\n`);
+    return 3;
+  }
+  if (o.cmd === 'info') {
+    if (o.json) process.stdout.write(JSON.stringify({ ok: true, target, chat: o.chat, ...r }) + '\n');
+    else process.stdout.write(describeLine(target, r) + '\n');
+    return 0;
+  }
+
+  // export
+  const paths = outputPaths(o, r.info);
+  const jsonl = paths.jsonl || path.join(path.dirname(Object.values(paths)[0]), '.' + path.basename(Object.values(paths)[0]) + '.partial.jsonl');
+  fs.writeFileSync(jsonl, '');
+  const t0 = Date.now(); let total = 0, off = 0, err = '';
+  if (!o.json) process.stderr.write(describeLine(target, r) + '\n');
+  while (true) {
+    const c = JSON.parse(evaluate(o, target, chunkJs(off, o.batch, o.minId, o.since)));
+    let rows = c.rows || [];
+    if (o.limit && total + rows.length > o.limit) rows = rows.slice(0, o.limit - total);
+    if (rows.length) fs.appendFileSync(jsonl, rows.map((x) => JSON.stringify(x)).join('\n') + '\n');
+    total += rows.length;
+    if (!o.json) process.stderr.write(`  ${total}${r.count ? '/' + r.count : ''} messages, oldest id ${rows.length ? rows[rows.length - 1].id : off}\n`);
+    if (!c.ok) { err = c.err; break; }
+    if (!rows.length || c.stop || (o.limit && total >= o.limit) || !c.next || c.next === off) break;
+    off = c.next;
+  }
+  // finalize: oldest first, then the requested formats
+  const all = fs.readFileSync(jsonl, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).sort((a, b) => a.id - b.id);
+  const meta = { chat: r.info, source: o.chat, exported_at: new Date().toISOString(), count: all.length, total_in_chat: r.count, fields: FIELDS, tool: `${NAME} ${VERSION}` };
+  if (paths.jsonl) fs.writeFileSync(paths.jsonl, all.map((x) => JSON.stringify(x)).join('\n') + (all.length ? '\n' : ''));
+  else fs.unlinkSync(jsonl);
+  if (paths.json) fs.writeFileSync(paths.json, JSON.stringify({ meta, messages: all }, null, 1));
+  if (paths.csv) fs.writeFileSync(paths.csv, '﻿' + FIELDS.join(',') + '\n' + all.map((m) => FIELDS.map((f) => csvEsc(m[f])).join(',')).join('\n') + (all.length ? '\n' : ''));
+  const secs = Math.round((Date.now() - t0) / 1000);
+  if (o.json) process.stdout.write(JSON.stringify({ ok: !err, target, chat: r.info, count: all.length, total_in_chat: r.count, files: paths, seconds: secs, err: err || undefined }) + '\n');
+  else process.stdout.write(`${err ? 'STOPPED (' + err + '): ' : ''}${all.length} messages in ${secs}s → ${Object.values(paths).join(', ')}\n`);
+  return err ? 2 : 0;
+}
+
+main().then((code) => process.exit(code)).catch((e) => { process.stderr.write(`${NAME}: ${e.message}\n`); process.exit(2); });
