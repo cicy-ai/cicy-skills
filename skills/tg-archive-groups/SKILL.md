@@ -1,6 +1,6 @@
 ---
 name: tg-archive-groups
-description: Use when a Telegram Web K account should have all its groups and channels moved into the Archive folder or brought back, in bulk, through agent-electron.
+description: Use when a Telegram Web K account should have its groups, channels, bots — or with --all every chat — moved into the Archive folder or brought back, in bulk, via agent-electron.
 ---
 
 # TG Archive Groups
@@ -8,9 +8,11 @@ description: Use when a Telegram Web K account should have all its groups and ch
 Moves every **group** (basic groups + supergroups) **and every broadcast
 channel** of a Telegram Web K session into the **Archive** folder in one go — or
 brings them back. `--groups-only` leaves channels alone; `--bots` also moves
-chats with bots. Chats with people are never touched. The official "Telegram"
-service-notification chat (id 777000) is skipped: Telegram refuses to archive it
-(`folders.editPeerFolders` is accepted but returns no update).
+chats with bots; **`--all` archives the entire main list** — groups, channels,
+bots and private chats with people. Without `--all`, chats with people are
+never touched. The official "Telegram" service-notification chat (id 777000)
+is always skipped: Telegram refuses to archive it (`folders.editPeerFolders`
+is accepted but returns no update).
 
 It drives the page through `agent-electron` (CDP `Runtime.evaluate`) and calls
 Telegram Web K's own `window.rootScope.managers` API
@@ -35,7 +37,8 @@ Archive folder; membership, history and notifications are unchanged.
    works when exactly one Telegram Web K webContents exists.
 3. **Groups and channels both move by default** (that is what "archive all my
    groups" means to users); `--groups-only` restricts it to groups; `--bots`
-   adds bot chats. Chats with people are never included.
+   adds bot chats; `--all` adds people too (everything). Without `--all`, chats
+   with people are never included.
 4. **Go through `agent-electron`**, never open your own RPC/CDP socket
    (cicy-skill-spec §4). `--client <id>` targets a specific cicy-desktop host.
 5. **`archive` also switches on the account's "keep archived" settings**
@@ -55,6 +58,8 @@ tg-archive-groups archive --target wc:113            # dry run
 tg-archive-groups archive --target wc:113 --yes      # archive all groups + channels
 tg-archive-groups archive --target wc:113 --yes --groups-only
 tg-archive-groups archive --target wc:113 --yes --bots        # bots too
+tg-archive-groups archive --target wc:113 --yes --all         # everything, people included
+tg-archive-groups unarchive --target wc:113 --yes --all       # bring everything back
 tg-archive-groups unarchive --target wc:113 --yes    # bring them back
 ```
 
