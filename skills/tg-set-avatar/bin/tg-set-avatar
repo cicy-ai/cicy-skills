@@ -1,0 +1,338 @@
+#!/usr/bin/env node
+// tg-set-avatar — show / preview / set the profile photo (avatar) of the account logged in to a
+// Telegram Web K page, defaulting to a cute cartoon girl avatar. Talks to the page through
+// agent-electron (CDP Runtime.evaluate) and Telegram Web K's own window.rootScope.managers API, so no
+// patch is needed. The image is rendered to a 640×640 JPEG inside the page (canvas), uploaded with
+// apiFileManager.upload and applied with appProfileManager.uploadProfilePhoto (photos.uploadProfilePhoto).
+// Zero deps, pure ESM, Node 18+. Runs on Linux cicy-code and inside dsh on Windows (cicy-skill-spec §4).
+import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { extname } from 'node:path';
+
+const NAME = 'tg-set-avatar';
+const VERSION = '0.1.0';
+
+const HELP = `${NAME} ${VERSION} — show / preview / set the profile photo of a Telegram Web K account (cute girl avatars by default)
+
+Usage:
+  ${NAME} targets [--client <id>] [--json]                 list Telegram Web K webContents to operate on
+  ${NAME} show    [--target wc:<id>] [--client <id>] [--json]
+                                                           which account is logged in + whether it has a photo
+  ${NAME} styles  [--json]                                 list the built-in avatar styles
+  ${NAME} preview [--style <s> | --image <path|url>] [--seed <s>] --out <file.jpg> [--target wc:<id>] [--client <id>] [--json]
+                                                           render the avatar that "set" would upload, save it locally
+  ${NAME} set     [--style <s> | --image <path|url>] [--seed <s>] [--if-none] [--target wc:<id>] [--client <id>] [--yes] [--json]
+                                                           upload it as the new profile photo (dry run without --yes)
+
+Options:
+  --target wc:<id>   Telegram Web K webContents id (from "targets"); auto-picked when exactly one exists
+  --client <id>      cicy-desktop client id (agent-electron --client)
+  --style <s>        girl (default) · girl-cartoon · emoji — see "styles"
+  --image <p|url>    use your own image (png/jpg/webp/gif/svg file or http(s) URL) instead of a style;
+                     it is center-cropped to a square and scaled to 640×640
+  --seed <s>         seed for the avatar (default: the account id, so every account gets its own stable avatar)
+  --if-none          skip accounts that already have a profile photo
+  --out <file>       where "preview" writes the JPEG
+  --yes              actually change the photo (set is a dry run without it)
+  --json             machine-readable output
+
+The previous photo is kept in the account's photo list (Telegram's normal behaviour); nothing is deleted.
+
+Exit codes: 0 ok · 1 usage / bad image · 2 agent-electron / page / network error · 3 refused by Telegram
+`;
+
+// ── avatar styles ────────────────────────────────────────────────────────
+// girl / girl-cartoon: DiceBear avatars (https://www.dicebear.com; "avataaars" by Pablo Stanley and
+// "adventurer" by Lisa Wischofsky, both free for personal and commercial use), constrained to long
+// hair, smiles and no beards so they read as cute girls. Fetched as SVG so the page renders them at full
+// resolution. emoji: drawn offline in the page (pastel gradient + emoji).
+const BG = 'ffd5dc,ffdfbf,fde2f3,e7d9ff,d1f4ff,fff1c1,dff7e3';
+const range = (p, a, b) => Array.from({ length: b - a + 1 }, (_, i) => p + String(a + i).padStart(2, '0')).join(',');
+const STYLES = {
+  girl: {
+    about: 'smiling cartoon girl, long hair (DiceBear "avataaars", needs internet)',
+    url: (seed) => `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(seed)}`
+      + '&top=bigHair,bob,curly,curvy,frida,longButNotTooLong,miaWallace,straight01,straight02,straightAndStrand'
+      + '&hairColor=a55728,2c1b18,b58143,d6b370,724133,4a312c,f59797,c93305'
+      + '&facialHairProbability=0&accessoriesProbability=0&mouth=smile,twinkle&eyes=happy,default,wink,hearts'
+      + '&eyebrows=default,defaultNatural,raisedExcited,raisedExcitedNatural'
+      + '&clothing=blazerAndSweater,collarAndSweater,graphicShirt,hoodie,overall,shirtCrewNeck,shirtScoopNeck,shirtVNeck'
+      + `&backgroundColor=${BG}`,
+  },
+  'girl-cartoon': {
+    about: 'doodle-style girl head, long hair + blush (DiceBear "adventurer", needs internet)',
+    url: (seed) => `https://api.dicebear.com/9.x/adventurer/svg?seed=${encodeURIComponent(seed)}&hair=${range('long', 1, 26)}`
+      + `&features=blush&featuresProbability=70&glassesProbability=0&mouth=${range('variant', 1, 13)}&backgroundColor=${BG}`,
+  },
+  emoji: { about: 'pastel gradient + cute emoji, drawn in the page (offline)' },
+};
+const EMOJI = ['🐰', '🌸', '🎀', '🍓', '🍑', '🧸', '🦋', '🌷', '🐱', '🍒', '🌼', '💖', '🐥', '🦄', '🍭', '🐼'];
+const PASTEL = [['#ffd6e7', '#ffb3d1'], ['#e7d9ff', '#c8b6ff'], ['#d1f4ff', '#a0e7ff'], ['#fff1c1', '#ffd98e'],
+  ['#dff7e3', '#b5ecc0'], ['#ffe0cc', '#ffc2a3'], ['#fde2f3', '#f7c4e8'], ['#e0f0ff', '#bcdcff']];
+
+// Deterministic 32-bit FNV-1a so the same seed (account id) always yields the same avatar.
+function hash(s) { let h = 0x811c9dc5; for (const ch of String(s)) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+
+function parseArgs(argv) {
+  const o = { cmd: argv[0] || '', target: '', client: '', style: '', image: '', seed: '', out: '', ifNone: false, json: false, yes: false };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--target') o.target = argv[++i] || '';
+    else if (a === '--client') o.client = argv[++i] || '';
+    else if (a === '--style') o.style = argv[++i] || '';
+    else if (a === '--image') o.image = argv[++i] || '';
+    else if (a === '--seed') o.seed = argv[++i] || '';
+    else if (a === '--out') o.out = argv[++i] || '';
+    else if (a === '--if-none') o.ifNone = true;
+    else if (a === '--json') o.json = true;
+    else if (a === '--yes') o.yes = true;
+    else if (a === '--dry-run') o.yes = false;
+    else if (a === '--help' || a === '-h') o.cmd = 'help';
+    else { process.stderr.write(`${NAME}: unexpected argument ${a}\n`); process.exit(1); }
+  }
+  if (o.cmd === '--help' || o.cmd === '-h') o.cmd = 'help';
+  if (o.target && /^\d+$/.test(o.target)) o.target = 'wc:' + o.target;
+  if (o.style && o.image) usage('pass either --style or --image, not both');
+  if (o.style && !STYLES[o.style]) usage(`unknown style "${o.style}" (${Object.keys(STYLES).join(', ')})`);
+  if (!o.style && !o.image) o.style = 'girl';
+  return o;
+}
+function usage(msg) { process.stderr.write(`${NAME}: ${msg}\n`); process.exit(1); }
+
+// ── image source → { mime, b64 } (or the offline emoji recipe) ───────────
+const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml' };
+const MAX_IMAGE = 10 * 1024 * 1024;
+async function fetchImage(url) {
+  let r;
+  try { r = await fetch(url, { signal: AbortSignal.timeout(30000) }); } catch (e) { throw new Error(`could not download ${url}: ${e.cause?.code || e.message}`); }
+  if (!r.ok) throw new Error(`could not download ${url}: HTTP ${r.status}`);
+  const mime = (r.headers.get('content-type') || '').split(';')[0].trim();
+  const buf = Buffer.from(await r.arrayBuffer());
+  return { mime, buf };
+}
+async function loadSource(o, seed) {
+  if (o.style === 'emoji') {
+    const h = hash(seed);
+    return { kind: 'emoji', label: 'emoji', emoji: EMOJI[h % EMOJI.length], colors: PASTEL[hash(seed + '#bg') % PASTEL.length] };
+  }
+  let mime, buf, label;
+  if (o.style) {
+    const url = STYLES[o.style].url(seed); label = `${o.style} (seed ${seed})`;
+    ({ mime, buf } = await fetchImage(url));
+  } else if (/^https?:\/\//i.test(o.image)) {
+    label = o.image; ({ mime, buf } = await fetchImage(o.image));
+  } else {
+    label = o.image;
+    try { buf = readFileSync(o.image); } catch (e) { const err = new Error(`cannot read ${o.image}: ${e.code || e.message}`); err.exit = 1; throw err; }
+    mime = MIME[extname(o.image).toLowerCase()] || '';
+  }
+  if (!mime.startsWith('image/')) mime = sniff(buf) || mime;
+  if (!mime.startsWith('image/')) { const e = new Error(`${label} is not an image (${mime || 'unknown type'})`); e.exit = 1; throw e; }
+  if (buf.length > MAX_IMAGE) { const e = new Error(`${label} is too large (${buf.length} bytes, max ${MAX_IMAGE})`); e.exit = 1; throw e; }
+  return { kind: 'data', label, mime, b64: buf.toString('base64') };
+}
+function sniff(b) {
+  if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
+  if (b.slice(0, 4).toString() === 'RIFF' && b.slice(8, 12).toString() === 'WEBP') return 'image/webp';
+  if (b.slice(0, 3).toString() === 'GIF') return 'image/gif';
+  if (/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(b.slice(0, 512).toString())) return 'image/svg+xml';
+  return '';
+}
+
+// ── agent-electron transport ─────────────────────────────────────────────
+function runAgent(o, args) {
+  const bin = process.env.AGENT_ELECTRON_BIN || 'agent-electron';
+  const full = o.client ? ['--client', o.client, ...args] : args;
+  let out;
+  try { out = execFileSync(bin, full, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+  catch (e) { throw new Error('agent-electron failed: ' + (e.stderr ? String(e.stderr).trim() : e.message)); }
+  try { return JSON.parse(out); } catch { throw new Error('agent-electron returned invalid JSON: ' + out.slice(0, 200)); }
+}
+function listTargets(o) {
+  const r = runAgent(o, ['webcontents', '--json']);
+  if (!r.ok || !Array.isArray(r.data)) throw new Error('could not list Electron webContents');
+  return r.data.filter((w) => /^https:\/\/web\.telegram\.org\/k\//.test(w.url || ''))
+    .map((w) => ({ target: 'wc:' + w.webContentsId, webContentsId: w.webContentsId, url: w.url, title: w.title || '', profile: w.profileId ?? w.accountIdx ?? null }));
+}
+function pickTarget(o) {
+  if (o.target) return o.target;
+  const t = listTargets(o);
+  if (!t.length) throw new Error('no Telegram Web K target found (open web.telegram.org/k in a cicy-desktop window first)');
+  if (t.length > 1) throw new Error(`multiple Telegram Web targets (${t.map((x) => x.target).join(', ')}); pass --target wc:<id>`);
+  return t[0].target;
+}
+function evaluate(o, target, expression) {
+  const r = runAgent(o, ['cdp', target, 'Runtime.evaluate', JSON.stringify({ expression, awaitPromise: true, returnByValue: true })]);
+  const res = r && r.result && r.result.result;
+  if (!r.success || !res) throw new Error('CDP Runtime.evaluate returned no result');
+  if (r.result.exceptionDetails) throw new Error(res.description || r.result.exceptionDetails.text || 'page evaluation failed');
+  return res.value;
+}
+const evalJson = (o, target, js) => JSON.parse(evaluate(o, target, js));
+
+// The image travels to the page as base64 in chunks: agent-electron takes the CDP params as one
+// command-line argument, and a single argument is capped (128 KiB on Linux, ~32 KiB on Windows).
+const CHUNK = 24 * 1024;
+function pushSource(o, target, src) {
+  const key = 'k' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  evalJson(o, target, `(() => { window.__tgSetAvatar = { key: ${JSON.stringify(key)}, parts: [] }; return '{"ok":true}'; })()`);
+  if (src.kind !== 'data') return key;
+  for (let i = 0; i < src.b64.length; i += CHUNK) {
+    const r = evalJson(o, target, `(() => { const s = window.__tgSetAvatar; if (!s || s.key !== ${JSON.stringify(key)}) return '{"ok":false}';
+      s.parts.push(${JSON.stringify(src.b64.slice(i, i + CHUNK))}); return '{"ok":true}'; })()`);
+    if (!r.ok) throw new Error('image transfer to the page was interrupted (another run on the same page?)');
+  }
+  return key;
+}
+
+// ── page-side scripts (run inside Telegram Web K) ────────────────────────
+const SELF_JS = `(async () => {
+  const R = window.rootScope, M = R && R.managers;
+  if (!M) return JSON.stringify({ ok: false, err: 'rootScope.managers not available (page not logged in / not Telegram Web K?)' });
+  if (!R.myId) return JSON.stringify({ ok: false, err: 'page is still starting or not logged in (rootScope.myId is empty)' });
+  let me = null;
+  try { const f = await M.apiManager.invokeApi('users.getFullUser', { id: { _: 'inputUserSelf' } }); me = (f.users || [])[0] || null; } catch (e) {}
+  if (!me) me = await M.appUsersManager.getSelf();
+  const p = me.photo && me.photo._ === 'userProfilePhoto' ? me.photo : null;
+  return JSON.stringify({ ok: true, self: { id: String(me.id), phone: me.phone || '', username: me.username || '',
+    first: me.first_name || '', last: me.last_name || '', photoId: p ? String(p.photo_id) : '' } });
+})()`;
+
+// Renders the pushed source (or the emoji recipe) to a 640×640 JPEG Blob: raster images are
+// center-cropped to a square, SVG is drawn at full size. Resolves to the Blob.
+const renderFn = (key, src) => `async function render() {
+  const S = 640, src = ${JSON.stringify(src.kind === 'data' ? { kind: 'data', mime: src.mime } : src)};
+  const st = window.__tgSetAvatar; if (!st || st.key !== ${JSON.stringify(key)}) throw new Error('image transfer lost (page reloaded or another run started)');
+  const c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
+  if (src.kind === 'emoji') {
+    const gr = g.createLinearGradient(0, 0, S, S); gr.addColorStop(0, src.colors[0]); gr.addColorStop(1, src.colors[1]);
+    g.fillStyle = gr; g.fillRect(0, 0, S, S);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '360px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; g.fillText(src.emoji, S / 2, S / 2 + 24);
+    g.globalAlpha = 0.85; g.font = '72px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+    g.fillText('✨', S * 0.18, S * 0.2); g.fillText('✨', S * 0.83, S * 0.8); g.globalAlpha = 1;
+  } else {
+    const bin = atob(st.parts.join('')); const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([u8], { type: src.mime }));
+    try {
+      const img = new Image(); img.decoding = 'async'; img.src = url;
+      await img.decode().catch(() => { throw new Error('the page could not decode the image (' + src.mime + ')'); });
+      const w = img.naturalWidth || S, h = img.naturalHeight || S, side = Math.min(w, h);
+      g.fillStyle = '#ffffff'; g.fillRect(0, 0, S, S);
+      if (src.mime === 'image/svg+xml') g.drawImage(img, 0, 0, S, S); // vector: draw at full size
+      else g.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, S, S);
+    } finally { URL.revokeObjectURL(url); }
+  }
+  delete window.__tgSetAvatar;
+  return await new Promise((res, rej) => c.toBlob((b) => b ? res(b) : rej(new Error('canvas export failed')), 'image/jpeg', 0.92));
+}`;
+
+const previewJs = (key, src) => `(async () => {
+  ${renderFn(key, src)}
+  try {
+    const b = await render(); const u8 = new Uint8Array(await b.arrayBuffer()); let s = '';
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return JSON.stringify({ ok: true, bytes: u8.length, b64: btoa(s) });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && e.message || e).slice(0, 200) }); }
+})()`;
+
+// apiFileManager.upload sends the file to Telegram (upload.saveFilePart) and resolves to an InputFile;
+// appProfileManager.uploadProfilePhoto calls photos.uploadProfilePhoto and updates the page's own
+// caches + avatar_update event, so the new photo shows without a reload. Then the server is re-read.
+const setJs = (key, src, before) => `(async () => {
+  ${renderFn(key, src)}
+  const M = window.rootScope.managers;
+  try {
+    const blob = await render();
+    const inputFile = await M.apiFileManager.upload({ file: blob, fileName: 'avatar.jpg' });
+    const serverPhotoId = async () => { try { const f = await M.apiManager.invokeApi('users.getFullUser', { id: { _: 'inputUserSelf' } });
+      const u = (f.users || [])[0]; return u && u.photo && u.photo.photo_id ? String(u.photo.photo_id) : ''; } catch (e) { return ''; } };
+    try { await M.appProfileManager.uploadProfilePhoto(inputFile); }
+    catch (e) {
+      // An RPC error (e.type) is Telegram refusing the photo. Anything else is the page helper failing
+      // locally; call the method directly unless the photo already changed (never upload it twice).
+      if (e && e.type) throw e;
+      const now = await serverPhotoId();
+      if (!now || now === ${JSON.stringify(before)}) await M.apiManager.invokeApi('photos.uploadProfilePhoto', { file: inputFile });
+    }
+    const photoId = await serverPhotoId();
+    const changed = !!photoId && photoId !== ${JSON.stringify(before)};
+    return JSON.stringify({ ok: changed, photoId, bytes: blob.size, err: changed ? '' : 'the profile photo did not change on the server' });
+  } catch (e) { return JSON.stringify({ ok: false, err: String(e && (e.type || e.message) || e).slice(0, 200) }); }
+})()`;
+
+const ERR_HINT = {
+  PHOTO_CROP_SIZE_SMALL: 'the image is too small',
+  PHOTO_EXT_INVALID: 'Telegram rejected the image format',
+  PHOTO_FILE_MISSING: 'the upload did not reach Telegram, try again',
+  IMAGE_PROCESS_FAILED: 'Telegram could not process the image',
+  FILE_PARTS_INVALID: 'the upload was incomplete, try again',
+};
+const explain = (err) => { const k = String(err || '').split(/[^A-Z_]/)[0]; const fw = /FLOOD_WAIT_(\d+)/.exec(err || ''); return fw ? `rate-limited by Telegram, wait ${fw[1]}s` : (ERR_HINT[k] || err); };
+const full = (f, l) => [f, l].filter(Boolean).join(' ');
+const who = (s) => s ? `"${full(s.first, s.last) || '?'}" +${s.phone || '?'} (id ${s.id})${s.username ? ' @' + s.username : ''}` : 'unknown account';
+const photoStr = (s) => s.photoId ? `has a photo (id ${s.photoId})` : 'no photo';
+const emit = (o, obj, text) => process.stdout.write(o.json ? JSON.stringify(obj) + '\n' : text + '\n');
+
+async function main() {
+  const o = parseArgs(process.argv.slice(2));
+  if (!o.cmd || o.cmd === 'help') { process.stdout.write(HELP); return 0; }
+
+  if (o.cmd === 'styles') {
+    const list = Object.entries(STYLES).map(([name, s]) => ({ name, about: s.about, default: name === 'girl' }));
+    emit(o, { ok: true, styles: list }, list.map((s) => `${s.name.padEnd(13)} ${s.about}${s.default ? '  [default]' : ''}`).join('\n'));
+    return 0;
+  }
+  if (o.cmd === 'targets') {
+    const t = listTargets(o);
+    emit(o, { ok: true, targets: t }, t.length ? t.map((x) => `${x.target.padEnd(8)} ${x.title}`).join('\n') : 'no Telegram Web K webContents found');
+    return 0;
+  }
+  if (!['show', 'preview', 'set'].includes(o.cmd)) { process.stderr.write(`${NAME}: unknown command "${o.cmd}"\n\n` + HELP); return 1; }
+  if (o.cmd === 'preview' && !o.out) usage('preview needs --out <file.jpg>');
+
+  const target = pickTarget(o);
+  const me = evalJson(o, target, SELF_JS);
+  if (!me.ok) throw new Error(me.err);
+  const self = me.self;
+
+  if (o.cmd === 'show') { emit(o, { ok: true, target, self }, `${target} ${who(self)}\n  ${photoStr(self)}`); return 0; }
+
+  const seed = o.seed || self.id;
+  const source = o.image ? { image: o.image } : { style: o.style, seed };
+  if (o.cmd === 'set' && o.ifNone && self.photoId) {
+    emit(o, { ok: true, target, self, skipped: 'has-photo', ...source }, `${target} ${who(self)}\n  ${photoStr(self)}, skipped (--if-none)`);
+    return 0;
+  }
+  const src = await loadSource(o, seed);
+  const what = src.kind === 'emoji' ? `emoji avatar ${src.emoji} (seed ${seed})` : src.label;
+
+  if (o.cmd === 'preview') {
+    const key = pushSource(o, target, src);
+    const r = evalJson(o, target, previewJs(key, src));
+    if (!r.ok) { const e = new Error(r.err); e.exit = 1; throw e; }
+    writeFileSync(o.out, Buffer.from(r.b64, 'base64'));
+    emit(o, { ok: true, target, self, out: o.out, bytes: r.bytes, ...source }, `${target} ${who(self)}\n  preview of ${what} → ${o.out} (${r.bytes} bytes)`);
+    return 0;
+  }
+
+  // set
+  if (!o.yes) {
+    emit(o, { ok: true, dryRun: true, target, self, ...source },
+      `${target} ${who(self)}\n  ${photoStr(self)}; would upload ${what} (dry run; add --yes to apply, or "preview --out f.jpg" to look first)`);
+    return 0;
+  }
+  const key = pushSource(o, target, src);
+  const r = evalJson(o, target, setJs(key, src, self.photoId));
+  if (!r.ok) {
+    emit(o, { ok: false, target, self, err: r.err, hint: explain(r.err), ...source }, `${target} ${who(self)}\n  FAILED to set ${what}: ${explain(r.err)} (${r.err})`);
+    return /^the page could not decode/.test(r.err) ? 1 : /^image transfer/.test(r.err) ? 2 : 3;
+  }
+  emit(o, { ok: true, target, self: { ...self, photoId: r.photoId }, previousPhotoId: self.photoId, photoId: r.photoId, bytes: r.bytes, ...source },
+    `${target} ${who(self)}\n  avatar set: ${what} (photo id ${r.photoId}${self.photoId ? ', was ' + self.photoId : ', had none'})`);
+  return 0;
+}
+
+main().then((code) => process.exit(code)).catch((e) => { process.stderr.write(`${NAME}: ${e.message}\n`); process.exit(e.exit || 2); });
