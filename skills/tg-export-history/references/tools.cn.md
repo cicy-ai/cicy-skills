@@ -19,6 +19,8 @@
 | `apiManager.invokeApi('messages.checkChatInvite', {hash})` | 邀请链接 → 会话,仅当返回 `chatInviteAlready`(已是成员) |
 | `appChatsManager.getChat(id)` / `appUsersManager.getUser(id)` | 数字 peer id → 页面缓存里的会话 / 用户(页面必须已经认识它) |
 | `apiManager.invokeApi('messages.getHistory', {peer, offset_id, limit:100, min_id})` | 翻页本身,从新到旧;第一次返回的 `count` 是总数 |
+| `apiManager.invokeApi('messages.getReplies', {peer, msg_id:<话题根>, offset_id, limit:100})` | 同样的翻页,只限一个论坛话题(`--topic`) |
+| 对链接里那条消息调 `channels.getMessages` | 识别 `messageActionTopicCreate`,话题链接就按话题导 |
 | 每次 `messages.getHistory` 返回里的 `users` / `chats` | 发送者 / 转发来源的名字 |
 
 ## 注意

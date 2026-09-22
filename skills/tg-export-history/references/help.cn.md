@@ -18,6 +18,7 @@
 | `--client <id>` | cicy-desktop 客户端 id,透传给 `agent-electron --client`。 |
 | `--out <路径>` | 输出文件(扩展名决定格式)或目录(末尾带 `/` 或已存在的目录)。默认 `./<用户名或id>-messages.<ext>`。同名文件会被覆盖。 |
 | `--format` | `json`(默认,`{meta, messages[]}`)、`jsonl`(一行一条)、`csv`(UTF-8 带 BOM,Excel 直接打开)、`all`(三种都写)。 |
+| `--topic <消息id>` | 论坛型群/频道:只导根消息 id 为 `<消息id>` 的那个话题(`messages.getReplies`)。`t.me/<会话>/<id>` 链接指向话题根时会自动按话题导。输出文件名带 `-topic<id>`。 |
 | `--limit N` | 只要最新的 N 条。 |
 | `--since 日期` | 只要该日期(`YYYY-MM-DD`,UTC)或 unix 时间戳之后的消息,翻到更早的就停。 |
 | `--min-id N` | 只要 id > N 的消息(增量导出:传上次已有的最大 id)。 |
@@ -30,7 +31,7 @@
 
 ## 输出
 
-`info --json`:`{ ok, target, chat, info:{id,title,username,type,members,member}, count, latest:{id,date} }`
+`info --json`:`{ ok, target, chat, info:{id,title,username,type,members,member}, topic, topicInfo:{id,title}?, count, latest:{id,date} }`
 `export --json`:`{ ok, target, chat, count, total_in_chat, files:{json?,jsonl?,csv?}, seconds, err? }`
 
 ## 退出码

@@ -21,7 +21,12 @@ else if(a.includes('Runtime.evaluate')){
   if(ex.includes('contacts.resolveUsername')){
     const ref=JSON.parse(/const ref = (\\{[^;]*\\});/.exec(ex)[1]);
     if(ref.value==='nobody') out=val({ok:false,err:'USERNAME_NOT_OCCUPIED'});
-    else out=val({ok:true,info:{id:'2101513995',title:'Demo Channel',username:ref.value,type:'channel',members:100,member:true},count:TOTAL,latest:{id:TOTAL,date:'2026-09-18T07:23:59.000Z'}});
+    else if(ref.topic) out=val({ok:true,info:{id:'2101513995',title:'Demo Channel',username:ref.value,type:'channel',members:100,member:true},topic:ref.topic,topicInfo:{id:ref.topic,title:'T'},count:40,latest:{id:40,date:'2026-09-18T07:23:59.000Z'}});
+    else if(ref.msgId===4546) out=val({ok:true,info:{id:'2101513995',title:'Demo Channel',username:ref.value,type:'channel',members:100,member:true},topic:0,topicInfo:{id:4546,title:'T'},count:TOTAL,latest:{id:TOTAL,date:'2026-09-18T07:23:59.000Z'}});
+    else out=val({ok:true,info:{id:'2101513995',title:'Demo Channel',username:ref.value,type:'channel',members:100,member:true},topic:0,topicInfo:null,count:TOTAL,latest:{id:TOTAL,date:'2026-09-18T07:23:59.000Z'}});
+  } else if(ex.includes('messages.getReplies') && Number((/const h = (\\d+)/.exec(ex)||[])[1])){
+    const off=Number(/let off = (\\d+)/.exec(ex)[1]); let id=off?off-1:40; const rows=[]; for(;id>=1&&rows.length<100;id--) rows.push({id,date:new Date((1700000000+id*60)*1000).toISOString(),from:'Demo',from_id:'c1',text:'topic msg '+id,media:'',media_id:'',mime:'',size:'',file:'',reply_to:'',fwd:'',views:'',service:'',edit_date:'',grouped_id:''});
+    out=val({ok:true,rows,next:rows.length?rows[rows.length-1].id:0,stop:false});
   } else if(ex.includes('messages.getHistory')){
     const off=Number(/let off = (\\d+)/.exec(ex)[1]); const batch=Number(/k < (\\d+)/.exec(ex)[1]); const since=Number(/m\\.date < (\\d+)/.exec(ex)[1]);
     let id=off?off-1:TOTAL; const rows=[]; let stop=false;
@@ -80,4 +85,14 @@ test('--out file.csv picks the format from the extension; --since stops at older
   const f = path.join(dir, 'x.csv');
   const r = JSON.parse(run(['export', '@demo_chan', '--out', f, '--since', String(1700000000 + 201 * 60), '--json']).out);
   assert.equal(r.count, 100); assert.deepEqual(Object.keys(r.files), ['csv']); assert.ok(fs.existsSync(f));
+});
+
+test('--topic and a topic-root link export only that topic', () => {
+  const { run, dir } = fakeAgent(250);
+  const a = JSON.parse(run(['export', '@demo_chan', '--topic', '4546', '--json']).out);
+  assert.equal(a.count, 40); assert.ok(a.files.json.endsWith('demo_chan-topic4546-messages.json'));
+  const b = JSON.parse(run(['export', 'https://t.me/demo_chan/4546', '--json']).out);
+  assert.equal(b.count, 40);
+  const c = JSON.parse(run(['info', 'https://t.me/demo_chan/4546', '--json']).out);
+  assert.equal(c.topic, 4546);
 });

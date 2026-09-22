@@ -18,6 +18,7 @@
 | `--client <id>` | cicy-desktop client id, passed through to `agent-electron --client`. |
 | `--out <path>` | Output file (its extension picks the format) or directory (trailing `/` or an existing directory). Default: `./<username-or-id>-messages.<ext>`. Existing files are overwritten. |
 | `--format` | `json` (default, `{meta, messages[]}`), `jsonl` (one record per line), `csv` (UTF-8 with BOM, opens in Excel), `all` (all three next to each other). |
+| `--topic <msgid>` | Forum chats: export only the topic whose root message id is `<msgid>` (`messages.getReplies`). A `t.me/<chat>/<id>` link that points at a topic root selects that topic automatically. Output file gets `-topic<id>` in its name. |
 | `--limit N` | Stop after the newest N messages. |
 | `--since DATE` | Only messages on/after `YYYY-MM-DD` (UTC) or a unix timestamp; paging stops at the first older message. |
 | `--min-id N` | Only messages with id > N (incremental export: pass the last id you already have). |
@@ -30,7 +31,7 @@
 
 ## Output
 
-`info --json`: `{ ok, target, chat, info:{id,title,username,type,members,member}, count, latest:{id,date} }`
+`info --json`: `{ ok, target, chat, info:{id,title,username,type,members,member}, topic, topicInfo:{id,title}?, count, latest:{id,date} }`
 `export --json`: `{ ok, target, chat, count, total_in_chat, files:{json?,jsonl?,csv?}, seconds, err? }`
 
 ## Exit codes
