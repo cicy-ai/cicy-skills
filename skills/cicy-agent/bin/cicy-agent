@@ -879,10 +879,23 @@ async function cmdCloud(args) {
 }
 
 async function loadCloudDirectory() {
+  // A Cloud/Hub login is required for every cloud command, even when the
+  // directory itself comes from the local daemon (sender identity needs it).
+  loadCloudCredential();
+  // Prefer the local cicy-code: it proxies to whichever control plane this
+  // instance is signed in to (cicy-cloud worker or CiCy Hub — the hub has no
+  // /api/code/* surface). Fall back to the Cloud worker only when the daemon
+  // predates these routes or is unreachable.
+  try {
+    const [instanceData, agentData] = await Promise.all([
+      api('GET', '/api/im/cicy-cloud/instances'), api('GET', '/api/im/cicy-cloud/agents'),
+    ]);
+    if (Array.isArray(instanceData?.instances) && Array.isArray(agentData?.agents)) {
+      return { instances: instanceData.instances, agents: agentData.agents };
+    }
+  } catch { /* old or unavailable daemon: use the Cloud worker directly */ }
   const [instanceData, agentData] = await Promise.all([
-    // via the local cicy-code, which proxies to whichever control plane this
-    // instance is signed in to (cicy-cloud worker or CiCy Hub); the hub has no /api/code/*
-    api('GET', '/api/im/cicy-cloud/instances'), api('GET', '/api/im/cicy-cloud/agents'),
+    cloudAPI('GET', '/api/code/instances'), cloudAPI('GET', '/api/code/agents'),
   ]);
   return { instances: instanceData.instances || [], agents: agentData.agents || [] };
 }
