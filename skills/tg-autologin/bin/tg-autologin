@@ -181,6 +181,13 @@ const P_FINISH = (idx, code, pw) => `(async () => {
 
 // ---------- orchestration ----------
 async function loginOne(machine, idx, opts) {
+  // 收尾模式:码由用户收好,直接填码+2FA,不重发、不覆盖
+  if (opts.code) {
+    process.stdout.write(`${machine} #${idx} 填码 ${opts.code} / 2FA ${opts.twofa || 'didi'}\n`);
+    const fin = await main(machine, P_FINISH(idx, opts.code, opts.twofa || 'didi'), 70000);
+    process.stdout.write(`  ${fin.ok ? '✓ 登录成功' : '✗ 登录失败'}${fin.twofa ? ' (2FA)' : ''}\n`);
+    return { idx, ok: !!fin.ok };
+  }
   let phone = opts.phone, codeUrl = opts.codeUrl;
   if (phone && codeUrl) { await main(machine, P_ASSIGN(idx, phone, codeUrl), 30000); }
   if (!phone || !codeUrl) {
@@ -191,18 +198,35 @@ async function loginOne(machine, idx, opts) {
   process.stdout.write(`${machine} #${idx} ${phone}\n`);
   const sent = await main(machine, P_SEND(idx, phone), 100000);
   if (sent.already) { process.stdout.write(`  已登录,跳过\n`); return { idx, ok: true, already: true }; }
-  process.stdout.write(`  发码: ${sent.ok ? 'ok' : '未确认(继续尝试接码)'}\n`);
+  process.stdout.write(`  发码: ${sent.ok ? 'ok' : '未确认'}\n`);
+  if (opts.sendOnly) {
+    process.stdout.write(`  ✋ 只发不收:已停在验证码输入界面,请自行收码并填入(2FA 也自理)\n`);
+    return { idx, ok: !!sent.ok, sendOnly: true, phone };
+  }
+  // 关键:码要几十秒才到接码设备。先 sleep 等码到达,再开接码页 ——
+  // 这样第一次读通常就有码,不用反复轮询撞 1/min 限流。
+  const WAIT = opts.wait != null ? opts.wait : 20;
+  if (WAIT > 0) { process.stdout.write(`  发码后等 ${WAIT}s 让码到达接码设备…\n`); await sleep(WAIT * 1000); }
   await main(machine, P_OVERLAY_OPEN(idx, codeUrl), 40000);
   // read code, spacing reads to respect the ~1/min 接码 rate limit
-  let code = '', pw = 'didi';
-  const MAX = opts.tries || 5;
+  let code = '', pw = 'didi', dead = false;
+  const CD = opts.cooldown || 62;
+  // 码要几分钟才到接码设备 → 窗口按分钟算,默认 ~12 分钟。每次读 ≥ 冷却间隔,
+  // 因为接码服务限流 ~1 次/分钟:读太快只会撞「请求过于频繁」并白烧 try。
+  const MAX = opts.tries || 12;
   for (let i = 0; i < MAX; i++) {
     const r = await main(machine, P_OVERLAY_READ(idx, i > 0), 30000).catch((e) => ({ err: e.message }));
     if (r.code) { code = r.code; pw = r.pw || 'didi'; break; }
-    if (r.rateLimited) { process.stdout.write(`  接码限流,冷却 ${opts.cooldown || 62}s…\n`); await sleep((opts.cooldown || 62) * 1000); }
-    else { process.stdout.write(`  等码…(${r.body ? r.body.slice(0, 40) : ''})\n`); await sleep(15000); }
+    // 真死卡才是「设备已掉线」;「无…登录消息」只是码还没到,继续耐心等
+    if (/掉线|已离线|不在线/.test(r.body || '')) { dead = true; process.stdout.write(`  ✗ 接码设备已掉线(真死卡)\n`); break; }
+    if (r.rateLimited) process.stdout.write(`  接码限流,冷却 ${CD}s…\n`);
+    else process.stdout.write(`  等码 ${i + 1}/${MAX}…(${(r.body || '').slice(0, 40)})\n`);
+    if (i < MAX - 1) await sleep(CD * 1000); // 每轮都按整冷却等,守住 1/min 限流
   }
-  if (!code) { process.stdout.write(`  ✗ 没拿到码(可能死卡/设备离线)\n`); return { idx, ok: false, err: 'no code' }; }
+  if (!code) {
+    const why = dead ? '接码设备已掉线' : `等满 ${MAX} 轮码仍未到(可加 --tries 拉长窗口,或让用户收到码后 --code 填入)`;
+    process.stdout.write(`  ✗ 没拿到码:${why}\n`); return { idx, ok: false, err: dead ? 'dead' : 'no code' };
+  }
   process.stdout.write(`  接码: ${code} / 2FA ${pw}\n`);
   const fin = await main(machine, P_FINISH(idx, code, pw), 70000);
   process.stdout.write(`  ${fin.ok ? '✓ 登录成功' : '✗ 登录失败'}${fin.twofa ? ' (2FA)' : ''}\n`);
@@ -212,11 +236,13 @@ async function loginOne(machine, idx, opts) {
 const USAGE = `tg-autologin — Telegram Web 自动登录(发码→接码overlay→填码+2FA)
 
   tg-autologin login <machine> <idx>[,<idx>...] [--phone <p> --code-url <u>]
-                                     [--cooldown <sec>] [--tries <n>] [--json]
+                                     [--cooldown <sec>] [--tries <n>] [--wait <sec>]
+                                     [--send-only] [--code <c> [--2fa <pw>]] [--json]
 
 - <machine>: 机器名(如 xs-1004)。<idx>: profile 序号,可逗号多个(单机顺序执行,不并发)。
 - 不带 --phone/--code-url 时从该 profile 已存的 telegramLogin 读取;带上则先派号再登。
-- 接码服务 ~1 req/min 限流,读码在 CLI 侧按冷却间隔重试(--cooldown 默认 62s)。
+- 接码服务 ~1 req/min 限流,读码在 CLI 侧按冷却间隔重试(--cooldown 默认 62s,--tries 默认 12 轮)。
+- --wait 发码后先等再开接码页(默认 20s)。--send-only 只发码由用户自行收码;--code/--2fa 直接填码收尾。
 - 2FA 密码优先用接码页的 pass2fa,缺省 didi。
 config: ${CFG}`;
 
@@ -230,7 +256,9 @@ async function run() {
   if (!machine || !idxArg) die('用法: tg-autologin login <machine> <idx[,idx...]>', 2);
   const getOpt = (name) => { const i = a.indexOf(name); return i >= 0 ? a[i + 1] : undefined; };
   const opts = { phone: getOpt('--phone'), codeUrl: getOpt('--code-url'),
-    cooldown: Number(getOpt('--cooldown')) || 62, tries: Number(getOpt('--tries')) || 5 };
+    cooldown: Number(getOpt('--cooldown')) || 62, tries: Number(getOpt('--tries')) || 12,
+    sendOnly: a.includes('--send-only'), code: getOpt('--code'), twofa: getOpt('--2fa'),
+    wait: getOpt('--wait') != null ? Number(getOpt('--wait')) : null };
   const idxs = idxArg.split(',').map((x) => parseInt(x, 10)).filter(Number.isInteger);
   const out = [];
   for (const idx of idxs) {  // 单机顺序,绝不并发(接码/CDP 会互相干扰)

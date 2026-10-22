@@ -45,6 +45,8 @@ tg-autologin login xs-1004 4                     # login profile #4 (reads its s
 tg-autologin login xs-1004 2,3,4                 # several, sequentially (never concurrent on one machine)
 tg-autologin login xs-1004 1 --phone +57... --code-url https://jiema.didiapi.uk/getcode?id=...
 tg-autologin login xs-1004 4 --cooldown 62 --tries 6 --json
+tg-autologin login xs-1004 4 --send-only         # only send; the user collects the code
+tg-autologin login xs-1004 4 --code 12345 --2fa didi   # finish with a code the user already has
 ```
 
 ## Hard-won details baked in

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "tg-autojoin",
+  "version": "2.1.4",
+  "title": "Telegram 自动 JOIN 注入脚本",
+  "description": "把 Telegram Web 自动 JOIN 注入脚本按版本下发到矩阵机(wsd),并核对各机装的是哪个版本。",
+  "category": "agent",
+  "tags": [
+    "telegram",
+    "inject",
+    "fleet",
+    "wsd"
+  ],
+  "author": "cicy",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [
+    "wsd"
+  ],
+  "npm_dependencies": false,
+  "entry": "bin/tg-autojoin",
+  "permissions": [],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  }
+}

@@ -1,0 +1,222 @@
+#!/usr/bin/env node
+// tg-web-pull — pull messages from a group open in a Telegram Web K webview.
+// Desktop control goes through the agent-electron skill (cicy-skill-spec §4 rule 3):
+// we shell out to `agent-electron cdp <target> Runtime.evaluate <params>` and scrape the DOM.
+// Zero deps, pure Node 18+. Must also run inside dsh on the Windows matrix machines.
+import { spawnSync } from 'node:child_process';
+
+const NAME = 'tg-web-pull';
+
+// ── argv parsing ───────────────────────────────────────────────────────────
+const raw = process.argv.slice(2);
+const cmd = raw[0];
+const pos = [];
+const opt = {};
+for (let i = 1; i < raw.length; i++) {
+  const a = raw[i];
+  if (a.startsWith('--')) {
+    const k = a.slice(2);
+    const next = raw[i + 1];
+    if (next === undefined || next.startsWith('--')) opt[k] = true;
+    else { opt[k] = next; i++; }
+  } else pos.push(a);
+}
+const JSONOUT = !!opt.json;
+
+function die(msg, code = 1) { process.stderr.write(NAME + ': ' + msg + '\n'); process.exit(code); }
+function out(obj) { process.stdout.write((JSONOUT ? JSON.stringify(obj) : human(obj)) + '\n'); }
+
+// ── agent-electron bridge ────────────────────────────────────────────────────
+function ae(args) {
+  const extra = opt.client ? ['--client', String(opt.client)] : [];
+  const full = [...extra, ...args];
+  let r = spawnSync('agent-electron', full, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (r.error && r.error.code === 'ENOENT' && process.platform === 'win32') {
+    r = spawnSync('agent-electron', full, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: true });
+  }
+  if (r.error) die('cannot run agent-electron (' + r.error.message + '). Is the agent-electron skill installed?', 3);
+  if (r.status !== 0 && !r.stdout) die('agent-electron failed: ' + (r.stderr || '').trim());
+  return r.stdout || '';
+}
+
+// Run a JS expression in the target webContents, return the parsed value.
+// Our expressions always `return JSON.stringify(...)`, so we unwrap the CDP result and JSON.parse it.
+function evalInPage(target, expression) {
+  const params = JSON.stringify({ expression: '(function(){' + expression + '})()', returnByValue: true });
+  const stdout = ae(['cdp', target, 'Runtime.evaluate', params]);
+  let obj;
+  try { obj = JSON.parse(stdout); } catch { die('could not parse agent-electron output:\n' + stdout.slice(0, 400)); }
+  // CDP exception?
+  const exc = obj?.result?.exceptionDetails || obj?.exceptionDetails;
+  if (exc) die('page exception: ' + (exc.exception?.description || exc.text || JSON.stringify(exc)).slice(0, 300));
+  const node = obj?.result?.result ?? obj?.result ?? obj;
+  const val = node?.value;
+  if (val === undefined) die('unexpected agent-electron result:\n' + stdout.slice(0, 400));
+  if (typeof val !== 'string') return val;
+  try { return JSON.parse(val); } catch { return val; }
+}
+
+function sleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+
+// ── page expressions ─────────────────────────────────────────────────────────
+// Shared helpers injected into the page as a string prefix.
+const PAGE_LIB = `
+  function _clean(el){ if(!el) return ""; var c=el.cloneNode(true);
+    c.querySelectorAll(".time,.reactions,.reactions-container,.bubble-beside-button,.web-page .time,.document-size").forEach(function(n){n.remove();});
+    return (c.textContent||"").replace(/[\\ue000-\\uf8ff]/g,"").replace(/\\s+/g," ").trim(); }
+  function _containers(){ return Array.prototype.slice.call(document.querySelectorAll(".chats-container > .chat")); }
+  function _peerOf(c){ var bs=c.querySelectorAll(".bubble[data-mid]"); for(var i=bs.length-1;i>=0;i--){ if(bs[i].dataset.peerId) return bs[i].dataset.peerId; } return null; }
+  function _titleOf(c){ var t=c.querySelector(".chat-info .peer-title"); return t?t.textContent.trim():null; }
+  function _msgs(c){ var out=[]; c.querySelectorAll(".bubbles .bubble[data-mid]").forEach(function(b){
+      var msg=b.querySelector(".message"); var name=b.querySelector(".name"); var media=[];
+      if(b.querySelector(".media-photo,.album-item")) media.push("photo");
+      if(b.querySelector("video,.video")) media.push("video");
+      if(b.querySelector(".document")) media.push("document");
+      if(b.querySelector(".audio")) media.push("audio");
+      var ts=b.dataset.timestamp?+b.dataset.timestamp:null;
+      out.push({ mid:+b.dataset.mid, peerId:b.dataset.peerId, ts:ts,
+        iso:ts?new Date(ts*1000).toISOString():null, out:b.classList.contains("is-out"),
+        from:name?name.textContent.trim():null, media:media.length?media:null, text:_clean(msg) });
+    });
+    out.sort(function(a,b){return a.mid-b.mid;}); return out; }
+`;
+
+function exprGroups() {
+  return PAGE_LIB + `
+    var out=[]; document.querySelectorAll(".chatlist a.chatlist-chat").forEach(function(a){
+      var t=a.querySelector(".peer-title"); var u=a.querySelector(".dialog-subtitle-badge-unread,.unread");
+      out.push({ peerId:a.dataset.peerId, href:a.getAttribute("href"),
+        title:t?t.textContent.trim():null, unread:u?(u.textContent.trim()||null):null });
+    });
+    // de-dupe by peerId (search + main list can both be present)
+    var seen={}, uniq=[]; out.forEach(function(d){ if(d.peerId&&!seen[d.peerId]){seen[d.peerId]=1;uniq.push(d);} });
+    return JSON.stringify({ title:document.title, count:uniq.length, groups:uniq });
+  `;
+}
+
+function exprOpen(peer, chat) {
+  const sel = peer
+    ? `document.querySelector('.chatlist a.chatlist-chat[data-peer-id="'+${JSON.stringify(String(peer))}+'"]')`
+    : `(function(){var want=${JSON.stringify(String(chat || ''))}.toLowerCase();var as=document.querySelectorAll('.chatlist a.chatlist-chat');for(var i=0;i<as.length;i++){var t=as[i].querySelector('.peer-title');if(t&&t.textContent.trim().toLowerCase().indexOf(want)>=0)return as[i];}return null;})()`;
+  return PAGE_LIB + `
+    var a=${sel};
+    if(!a) return JSON.stringify({ok:false,reason:"dialog-not-found"});
+    try{ a.scrollIntoView({block:"center"}); }catch(e){}
+    try{ a.click(); }catch(e){}
+    try{ if(a.getAttribute("href")) location.hash=a.getAttribute("href"); }catch(e){}
+    return JSON.stringify({ok:true,peerId:a.dataset.peerId,title:(a.querySelector(".peer-title")||{}).textContent});
+  `;
+}
+
+function exprScroll(peer) {
+  const pick = peer
+    ? `_containers().filter(function(c){return _peerOf(c)===${JSON.stringify(String(peer))};})[0]`
+    : `document.querySelector(".chats-container > .chat.active")`;
+  return PAGE_LIB + `
+    var c=${pick}; if(!c) return JSON.stringify({ok:false});
+    var sc=c.querySelector(".bubbles .scrollable"); if(sc) sc.scrollTop=0;
+    return JSON.stringify({ok:!!sc,count:c.querySelectorAll(".bubble[data-mid]").length});
+  `;
+}
+
+function exprPull(peer, chat, limit) {
+  const pick = peer
+    ? `_containers().filter(function(c){return _peerOf(c)===${JSON.stringify(String(peer))};})[0]`
+    : chat
+      ? `_containers().filter(function(c){var t=_titleOf(c);return t&&t.toLowerCase().indexOf(${JSON.stringify(String(chat).toLowerCase())})>=0;})[0] || document.querySelector(".chats-container > .chat.active")`
+      : `document.querySelector(".chats-container > .chat.active") || _containers()[0]`;
+  return PAGE_LIB + `
+    var c=${pick};
+    if(!c) return JSON.stringify({ok:false,reason:"no-matching-chat",containers:_containers().map(function(x){return {peer:_peerOf(x),title:_titleOf(x)};})});
+    var msgs=_msgs(c); var lim=${Number(limit) || 0};
+    if(lim>0 && msgs.length>lim) msgs=msgs.slice(msgs.length-lim);
+    return JSON.stringify({ok:true,peerId:_peerOf(c),chat:_titleOf(c),active:c.classList.contains("active"),total:_msgs(c).length,returned:msgs.length,messages:msgs});
+  `;
+}
+
+// ── commands ───────────────────────────────────────────────────────────────
+function cmdWebviews() {
+  const stdout = ae(['webcontents', '--json']);
+  let obj; try { obj = JSON.parse(stdout); } catch { die('bad webcontents output'); }
+  const list = (obj.data || obj || []).filter(w => (w.url || '').includes('web.telegram.org'));
+  const rows = list.map(w => ({ target: 'wc:' + w.webContentsId, title: w.title, url: w.url }));
+  out({ ok: true, count: rows.length, webviews: rows });
+}
+
+function requireTarget() {
+  const t = pos[0];
+  if (!t) die('missing <target> (e.g. wc:42). Run `tg-web-pull webviews` to list them.');
+  return /^(wc:|win:|tab:)/.test(t) ? t : 'wc:' + t;
+}
+
+function cmdGroups() {
+  const target = requireTarget();
+  out(evalInPage(target, exprGroups()));
+}
+
+function cmdPull() {
+  const target = requireTarget();
+  const peer = opt.peer ? String(opt.peer) : null;
+  const chat = opt.chat ? String(opt.chat) : null;
+  const limit = opt.limit ? parseInt(opt.limit, 10) : 0;
+  const scroll = opt.scroll ? parseInt(opt.scroll, 10) : 0;
+
+  if (opt.open && (peer || chat)) {
+    const o = evalInPage(target, exprOpen(peer, chat));
+    if (!o.ok && !JSONOUT) process.stderr.write(NAME + ': open best-effort: ' + (o.reason || 'sent') + '\n');
+    // poll for the target chat to appear/settle
+    for (let i = 0; i < 6; i++) { sleep(1200); const p = evalInPage(target, exprPull(peer, chat, 1)); if (p.ok) break; }
+  }
+  for (let i = 0; i < scroll; i++) { evalInPage(target, exprScroll(peer)); sleep(1500); }
+
+  const res = evalInPage(target, exprPull(peer, chat, limit));
+  if (!res.ok) die('could not read messages: ' + (res.reason || '') + (res.containers ? ' (open chats: ' + JSON.stringify(res.containers) + ')' : ''));
+  out(res);
+}
+
+// ── human-readable rendering ─────────────────────────────────────────────────
+function human(o) {
+  if (o.webviews) return o.webviews.map(w => `${w.target}\t${w.title}`).join('\n') || '(no telegram webviews)';
+  if (o.groups) return `# ${o.count} groups\n` + o.groups.map(g => `${g.peerId}\t${g.unread ? '[' + g.unread + '] ' : ''}${g.title}`).join('\n');
+  if (o.messages) {
+    const head = `# ${o.chat || o.peerId} (peer ${o.peerId})  ${o.returned}/${o.total} msgs${o.active ? '' : '  [not active]'}`;
+    const body = o.messages.map(m => {
+      const when = m.iso ? m.iso.replace('T', ' ').slice(0, 16) : '';
+      const who = m.out ? '→me' : (m.from || '');
+      const media = m.media ? '[' + m.media.join(',') + '] ' : '';
+      return `${when}  ${m.mid}  ${who}\n  ${media}${m.text}`;
+    }).join('\n');
+    return head + '\n' + body;
+  }
+  return JSON.stringify(o);
+}
+
+// ── dispatch ─────────────────────────────────────────────────────────────────
+const HELP = `tg-web-pull — pull messages from a group open in a Telegram Web K webview
+
+Usage:
+  tg-web-pull webviews [--json]                       list Telegram Web K webviews (targets)
+  tg-web-pull groups <target> [--json]                list the chat/group dialogs in that webview
+  tg-web-pull pull <target> [options]                 pull messages from a group
+
+pull options:
+  --peer <id>      select the group by peerId (from \`tg-web-pull groups\`, e.g. -1770576689)
+  --chat <title>   select the group by (partial) title, case-insensitive
+  --open           best-effort: open the group first (may be overridden on matrix-driven cells)
+  --scroll <n>     scroll up n times to load older history (~1.5s each)
+  --limit <n>      return only the last n messages
+  --json           machine-readable output
+
+<target> is a webContents id: \`wc:42\` or just \`42\`. Use \`--client <id>\` to pick a desktop host.
+
+Notes:
+  Desktop control is delegated to the agent-electron skill. Without --peer/--chat,
+  \`pull\` reads whichever chat is currently active in the webview.`;
+
+switch (cmd) {
+  case undefined: case '--help': case '-h': case 'help': process.stdout.write(HELP + '\n'); break;
+  case 'webviews': cmdWebviews(); break;
+  case 'groups': cmdGroups(); break;
+  case 'pull': cmdPull(); break;
+  default: die('unknown command: ' + cmd + ' (try `tg-web-pull --help`)');
+}
