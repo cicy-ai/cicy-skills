@@ -1,0 +1,75 @@
+{
+  "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
+  "name": "aws-cli",
+  "version": "0.1.0",
+  "title": "AWS CLI",
+  "description": "Run the official AWS CLI as any AWS account stored in the cicy-code account matrix (keys + note), without exposing secrets: accounts / whoami / exec / use / test / status / install.",
+  "category": "cloud",
+  "tags": [
+    "aws",
+    "amazon",
+    "cli",
+    "credentials",
+    "multi-account"
+  ],
+  "author": "cicy-ai",
+  "license": "MIT",
+  "runtime": {
+    "node": ">=18"
+  },
+  "system_requirements": [],
+  "npm_dependencies": false,
+  "entry": "bin/aws-cli",
+  "permissions": [
+    "network",
+    "filesystem:home",
+    "process:spawn"
+  ],
+  "compatible_agents": [
+    "*"
+  ],
+  "files": {
+    "skill_md": "SKILL.md",
+    "help_md": "references/help.md",
+    "tools_md": "references/tools.md",
+    "readme": "README.md",
+    "help_en_md": "references/help.en.md",
+    "help_cn_md": "references/help.cn.md",
+    "tools_en_md": "references/tools.en.md",
+    "tools_cn_md": "references/tools.cn.md"
+  },
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/aws-cli",
+  "i18n": {
+    "zh-CN": {
+      "title": "AWS CLI",
+      "description": "以 cicy-code 账户面板里保存的任意 AWS 账号（Access Key + 备注）运行官方 AWS CLI，不泄露 Secret：accounts / whoami / exec / use / test / status / install。"
+    }
+  },
+  "tools": [
+    {
+      "name": "aws-cli accounts",
+      "example": "aws-cli accounts",
+      "description": "List stored AWS accounts with key id, region and note"
+    },
+    {
+      "name": "aws-cli whoami",
+      "example": "aws-cli whoami --account prod",
+      "description": "Show the caller identity of an account"
+    },
+    {
+      "name": "aws-cli exec",
+      "example": "aws-cli exec --account prod -- s3 ls",
+      "description": "Run any aws command as an account"
+    },
+    {
+      "name": "aws-cli use",
+      "example": "aws-cli use prod",
+      "description": "Make an account this machine's default aws profile"
+    },
+    {
+      "name": "aws-cli status",
+      "example": "aws-cli status",
+      "description": "Check aws CLI install and accounts"
+    }
+  ]
+}
