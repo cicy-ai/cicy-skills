@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
 
 const cli = new URL('../bin/tg-web-mirror-hook', import.meta.url).pathname;
 
@@ -83,8 +85,39 @@ else process.exit(9);
   const invoked = fs.readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
   const write = invoked.find((call) => call[0] === 'rpc' && call[1] === 'file_write');
   const payload = JSON.parse(write[2]);
-  assert.equal(result.path, 'C:\\Users\\test\\data\\electron\\extension\\inject\\telegram.org.js');
+  assert.equal(result.path, 'C:\\Users\\test\\cicy-ai\\electron\\extension\\inject\\telegram.org.js');
   assert.equal(payload.path, result.path);
   assert.match(payload.content, /__cicyTelegramMirrorsPatch/);
   assert.match(payload.content, /window\.__mirrors=this\.mirrors/);
+});
+
+test('fleet host-install runs in the machine main process via the control plane', async () => {
+  const http = await import('node:http');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-hook-fleet-'));
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => (body += d));
+    req.on('end', () => {
+      seen.push({ url: req.url, token: req.headers['x-cicy-ctrl'], body });
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ results: [{ host: 'desktop-xs-1', ok: true, out: JSON.stringify({ ok: true, installed: true, changed: true, path: 'C:\\Users\\x\\cicy-ai\\electron\\extension\\inject\\telegram.org.js', size: 10 }) }] }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const cfg = path.join(dir, 'desktop-ctrl.json');
+  fs.writeFileSync(cfg, JSON.stringify({ base: `http://127.0.0.1:${server.address().port}`, token: 'tok' }));
+  try {
+    const { stdout } = await execFileAsync(cli, ['host-install', '--host', 'xs-1', '--json'], { env: { ...process.env, CICY_DESKTOP_CTRL: cfg }, encoding: 'utf8' });
+    const result = JSON.parse(stdout);
+    assert.equal(result.installed, true);
+    assert.equal(result.machines[0].host, 'xs-1');
+    assert.equal(seen[0].url, '/api/rpc');
+    assert.equal(seen[0].token, 'tok');
+    const payload = JSON.parse(seen[0].body);
+    assert.equal(payload.target, 'xs-1');
+    assert.match(payload.js, /cicy-ai/);
+    assert.match(payload.js, /__cicyTelegramMirrorsPatch/);
+    assert.doesNotMatch(payload.js, /"data","electron"/);
+  } finally { server.close(); }
 });
