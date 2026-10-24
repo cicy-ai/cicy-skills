@@ -1,15 +1,27 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 import { buildInstallExpression, buildVerifyExpression } from '../lib/expressions.js';
 
 const VERSION = '0.1.0';
+// cicy-desktop reads per-domain injection scripts from this fixed directory
+// (src/utils/window-utils.js). It moved from ~/data/electron in 2.1.3xx.
+const INJECT_SEGMENTS = ['cicy-ai', 'electron', 'extension', 'inject', 'telegram.org.js'];
+const HOOK_ASSET = new URL('../assets/telegram.org.js', import.meta.url);
+const CTRL_CFG = process.env.CICY_DESKTOP_CTRL || path.join(os.homedir(), 'cicy-ai', 'db', 'desktop-ctrl.json');
 
 function usage() {
   return `Usage: tg-web-mirror-hook <status|install|verify|host-install> [options]
 
 Options:
-  --client <client_id>  Target a specific cicy-desktop client
+  --client <client_id>  Target a specific cicy-desktop client (local agent-desktop/agent-electron)
+  --host <machine>      Fleet mode: machine id (xs-1001), comma list, or 'all' via the
+                        realtime control plane (${CTRL_CFG}); operates on every
+                        Telegram Web K cell of that machine
   --target <id>        Use a known winId/wc:<webContentsId>
   --version <version>  Hook version (default: ${VERSION})
   --json               Print machine-readable JSON
@@ -17,7 +29,7 @@ Options:
 }
 
 function parseArgs(argv) {
-  const options = { command: 'status', version: VERSION, json: false, client: null, target: null };
+  const options = { command: 'status', version: VERSION, json: false, client: null, host: null, target: null };
   const args = [...argv];
   if (args[0] && !args[0].startsWith('-')) options.command = args.shift();
   while (args.length) {
@@ -25,14 +37,16 @@ function parseArgs(argv) {
     if (arg === '--json') options.json = true;
     else if (arg === '-h' || arg === '--help') options.help = true;
     else if (arg === '--client') options.client = args.shift();
+    else if (arg === '--host') options.host = args.shift();
     else if (arg === '--target') options.target = args.shift();
     else if (arg === '--version') options.version = args.shift();
     else throw new Error(`unknown option: ${arg}`);
-    if ((arg === '--client' || arg === '--target' || arg === '--version') && !args.length && !options[arg.slice(2)]) {
+    if ((arg === '--client' || arg === '--host' || arg === '--target' || arg === '--version') && !args.length && !options[arg.slice(2)]) {
       throw new Error(`${arg} requires a value`);
     }
   }
   if (!['status', 'install', 'verify', 'host-install'].includes(options.command)) throw new Error(`unknown command: ${options.command}`);
+  if (options.client && options.host) throw new Error('--client and --host are mutually exclusive');
   return options;
 }
 
@@ -86,8 +100,8 @@ function hostInstall(options) {
   const home = String(homeResult?.stdout || '').trim().replace(/[\\/]+$/, '');
   if (!home || homeResult?.exitCode !== 0) throw new Error('could not resolve Desktop user home directory');
   const separator = windows ? '\\' : '/';
-  const remotePath = [home, 'data', 'electron', 'extension', 'inject', 'telegram.org.js'].join(separator);
-  const content = readFileSync(new URL('../assets/telegram.org.js', import.meta.url), 'utf8');
+  const remotePath = [home, ...INJECT_SEGMENTS].join(separator);
+  const content = readFileSync(HOOK_ASSET, 'utf8');
   const saved = runDesktop(['rpc', 'file_write', JSON.stringify({ path: remotePath, content }), '--client', target.client_id, '--json']);
   return { installed: Boolean(saved?.success), path: remotePath, size: saved?.size ?? Buffer.byteLength(content) };
 }
@@ -137,6 +151,173 @@ async function verifyWithRetry(options, target, attempts = 20) {
   return value;
 }
 
+// ---------------------------------------------------------------------------
+// Fleet mode (--host): reach cicy-desktop machines over the realtime control
+// plane (same {base, token} file `wsd` / tg-matrix use) and run code in each
+// machine's Electron MAIN process. Matrix cells are BrowserViews, so the
+// domain-inject hook never runs there; in fleet mode the cache patch is applied
+// directly inside every Telegram Web K webContents of the machine instead.
+// ---------------------------------------------------------------------------
+function loadCtrl() {
+  let c;
+  try { c = JSON.parse(readFileSync(CTRL_CFG, 'utf8')); }
+  catch (error) { throw new Error(`cannot read control config ${CTRL_CFG}: ${error.message}`); }
+  if (!c.base || !c.token) throw new Error(`${CTRL_CFG} missing "base" or "token"`);
+  return { base: String(c.base).replace(/\/+$/, ''), token: String(c.token) };
+}
+
+function ctrlCall(pathname, payload, timeout = 130000) {
+  const { base, token } = loadCtrl();
+  const url = new URL(base + pathname);
+  const mod = url.protocol === 'https:' ? https : http;
+  const data = payload == null ? null : Buffer.from(JSON.stringify(payload));
+  const opts = {
+    method: payload == null ? 'GET' : 'POST',
+    headers: {
+      'x-cicy-ctrl': token,
+      'content-type': 'application/json',
+      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) tg-web-mirror-hook/1',
+    },
+  };
+  if (data) opts.headers['content-length'] = data.length;
+  return new Promise((resolve, reject) => {
+    const req = mod.request(url, opts, (res) => {
+      let buf = '';
+      res.on('data', (d) => (buf += d));
+      res.on('end', () => {
+        if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode} ${buf.slice(0, 300)}`));
+        try { resolve(JSON.parse(buf)); } catch { reject(new Error(`bad JSON from control plane: ${buf.slice(0, 200)}`)); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(timeout, () => req.destroy(new Error('control plane timeout')));
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+// `code` must be a self-contained async IIFE returning a JSON string.
+async function fleetMain(target, code) {
+  const wrapper =
+    "const g = await window.electronRPC('get_windows', {});" +
+    "const gt = ((g&&g.content)||[]).map(c=>c&&c.text).join('');" +
+    "let wid = 1; try { const ws = JSON.parse(gt); if (ws && ws.length) wid = ws[0].id; } catch (e) {}" +
+    "const r = await window.electronRPC('control_electron_BrowserWindow'," +
+    "{win_id: wid, code: " + JSON.stringify(code) + "});" +
+    "return ((r&&r.content)||[]).map(c=>c&&c.text).join('');";
+  const res = await ctrlCall('/api/rpc', { target, js: wrapper });
+  const rows = (res.results || []).map((r) => {
+    let out = r.out;
+    if (typeof out === 'string' && out && '{['.includes(out[0])) {
+      try { out = JSON.parse(out); } catch { /* keep raw */ }
+    }
+    return { host: String(r.host || '?').replace(/^desktop-/, ''), ok: r.ok !== false, out };
+  });
+  if (!rows.length) throw new Error(`no connected machine matched "${target}"`);
+  return rows;
+}
+
+function fleetHostInstall(options) {
+  const content = readFileSync(HOOK_ASSET, 'utf8');
+  const code = `(async () => {
+  try {
+    const req = process.mainModule.require.bind(process.mainModule);
+    const fs = req('fs'), os = req('os'), path = req('path');
+    const target = path.join(os.homedir(), ${JSON.stringify(INJECT_SEGMENTS.slice(0, -1))}.reduce((a, b) => path.join(a, b)), ${JSON.stringify(INJECT_SEGMENTS.at(-1))});
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const content = ${JSON.stringify(content)};
+    let before = null; try { before = fs.readFileSync(target, 'utf8'); } catch (e) {}
+    const changed = before !== content;
+    if (changed) fs.writeFileSync(target, content, 'utf8');
+    return JSON.stringify({ ok: true, installed: true, changed, path: target, size: Buffer.byteLength(content) });
+  } catch (e) { return JSON.stringify({ ok: false, err: String((e && e.message) || e) }); }
+})()`;
+  return fleetMain(options.host, code);
+}
+
+// Run a page expression inside every Telegram Web K webContents of the machine
+// (or only --target wc:<id>). `reloadOnChange` reloads cells whose install
+// reported changed:true, then waits for the page to come back before verifying.
+function fleetPageCode(expression, { targetWc = null, reloadOnChange = false, verifyExpression = null } = {}) {
+  return `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const req = process.mainModule.require.bind(process.mainModule);
+    const { webContents } = req('electron');
+    const want = ${JSON.stringify(targetWc)};
+    const cells = webContents.getAllWebContents().filter((wc) => {
+      if (want != null && wc.id !== want) return false;
+      let u = ''; try { u = wc.getURL() || ''; } catch (e) {}
+      return /^https:\\/\\/web\\.telegram\\.org\\/k\\//.test(u);
+    });
+    const out = [];
+    for (const wc of cells) {
+      const row = { wc: wc.id, url: wc.getURL() };
+      try {
+        try { row.partition = (wc.session && wc.session.getStoragePath && wc.session.getStoragePath()) || ''; } catch (e) {}
+        row.result = await wc.executeJavaScript(${JSON.stringify(expression)}, true);
+        if (${JSON.stringify(reloadOnChange)} && row.result && row.result.changed) {
+          wc.reload();
+          for (let i = 0; i < 40; i += 1) { await sleep(500); if (!wc.isLoading()) break; }
+          await sleep(1500);
+        }
+        if (${JSON.stringify(verifyExpression)}) {
+          for (let i = 0; i < 20; i += 1) {
+            try { row.verification = await wc.executeJavaScript(${JSON.stringify(verifyExpression)}, true); } catch (e) { row.verification = { error: String(e && e.message || e) }; }
+            const v = row.verification;
+            if (v && v.cache && v.runtime && v.runtime.present && v.runtime.keyCount > 0) break;
+            await sleep(500);
+          }
+        }
+      } catch (e) { row.error = String((e && e.message) || e); }
+      out.push(row);
+    }
+    return JSON.stringify({ ok: true, cells: out });
+  } catch (e) { return JSON.stringify({ ok: false, err: String((e && e.message) || e) }); }
+})()`;
+}
+
+function parseWc(target) {
+  if (!target) return null;
+  const m = /^wc:(\d+)$/.exec(target);
+  if (!m) throw new Error('fleet mode --target must be wc:<webContentsId>');
+  return Number(m[1]);
+}
+
+async function fleetRun(options) {
+  const targetWc = parseWc(options.target);
+  const verifyExpr = buildVerifyExpression(options.version);
+  let rows;
+  if (options.command === 'install') {
+    rows = await fleetMain(options.host, fleetPageCode(buildInstallExpression(options.version), {
+      targetWc, reloadOnChange: true, verifyExpression: verifyExpr,
+    }));
+  } else {
+    rows = await fleetMain(options.host, fleetPageCode(verifyExpr, { targetWc }));
+  }
+  let allVerified = true;
+  const report = rows.map((r) => {
+    const o = r.out && typeof r.out === 'object' ? r.out : { ok: false, err: String(r.out) };
+    const cells = (o.cells || []).map((c) => {
+      const v = options.command === 'install' ? c.verification : c.result;
+      const verified = !c.error && isVerified(v, options.version);
+      if (!verified) allVerified = false;
+      return {
+        wc: c.wc, url: c.url, verified,
+        changed: options.command === 'install' ? Boolean(c.result && c.result.changed) : undefined,
+        version: v && v.cache ? v.cache.version : null,
+        keyCount: v && v.runtime ? v.runtime.keyCount : 0,
+        keys: v && v.runtime ? v.runtime.keys : [],
+        error: c.error || (v && v.error) || undefined,
+      };
+    });
+    if (!o.ok || !r.ok) allVerified = false;
+    if (o.ok && cells.length === 0) allVerified = false;
+    return { host: r.host, ok: Boolean(r.ok && o.ok), err: o.err, cells };
+  });
+  return { verified: allVerified, version: options.version, machines: report };
+}
+
 function print(value, json) {
   if (json) process.stdout.write(`${JSON.stringify(value)}\n`);
   else process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -149,7 +330,20 @@ async function main() {
     return;
   }
   if (options.command === 'host-install') {
+    if (options.host) {
+      const rows = await fleetHostInstall(options);
+      const bad = rows.filter((r) => !r.ok || !(r.out && r.out.ok));
+      print({ installed: bad.length === 0, machines: rows }, options.json);
+      if (bad.length) process.exitCode = 1;
+      return;
+    }
     print(hostInstall(options), options.json);
+    return;
+  }
+  if (options.host) {
+    const result = await fleetRun(options);
+    print(result, options.json);
+    if (!result.verified && options.command !== 'status') process.exitCode = 2;
     return;
   }
   const target = discoverTarget(options);
