@@ -11,7 +11,7 @@
 | `msg` | POST | `/api/tmux/send` |
 | `broadcast` | GET ×2 + POST ×N | `/api/tmux/panes` + `/api/tmux/tree`，然后为每个目标执行 `/api/tmux/send`（每次发送有超时） |
 | `send-keys` | POST | `/api/tmux/send-keys` |
-| `restart` | POST | `/api/tmux/restart_all` |
+| `restart` | POST | `/api/panes/<pane>/restart` |
 | `clear` | POST | `/api/tmux/clear` |
 | `whoami` | GET | `/api/health` + `/api/code/instances` |
 | `cloud ls` / `cloud agents` | GET | `/api/code/instances` + `/api/code/agents` |

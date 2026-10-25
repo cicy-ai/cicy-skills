@@ -41,7 +41,9 @@ cicy-agent send-keys <pane> <keys...>         tmux send-keys
 cicy-agent projects                           List every project without expanding Agents
 cicy-agent projects --current                 List the current project with nested Agents
 cicy-agent projects <id|name>                 List one project with nested Agents by ID or exact name
-cicy-agent restart                            Restart all panes
+cicy-agent restart <pane> [--self]            Restart ONE pane: re-inits its env and
+                                              relaunches the agent on its latest session.
+                                              Own pane needs --self. No restart-all form.
 cicy-agent clear <pane>                       Clear pane
 cicy-agent fork <src> [--title T] [--master PANE]     Replicate an agent so a new one inherits its context
 cicy-agent create <title> [--type cicy] [--model M]   Create a BRAND-NEW agent from scratch (POST /api/panes/create).

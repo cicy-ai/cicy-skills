@@ -41,7 +41,8 @@ cicy-agent send-keys <pane> <keys...>         tmux send-keys
 cicy-agent projects                           仅列出所有 Project，不展开 Agents
 cicy-agent projects --current                 列出当前 Project 及其 Agents
 cicy-agent projects <id|name>                 按 ID 或完整名称列出一个 Project 及其 Agents
-cicy-agent restart                            重启所有面板
+cicy-agent restart <pane> [--self]            重启单个面板：重新注入环境并在最近的会话上
+                                              重新拉起 agent。重启自己需要 --self。不提供全部重启。
 cicy-agent clear <pane>                       清除面板
 cicy-agent fork <src> [--title T] [--master PANE]     复制代理以便新代理继承其上下文
 cicy-agent create <title> [--type cicy] [--model M]   从头创建全新代理（POST /api/panes/create）。

@@ -59,7 +59,7 @@ Details:
   `team.agent` Cloud target; Cloud reads never use terminal capture
 - `msgs` — the local or Cloud cross-agent message link: who→who, status, and a q⟶answer
   summary of what the receiver actually did
-- restart all panes / clear one
+- restart one pane (`restart <pane>`, own pane needs `--self`) / clear one
 - `projects` — list all projects without expanding Agents; use `projects --current` or `projects <id|name>` for one project's Agent details
 - `cloud ls [--all]` / `cloud agents [--all]` — discover Cloud Instances and Agents
 - `whoami` — return this Agent, team, Instance, and fixed-domain identity
