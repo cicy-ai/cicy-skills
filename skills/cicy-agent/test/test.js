@@ -168,4 +168,37 @@ localServer.kill();
 rmSync(localDir, { recursive: true, force: true });
 assert('local msg prints id and structured reply', local.status === 0 && local.stdout.includes('msg_id=local-msg-12345678  status=sent') && local.stdout.includes('local answer'), local.stdout + local.stderr);
 
+
+// mail: address comes from the Worker's /v1/whoami, the hub token is sent as
+// Bearer, and ls is scoped to this Agent.
+const mailDir = mkdtempSync(join(tmpdir(), 'cicy-agent-mail-test-'));
+const mailPortFile = join(mailDir, 'port');
+const mailServer = spawn(process.execPath, ['-e', `
+  const http = require('http'); const fs = require('fs');
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.headers.authorization !== 'Bearer hub-test-token') { res.statusCode = 401; return res.end('{}'); }
+    if (req.url === '/v1/whoami') return res.end(JSON.stringify({ok:true,instance:'colab-limeng',domain:'agents.cicy-ai.com'}));
+    if (req.url.startsWith('/v1/mail?')) {
+      const agent = new URL(req.url, 'http://x').searchParams.get('agent');
+      return res.end(JSON.stringify({ok:true,mail:[{id:'0f8fad5b-d9cb-469f-a165-70867728950e',mailbox:agent+'.colab-limeng',from_addr:'noreply@github.com',subject:'Verify '+agent,received_at:0,read_at:null}]}));
+    }
+    res.statusCode = 404; res.end('{}');
+  });
+  server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port)));
+`, mailPortFile], { stdio: 'ignore' });
+let mailPort = '';
+for (let i = 0; i < 100 && !mailPort; i++) {
+  try { mailPort = readFileSync(mailPortFile, 'utf8').trim(); } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }
+}
+const mailDevice = join(mailDir, 'cloud-device.json');
+writeFileSync(mailDevice, JSON.stringify({ token: 'hub-test-token', mode: 'hub', cloud_origin: 'https://ws.cicy-ai.com' }));
+const mailEnv = { CICY_CLOUD_DEVICE_JSON: mailDevice, CICY_MAIL_ORIGIN: `http://127.0.0.1:${mailPort}`, X_AGENT_SHORT_ID: 'w-1001' };
+const mailAddr = runSkill(D, ['mail', 'address'], mailEnv);
+const mailLs = runSkill(D, ['mail', 'ls'], mailEnv);
+mailServer.kill();
+rmSync(mailDir, { recursive: true, force: true });
+assert('mail address is <agent>.<instance>@domain', mailAddr.status === 0 && mailAddr.stdout.trim() === 'w-1001.colab-limeng@agents.cicy-ai.com', mailAddr.stdout + mailAddr.stderr);
+assert('mail ls is scoped to this agent', mailLs.status === 0 && mailLs.stdout.includes('Verify w-1001') && mailLs.stdout.includes('w-1001.colab-limeng'), mailLs.stdout + mailLs.stderr);
+
 finish();
