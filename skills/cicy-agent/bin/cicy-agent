@@ -687,10 +687,21 @@ async function cmdSendKeys(args, node) {
   console.log(typeof data === 'string' ? data : JSON.stringify(data));
 }
 
-async function cmdRestart(_args, node) {
-  const data = await api('POST', '/api/tmux/restart_all', {}, node);
-  if (json) return ok(data);
-  console.log(typeof data === 'string' ? data : JSON.stringify(data));
+// restart one pane (POST /api/panes/<pane>/restart): re-runs the pane's init
+// (env, boot lines) and relaunches its agent CLI on the latest session. There
+// is deliberately no "restart everything" form; restarting your own pane ends
+// the current turn, so it needs --self.
+async function cmdRestart(args, node) {
+  const target = args.find((a) => !a.startsWith('--'));
+  if (!target) throw Object.assign(new Error('Usage: cicy-agent restart <pane> [--self]'), { exitCode: 2 });
+  const self = currentAgentID();
+  if (self && sessionOf(target) === sessionOf(self) && !args.includes('--self')) {
+    throw Object.assign(new Error(`${target} is this Agent's own pane; restarting it ends the current turn. Pass --self to do it anyway.`), { exitCode: 2 });
+  }
+  const data = await api('POST', `/api/panes/${encodeURIComponent(target)}/restart`, {}, node);
+  if (data && data.success === false) throw Object.assign(new Error(`restart ${target} failed: ${data.error || 'unknown error'}`), { exitCode: 4 });
+  if (json) return ok({ pane: target, ...data });
+  console.log(`restarted ${target}`);
 }
 
 async function cmdClear(args, node) {

@@ -36,7 +36,7 @@ cicy-agent msgs team.w-10002                  # query the target Instance over C
 
 cicy-agent send-keys w-1001 'ls -la' Enter
 cicy-agent clear w-1001
-cicy-agent restart                # restart_all
+cicy-agent restart <pane>         # restart one pane
 
 # CiCy Cloud instances (no target instance token needed)
 cicy-agent whoami                          # this Agent/team/Instance/fixed URL

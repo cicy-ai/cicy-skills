@@ -201,4 +201,36 @@ rmSync(mailDir, { recursive: true, force: true });
 assert('mail address is <agent>.<instance>@domain', mailAddr.status === 0 && mailAddr.stdout.trim() === 'w-1001.colab-limeng@cicy-ai.com', mailAddr.stdout + mailAddr.stderr);
 assert('mail ls is scoped to this agent', mailLs.status === 0 && mailLs.stdout.includes('Verify w-1001') && mailLs.stdout.includes('w-1001.colab-limeng'), mailLs.stdout + mailLs.stderr);
 
+
+// restart targets ONE pane; no arg and own pane (without --self) are refused.
+const rsDir = mkdtempSync(join(tmpdir(), 'cicy-agent-restart-test-'));
+const rsPortFile = join(rsDir, 'port');
+const rsServer = spawn(process.execPath, ['-e', `
+  const http = require('http'); const fs = require('fs');
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.method === 'POST' && req.url === '/api/panes/w-1107/restart') return res.end(JSON.stringify({success:true}));
+    if (req.method === 'POST' && req.url === '/api/panes/w-404/restart') return res.end(JSON.stringify({success:false,error:'no such pane'}));
+    res.statusCode = 404; res.end(JSON.stringify({error:'unexpected '+req.method+' '+req.url}));
+  });
+  server.listen(0,'127.0.0.1',()=>fs.writeFileSync(process.argv[1],String(server.address().port)));
+`, rsPortFile], { stdio: 'ignore' });
+let rsPort = '';
+for (let i = 0; i < 100 && !rsPort; i++) {
+  try { rsPort = readFileSync(rsPortFile, 'utf8').trim(); } catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }
+}
+const rsGlobal = join(rsDir, 'global.json');
+writeFileSync(rsGlobal, JSON.stringify({api_token:'local-test-token'}));
+const rsEnv = { CICY_GLOBAL_JSON: rsGlobal, CICY_API_PORT: rsPort, X_AGENT_SHORT_ID: 'w-1002' };
+const rsNoArg = runSkill(D, ['restart'], rsEnv);
+const rsSelf = runSkill(D, ['restart', 'w-1002:main.0'], rsEnv);
+const rsOne = runSkill(D, ['restart', 'w-1107'], rsEnv);
+const rsFail = runSkill(D, ['restart', 'w-404'], rsEnv);
+rsServer.kill();
+rmSync(rsDir, { recursive: true, force: true });
+assert('restart without a pane is a usage error', rsNoArg.status === 2 && rsNoArg.stderr.includes('Usage: cicy-agent restart <pane>'), rsNoArg.stderr);
+assert('restart refuses own pane without --self', rsSelf.status === 2 && rsSelf.stderr.includes('--self'), rsSelf.stderr);
+assert('restart hits only that pane', rsOne.status === 0 && rsOne.stdout.includes('restarted w-1107'), rsOne.stdout + rsOne.stderr);
+assert('restart surfaces server-side failure', rsFail.status === 4 && rsFail.stderr.includes('no such pane'), rsFail.stderr);
+
 finish();
