@@ -57,6 +57,14 @@ cicy-agent create <title> [--type cicy] [--model M]   从头创建全新代理�
 cicy-agent whoami                            查看当前 Agent ID、team ID、Instance ID、
                                               固定域名和 HTTPS URL。
 cicy-agent --json whoami                     供脚本使用的结构化身份信息。
+cicy-agent mail address                      查看当前 Agent 的邮箱（同时是 git email）：
+                                              <agent>.<instance>@cicy-ai.com
+cicy-agent mail ls [--unread] [--all]        列出当前 Agent 的邮件（--all：整个
+            [--limit N] [--agent ID]           Instance）。* 表示未读。
+cicy-agent mail read <id>                    显示一封邮件（并标记已读）。
+cicy-agent mail rm <id>                      删除一封邮件。
+cicy-agent mail wait [--from S] [--subject S] 等待一封新的匹配邮件（默认 300 秒），
+            [--timeout S]                      到达后打印，适合验证码 / 验证链接。
 
 cicy-agent cloud ls [--all]                  按 Team 分组列出 Cloud Agents。默认仅在线 Team；
                                               --all 包含离线 Team。

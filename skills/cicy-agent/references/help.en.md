@@ -57,6 +57,15 @@ cicy-agent create <title> [--type cicy] [--model M]   Create a BRAND-NEW agent f
 cicy-agent whoami                            Show this Agent ID, team ID, Instance ID,
                                               fixed domain and HTTPS URL.
 cicy-agent --json whoami                     Machine-readable identity for scripts.
+cicy-agent mail address                      This Agent's mailbox / git email:
+                                              <agent>.<instance>@cicy-ai.com
+cicy-agent mail ls [--unread] [--all]        List mail for this Agent (--all: whole
+            [--limit N] [--agent ID]           Instance). * marks unread.
+cicy-agent mail read <id>                    Print one mail (marks it read).
+cicy-agent mail rm <id>                      Delete one mail.
+cicy-agent mail wait [--from S] [--subject S] Block until a new matching mail arrives
+            [--timeout S]                      (default 300s), then print it — e.g.
+                                              verification codes / links.
 
 cicy-agent cloud ls [--all]                  List Cloud teams with nested Agents. Online only
                                               by default; --all includes offline teams.

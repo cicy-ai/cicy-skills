@@ -3,7 +3,7 @@
 // Subcommands: list / ls / tree / windows / capture / reply / msg / msgs /
 //              broadcast / get_online_agents / get_offline_agents /
 //              get_all_agents / projects / send-keys / restart / clear / fork / create /
-//              whoami / cloud
+//              whoami / cloud / mail
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -26,6 +26,7 @@ const GLOBAL_JSON = process.env.CICY_GLOBAL_JSON || join(homedir(), 'cicy-ai', '
 const CLOUD_DEVICE_JSON = process.env.CICY_CLOUD_DEVICE_JSON || join(homedir(), 'cicy-ai', 'db', 'cloud-device.json');
 const API_PORT = process.env.CICY_API_PORT || '8008';
 const API_BASE = `http://127.0.0.1:${API_PORT}`;
+const MAIL_ORIGIN = (process.env.CICY_MAIL_ORIGIN || 'https://cicy-agent-mail.w3c-offical.workers.dev').replace(/\/+$/, '');
 
 (async () => {
   try {
@@ -54,6 +55,7 @@ const API_BASE = `http://127.0.0.1:${API_PORT}`;
       case 'create': case 'new':  await cmdCreate(r2, node); break;
       case 'whoami': case 'identity': case 'self': await cmdWhoami(r2, node); break;
       case 'cloud':              await cmdCloud(r2); break;
+      case 'mail':               await cmdMail(r2); break;
       default: bail(`unknown command: ${cmd}. Try cicy-agent --help.`, 2);
     }
   } catch (e) {
@@ -784,6 +786,104 @@ async function cmdWhoami(args, node) {
   console.log(`domain\t${identity.proxyHost || '(not available)'}`);
   console.log(`url\t${identity.url || '(not available)'}`);
   if (cloudError) console.error(`warning: ${cloudError}`);
+}
+
+// ── Agent mailboxes ─────────────────────────────────────────────────────
+// <agent>.<instance>@cicy-ai.com → Cloudflare Email Routing → the
+// cicy-agent-mail Worker (D1). Reads authenticate with this Instance's hub
+// credential; the Worker only returns mail addressed to this Instance.
+async function mailAPI(method, path) {
+  const { token } = loadCloudCredential();
+  let res;
+  try {
+    res = await fetch(MAIL_ORIGIN + path, {
+      method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (e) { throw Object.assign(new Error(`cannot reach mail service at ${MAIL_ORIGIN} (${e.message})`), { exitCode: 3 }); }
+  const text = await res.text();
+  let body; try { body = JSON.parse(text); } catch { body = { error: text }; }
+  if (res.status === 401) throw Object.assign(new Error('mail service rejected this Instance (hub login required; cicy-cloud logins have no mailbox)'), { exitCode: 3 });
+  if (!res.ok) throw Object.assign(new Error(`mail service error (${res.status}): ${body?.error || text}`), { exitCode: 4 });
+  return body;
+}
+
+function mailFlags(args) {
+  const out = { _: [] };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--all' || a === '--unread') out[a.slice(2)] = true;
+    else if (['--limit', '--agent', '--from', '--subject', '--timeout'].includes(a)) out[a.slice(2)] = args[++i];
+    else out._.push(a);
+  }
+  return out;
+}
+
+function mailAgent(flags) {
+  const agent = String(flags.agent || currentAgentID() || '').trim().toLowerCase();
+  if (!agent) throw Object.assign(new Error('not in an Agent pane; pass --agent <id>'), { exitCode: 2 });
+  return agent;
+}
+
+function printMailRow(m) {
+  const when = new Date(m.received_at).toISOString().replace('T', ' ').slice(0, 19);
+  console.log(`${m.read_at ? ' ' : '*'} ${m.id}  ${when}  ${m.mailbox}  ${m.from_addr}  ${m.subject}`);
+}
+
+async function cmdMail(args) {
+  const [sub = 'ls', ...rest] = args;
+  const flags = mailFlags(rest);
+  if (sub === 'address' || sub === 'addr') {
+    const who = await mailAPI('GET', '/v1/whoami');
+    const address = `${mailAgent(flags)}.${who.instance}@${who.domain}`;
+    if (json) return ok({ address, instance: who.instance, domain: who.domain });
+    return console.log(address);
+  }
+  if (sub === 'ls' || sub === 'list') {
+    const q = new URLSearchParams({ limit: String(flags.limit || 20) });
+    if (!flags.all) q.set('agent', mailAgent(flags));
+    if (flags.unread) q.set('unread', '1');
+    const { mail } = await mailAPI('GET', `/v1/mail?${q}`);
+    if (json) return ok(mail);
+    if (!mail.length) return console.log('(no mail)');
+    mail.forEach(printMailRow);
+    return;
+  }
+  if (sub === 'read' || sub === 'show') {
+    const id = flags._[0];
+    if (!id) throw Object.assign(new Error('Usage: cicy-agent mail read <id>'), { exitCode: 2 });
+    const { mail } = await mailAPI('GET', `/v1/mail/${encodeURIComponent(id)}`);
+    if (json) return ok(mail);
+    console.log(`From: ${mail.from_addr}\nTo: ${mail.to_addr}\nSubject: ${mail.subject}\nDate: ${mail.sent_at || new Date(mail.received_at).toISOString()}`);
+    if (mail.attachments?.length) console.log(`Attachments: ${mail.attachments.map((a) => `${a.filename} (${a.size}B)`).join(', ')}`);
+    const body = mail.text || mail.html.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, ' ').replace(/[ \t]+/g, ' ');
+    console.log(`\n${body.trim()}`);
+    return;
+  }
+  if (sub === 'rm' || sub === 'delete') {
+    const id = flags._[0];
+    if (!id) throw Object.assign(new Error('Usage: cicy-agent mail rm <id>'), { exitCode: 2 });
+    await mailAPI('DELETE', `/v1/mail/${encodeURIComponent(id)}`);
+    if (json) return ok({ deleted: id });
+    return console.log(`deleted ${id}`);
+  }
+  if (sub === 'wait') {
+    // Block until a NEW mail for this agent arrives (optionally matching
+    // --from / --subject substrings); prints it like `mail read`.
+    const agent = mailAgent(flags);
+    const deadline = Date.now() + (Number(flags.timeout) || 300) * 1000;
+    const since = Date.now() - 5000;
+    const match = (m) => (!flags.from || m.from_addr.toLowerCase().includes(String(flags.from).toLowerCase()))
+      && (!flags.subject || m.subject.toLowerCase().includes(String(flags.subject).toLowerCase()));
+    while (Date.now() < deadline) {
+      const { mail } = await mailAPI('GET', `/v1/mail?agent=${encodeURIComponent(agent)}&since=${since}&limit=20`);
+      const hit = mail.find(match);
+      if (hit) return cmdMail(['read', hit.id]);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    throw Object.assign(new Error('timed out waiting for mail'), { exitCode: 5 });
+  }
+  throw Object.assign(new Error('Usage: cicy-agent mail <address|ls|read|rm|wait> [--all] [--unread] [--limit N] [--agent ID] [--from S] [--subject S] [--timeout S]'), { exitCode: 2 });
 }
 
 // ── CiCy Cloud instance messaging ──────────────────────────────────────

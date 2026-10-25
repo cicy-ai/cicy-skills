@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent",
-  "version": "1.6.18",
+  "version": "1.6.19",
   "title": "Cicy Agent",
   "description": "Operate local and Cloud Agents, discover this Instance's team ID and fixed domain, and coordinate work with tracked messages and completion notifications.",
   "category": "dev",
@@ -46,7 +46,7 @@
   "i18n": {
     "zh-CN": {
       "title": "Cicy Agent",
-    "description": "操作本地 Agent，并通过 CiCy Cloud 自动发现和消息路由访问其他 Instance；无需目标 Token。"
+      "description": "操作本地 Agent，并通过 CiCy Cloud 自动发现和消息路由访问其他 Instance；无需目标 Token。"
     }
   },
   "tools": [
