@@ -789,7 +789,7 @@ async function cmdWhoami(args, node) {
 }
 
 // ── Agent mailboxes ─────────────────────────────────────────────────────
-// <agent>.<instance>@agents.cicy-ai.com → Cloudflare Email Routing → the
+// <agent>.<instance>@cicy-ai.com → Cloudflare Email Routing → the
 // cicy-agent-mail Worker (D1). Reads authenticate with this Instance's hub
 // credential; the Worker only returns mail addressed to this Instance.
 async function mailAPI(method, path) {

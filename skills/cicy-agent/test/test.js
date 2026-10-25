@@ -178,7 +178,7 @@ const mailServer = spawn(process.execPath, ['-e', `
   const server = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.headers.authorization !== 'Bearer hub-test-token') { res.statusCode = 401; return res.end('{}'); }
-    if (req.url === '/v1/whoami') return res.end(JSON.stringify({ok:true,instance:'colab-limeng',domain:'agents.cicy-ai.com'}));
+    if (req.url === '/v1/whoami') return res.end(JSON.stringify({ok:true,instance:'colab-limeng',domain:'cicy-ai.com'}));
     if (req.url.startsWith('/v1/mail?')) {
       const agent = new URL(req.url, 'http://x').searchParams.get('agent');
       return res.end(JSON.stringify({ok:true,mail:[{id:'0f8fad5b-d9cb-469f-a165-70867728950e',mailbox:agent+'.colab-limeng',from_addr:'noreply@github.com',subject:'Verify '+agent,received_at:0,read_at:null}]}));
@@ -198,7 +198,7 @@ const mailAddr = runSkill(D, ['mail', 'address'], mailEnv);
 const mailLs = runSkill(D, ['mail', 'ls'], mailEnv);
 mailServer.kill();
 rmSync(mailDir, { recursive: true, force: true });
-assert('mail address is <agent>.<instance>@domain', mailAddr.status === 0 && mailAddr.stdout.trim() === 'w-1001.colab-limeng@agents.cicy-ai.com', mailAddr.stdout + mailAddr.stderr);
+assert('mail address is <agent>.<instance>@domain', mailAddr.status === 0 && mailAddr.stdout.trim() === 'w-1001.colab-limeng@cicy-ai.com', mailAddr.stdout + mailAddr.stderr);
 assert('mail ls is scoped to this agent', mailLs.status === 0 && mailLs.stdout.includes('Verify w-1001') && mailLs.stdout.includes('w-1001.colab-limeng'), mailLs.stdout + mailLs.stderr);
 
 finish();

@@ -58,7 +58,7 @@ cicy-agent whoami                            Show this Agent ID, team ID, Instan
                                               fixed domain and HTTPS URL.
 cicy-agent --json whoami                     Machine-readable identity for scripts.
 cicy-agent mail address                      This Agent's mailbox / git email:
-                                              <agent>.<instance>@agents.cicy-ai.com
+                                              <agent>.<instance>@cicy-ai.com
 cicy-agent mail ls [--unread] [--all]        List mail for this Agent (--all: whole
             [--limit N] [--agent ID]           Instance). * marks unread.
 cicy-agent mail read <id>                    Print one mail (marks it read).

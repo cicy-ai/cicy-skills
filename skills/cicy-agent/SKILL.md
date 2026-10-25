@@ -63,7 +63,7 @@ Details:
 - `projects` — list all projects without expanding Agents; use `projects --current` or `projects <id|name>` for one project's Agent details
 - `cloud ls [--all]` / `cloud agents [--all]` — discover Cloud Instances and Agents
 - `whoami` — return this Agent, team, Instance, and fixed-domain identity
-- `mail address|ls|read|rm|wait` — this Agent's own inbox `<agent>.<instance>@agents.cicy-ai.com` (hub Instances only); the same address is the pane's git author email, so `mail wait --from github` can complete GitHub email verification
+- `mail address|ls|read|rm|wait` — this Agent's own inbox `<agent>.<instance>@cicy-ai.com` (hub Instances only); the same address is the pane's git author email, so `mail wait --from github` can complete GitHub email verification
 - `msg <team.agent>` — route through CiCy Cloud and print the correlated reply
 
 ## Rules
