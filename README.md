@@ -120,6 +120,8 @@ node tools/test-skill.js skills/<name>
 
 ```bash
 # 1. Yank（下架）registry 里的所有版本
+#    推荐：Actions → "Yank skill" → Run workflow，填 skill 名（用仓库 secret，无需本地 token）
+#    或手动：
 ADMIN_TOKEN=$(jq -r .admin_token ~/cicy-ai/db/skills-registry-admin.json)
 
 # 获取所有版本
