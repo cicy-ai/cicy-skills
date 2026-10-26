@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-clean-deleted",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "title": "TG Clean Deleted",
   "description": "Use when a Telegram Web K account has \"Deleted Account\" chats piling up: scan them and delete those chats through agent-electron, no patch required.",
   "category": "productivity",
@@ -38,5 +38,11 @@
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
   },
-  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-clean-deleted"
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-clean-deleted",
+  "i18n": {
+    "zh-CN": {
+      "title": "TG 清理已注销账号",
+      "description": "Telegram Web K 账号里堆积了“已注销账号”会话时，通过 agent-electron 扫描并删除这些会话，无需打补丁。"
+    }
+  }
 }

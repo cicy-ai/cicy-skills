@@ -216,7 +216,18 @@ if (manifest.config?.path && !manifest.config.path.startsWith('~/cicy-ai/')) {
   );
 }
 
-// 11. static scan: forbid eval / Function in entry file (best-effort)
+// 11. zh-CN localization: the market UI shows i18n["zh-CN"] to Chinese
+// users and falls back to the English title/description when it is missing.
+const zh = manifest.i18n?.['zh-CN'];
+if (!zh?.title || !zh?.description) {
+  err(
+    'MISSING_I18N_ZH',
+    'manifest.i18n["zh-CN"] must have both title and description',
+    'add "i18n": { "zh-CN": { "title": "...", "description": "..." } } (description <=200 chars)',
+  );
+}
+
+// 12. static scan: forbid eval / Function in entry file (best-effort)
 if (entry && fileExists(entry)) {
   const src = readFileSync(join(SKILL_DIR, entry), 'utf8');
   if (/\beval\s*\(/.test(src)) {

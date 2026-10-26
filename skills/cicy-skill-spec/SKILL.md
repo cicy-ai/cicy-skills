@@ -139,6 +139,9 @@ git tag <name>-v<version> && git push origin <name>-v<version>
   appears, you cannot overwrite — **bump to a new version** and re-tag.
 - `category` must be one of: `network cloud ai dev system productivity agent infra other`.
 - SKILL.md frontmatter `description` must **exactly equal** manifest `description`.
+- manifest `i18n["zh-CN"]` needs both `title` and `description` (≤200 chars); the
+  market shows them in the Chinese UI and falls back to English without them.
+  `validate-skill.js` rejects a manifest that lacks them.
 
 ---
 
