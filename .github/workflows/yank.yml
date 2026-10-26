@@ -1,0 +1,37 @@
+name: Yank skill
+
+# Hide every published version of a skill from the registry (list API).
+# Used when a skill's source was removed from skills/. GitHub Release assets
+# are left in place.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "skill name, e.g. agent-mobile"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  yank:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Yank all versions
+        env:
+          ADMIN_TOKEN: ${{ secrets.SKILLS_REGISTRY_ADMIN_TOKEN }}
+          NAME: ${{ github.event.inputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "::error::bad skill name"; exit 1; }
+          base=https://skills.cicy-ai.com/v1
+          versions=$(curl -fsS "$base/skills/$NAME/versions" | jq -r '.data.versions[].version')
+          [ -n "$versions" ] || { echo "::error::no versions for $NAME"; exit 1; }
+          for v in $versions; do
+            code=$(curl -sS -o /tmp/out -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer $ADMIN_TOKEN" "$base/admin/skills/$NAME/$v")
+            echo "$NAME@$v → $code $(cat /tmp/out)"
+            [ "$code" -lt 300 ] || exit 1
+          done
