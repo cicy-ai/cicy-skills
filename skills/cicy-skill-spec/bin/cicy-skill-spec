@@ -100,6 +100,7 @@ function cmdScaffold() {
       help_en_md: 'references/help.en.md', help_cn_md: 'references/help.cn.md',
       tools_en_md: 'references/tools.en.md', tools_cn_md: 'references/tools.cn.md',
     },
+    i18n: { 'zh-CN': { title: `TODO: ${name} 中文标题`, description: 'TODO: 一句话中文简介（<=200 字符，技能市场中文界面显示）。' } },
   };
 
   const skillMd = `---\nname: ${name}\ndescription: ${desc}\n---\n\n# ${title}\n\nDescribe what this skill does and when an agent should invoke it.\n\n## Scope\n\nUse this skill when:\n\n- (replace with concrete triggers)\n\n## Quick start\n\n\`\`\`sh\n${name} --help\n\`\`\`\n\nIn dsh on a matrix machine: \`/${name}\` loads this file; the same commands work from its shell.\n\n## References\n\n- [help.md](./references/help.md)\n- [tools.md](./references/tools.md)\n`;

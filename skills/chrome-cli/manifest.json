@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "chrome-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Chrome CLI",
   "description": "Manage local native Chrome profiles and CDP directly on macOS or Linux without cicy-desktop or Electron RPC. Use agent-chrome instead for remote Chrome on a connected cicy-desktop client.",
   "category": "dev",
@@ -23,5 +23,11 @@
     "help_cn_md": "references/help.cn.md",
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Chrome 本地控制",
+      "description": "在 macOS 或 Linux 上直接管理本机 Chrome 的 profile 并调用 CDP，不需要 cicy-desktop 或 Electron RPC。要控制已连接 cicy-desktop 上的远程 Chrome，请用 agent-chrome。"
+    }
   }
 }

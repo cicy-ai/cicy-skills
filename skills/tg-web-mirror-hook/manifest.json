@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-web-mirror-hook",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "title": "TG Web Mirror Hook",
   "description": "Use when Telegram Web K needs window.__mirrors exposed, its host injection script installed, or its apiManagerProxy cache changed and verified.",
   "category": "dev",
@@ -40,5 +40,11 @@
     "help_cn_md": "references/help.cn.md",
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "TG Web 镜像钩子",
+      "description": "用于让 Telegram Web K 暴露 window.__mirrors、安装宿主注入脚本，或修改并验证其 apiManagerProxy 缓存。"
+    }
   }
 }

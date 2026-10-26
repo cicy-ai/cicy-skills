@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-agent-role",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "title": "CiCy Agent Role",
   "description": "Create, validate, search, install, and safely update CiCy Agent role templates. Use when building reusable roles for the Create Agent dialog or managing roles from the public Agent Role Market.",
   "category": "agent",
@@ -23,5 +23,11 @@
     "help_cn_md": "references/help.cn.md",
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Agent 角色模板",
+      "description": "创建、校验、搜索、安装并安全更新 CiCy Agent 角色模板。用于为「新建 Agent」对话框制作可复用角色，或管理公共 Agent 角色市场里的角色。"
+    }
   }
 }

@@ -101,7 +101,7 @@ node tools/test-skill.js skills/<name>
   "runtime": { "node": ">=18" },
   "entry": "bin/my-skill",
   "i18n": {
-    "zh-CN": { "title": "我的 Skill", "description": "中文描述" }
+    "zh-CN": { "title": "我的 Skill", "description": "中文描述" }   // 必填，validate 会检查
   },
   "tools": [
     {

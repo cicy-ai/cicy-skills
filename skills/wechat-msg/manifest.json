@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "wechat-msg",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "title": "WeChat Msg",
   "description": "Send text or images to your WeChat through the ilink bot channel, reusing cicy-code persisted login (~/cicy-ai/db/im-wechat-N.json). send 支持 --image 发送图片(ilink CDN 加密上传)。Subcommands: send / status.",
   "category": "productivity",
@@ -33,5 +33,11 @@
     "help_cn_md": "references/help.cn.md",
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "微信消息",
+      "description": "通过 ilink 机器人通道给你的微信发送文字或图片，复用 cicy-code 已保存的登录（~/cicy-ai/db/im-wechat-N.json）。--image 走 ilink CDN 加密上传。子命令：send / status。"
+    }
   }
 }

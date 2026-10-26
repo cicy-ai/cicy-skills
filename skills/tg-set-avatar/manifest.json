@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-set-avatar",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "title": "TG Set Avatar",
   "description": "Use when a Telegram account running in Telegram Web K needs its profile photo (avatar) shown, previewed or set through agent-electron, defaulting to a smiling cartoon girl avatar picked per account.",
   "category": "productivity",
@@ -40,5 +40,11 @@
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
   },
-  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-avatar"
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-avatar",
+  "i18n": {
+    "zh-CN": {
+      "title": "TG 设置头像",
+      "description": "通过 agent-electron 查看、预览或设置 Telegram Web K 账号的头像，默认按账号挑选一张微笑卡通女孩头像。"
+    }
+  }
 }

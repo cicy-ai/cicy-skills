@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-set-name",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "title": "TG Set Name",
   "description": "Use when a Telegram account running in Telegram Web K needs its display name (first + last name) shown or set through agent-electron, defaulting to a cute Chinese girl name picked per account.",
   "category": "productivity",
@@ -39,5 +39,11 @@
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
   },
-  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-name"
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-name",
+  "i18n": {
+    "zh-CN": {
+      "title": "TG 设置昵称",
+      "description": "通过 agent-electron 查看或设置 Telegram Web K 账号的显示名（名和姓），默认按账号挑选一个可爱的中文女孩名字。"
+    }
+  }
 }

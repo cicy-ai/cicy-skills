@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "cicy-knowledge",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "title": "Cicy Knowledge",
   "description": "Team knowledge store CLI over cicy-code /api/knowledge: add/list/get/recall/promote/reject/supersede + draft/deprecate maturity flags + specialist pin. Recall = keyword+tag over canon, no vector RAG.",
   "category": "agent",
@@ -74,5 +74,11 @@
       "example": "cicy-knowledge specialist [<pane>]",
       "description": "Show or pin which pane is the 知识专员 (receives memory-hook briefs). Config-file backed (global.json), not a DB role query; defaults to the master pane w-1001."
     }
-  ]
+  ],
+  "i18n": {
+    "zh-CN": {
+      "title": "团队知识库",
+      "description": "基于 cicy-code /api/knowledge 的团队知识库 CLI：add/list/get/recall/promote/reject/supersede，支持草稿、弃用标记和专家置顶。recall 按关键词和标签检索已审核条目，不用向量检索。"
+    }
+  }
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-autojoin",
-  "version": "2.1.4",
+  "version": "2.1.5",
   "title": "Telegram 自动 JOIN 注入脚本",
   "description": "把 Telegram Web 自动 JOIN 注入脚本按版本下发到矩阵机(wsd),并核对各机装的是哪个版本。",
   "category": "agent",
@@ -34,5 +34,11 @@
     "help_cn_md": "references/help.cn.md",
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
+  },
+  "i18n": {
+    "zh-CN": {
+      "title": "Telegram 自动 JOIN 注入脚本",
+      "description": "把 Telegram Web 自动 JOIN 注入脚本按版本下发到矩阵机(wsd),并核对各机装的是哪个版本。"
+    }
   }
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "tg-set-username",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "title": "TG Set Username",
   "description": "Use when a Telegram account running in Telegram Web K needs its public @username shown, checked, set or cleared through agent-electron, no patch required.",
   "category": "productivity",
@@ -38,5 +38,11 @@
     "tools_en_md": "references/tools.en.md",
     "tools_cn_md": "references/tools.cn.md"
   },
-  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-username"
+  "homepage": "https://github.com/cicy-ai/cicy-skills/tree/main/skills/tg-set-username",
+  "i18n": {
+    "zh-CN": {
+      "title": "TG 设置用户名",
+      "description": "通过 agent-electron 查看、检查可用性、设置或清除 Telegram Web K 账号的公开 @用户名，无需打补丁。"
+    }
+  }
 }
