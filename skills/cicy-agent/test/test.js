@@ -178,7 +178,7 @@ const mailServer = spawn(process.execPath, ['-e', `
   const server = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.headers.authorization !== 'Bearer hub-test-token') { res.statusCode = 401; return res.end('{}'); }
-    if (req.url === '/v1/whoami') return res.end(JSON.stringify({ok:true,instance:'colab-limeng',domain:'cicy-ai.com'}));
+    if (!req.url.startsWith('/api/mail/')) { res.statusCode = 404; return res.end('{}'); } req.url = req.url.slice('/api/mail'.length); if (req.url === '/v1/whoami') return res.end(JSON.stringify({ok:true,instance:'colab-limeng',domain:'cicy-ai.com'}));
     if (req.url.startsWith('/v1/mail?')) {
       const agent = new URL(req.url, 'http://x').searchParams.get('agent');
       return res.end(JSON.stringify({ok:true,mail:[{id:'0f8fad5b-d9cb-469f-a165-70867728950e',mailbox:agent+'.colab-limeng',from_addr:'noreply@github.com',subject:'Verify '+agent,received_at:0,read_at:null}]}));
@@ -193,7 +193,8 @@ for (let i = 0; i < 100 && !mailPort; i++) {
 }
 const mailDevice = join(mailDir, 'cloud-device.json');
 writeFileSync(mailDevice, JSON.stringify({ token: 'hub-test-token', mode: 'hub', cloud_origin: 'https://ws.cicy-ai.com' }));
-const mailEnv = { CICY_CLOUD_DEVICE_JSON: mailDevice, CICY_MAIL_ORIGIN: `http://127.0.0.1:${mailPort}`, X_AGENT_SHORT_ID: 'w-1001' };
+writeFileSync(mailDevice, JSON.stringify({ token: 'hub-test-token', mode: 'hub', cloud_origin: `http://127.0.0.1:${mailPort}` }));
+const mailEnv = { CICY_CLOUD_DEVICE_JSON: mailDevice, X_AGENT_SHORT_ID: 'w-1001' };
 const mailAddr = runSkill(D, ['mail', 'address'], mailEnv);
 const mailLs = runSkill(D, ['mail', 'ls'], mailEnv);
 mailServer.kill();
