@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 
 const NAME = 'luckgram';
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const LOCAL_URL = 'http://127.0.0.1:28765/mcp';
 const CLOUD_URL = 'https://mcp.luckgram.cc/mcp';
 const CLOUD_BACKUP_URL = 'https://lg-mcp.cat158.com/mcp';
@@ -59,6 +59,17 @@ Groups and channels (skill: groups)
 Profile            (skill: profile)
   luckgram profile set [--first <name>] [--last <name>] [--bio <text>]
 
+Bots, through @BotFather   (skill: botfather)
+  luckgram bots list
+  luckgram bots create <username> --name <display name> [--out <file>]
+  luckgram bots token <bot> [--revoke] [--out <file>]
+  luckgram bots set <bot> [--name <n>] [--description <t>] [--about <t>] [--privacy on|off] [--groups on|off]
+  luckgram bots commands <bot> 'start=Start the bot' 'help=How it works' …   (or --clear)
+  luckgram bots delete <bot> --confirm <bot>
+  luckgram botfather send <text…>               anything else: a command or an answer to its question
+  luckgram botfather press <message id> <button text…>
+  luckgram botfather read [--limit N]
+
 Raw
   luckgram tools                                the server's tool list
   luckgram call <tool> ['<json arguments>']     call any tool
@@ -76,7 +87,7 @@ Skills are switched on per account by the user in Luckgram Desktop
 `;
 
 // ── arguments ────────────────────────────────────────────────────────────
-const BOOLEAN_FLAGS = new Set(['json', 'unread', 'stdin', 'token-stdin', 'local', 'cloud', 'backup', 'help']);
+const BOOLEAN_FLAGS = new Set(['json', 'unread', 'stdin', 'token-stdin', 'local', 'cloud', 'backup', 'help', 'revoke', 'clear']);
 
 function parseArgs(argv) {
   const flags = {};
@@ -444,6 +455,102 @@ const COMMANDS = {
     });
     if (result?.isError) fail(EXIT.TOOL, result.content?.[0]?.text || 'the tool failed');
     out(flags, result.structuredContent ?? {}, (v) => `updated: ${v.name}` + (v.bio !== undefined ? `  bio: ${v.bio || '(empty)'}` : ''));
+  },
+  async bots(conn, flags, rest) {
+    const [sub, name, ...more] = rest;
+    const account = flags.account;
+    const bot = (text) => {
+      if (!text) fail(EXIT.USAGE, 'which bot? give its username');
+      return text.replace(/^@/, '');
+    };
+    // A bot token is a secret: with --out it goes to a file only the owner
+    // can read and the output shows it masked.
+    const withToken = (value) => {
+      if (!flags.out || !value.token) return value;
+      writeFileSync(flags.out, value.token + '\n', { mode: 0o600 });
+      try { chmodSync(flags.out, 0o600); } catch { /* Windows */ }
+      const hidden = JSON.parse(JSON.stringify(value).split(value.token).join(mask(value.token)));
+      return { ...hidden, token_file: flags.out };
+    };
+    const tokenLine = (v) => (v.token_file ? `token saved to ${v.token_file} (${v.token})` : `token: ${v.token}`);
+    const onOff = (key) => {
+      if (flags[key] === undefined) return undefined;
+      if (flags[key] !== 'on' && flags[key] !== 'off') fail(EXIT.USAGE, `--${key} takes on or off`);
+      return flags[key] === 'on';
+    };
+    if (sub === 'list') {
+      const value = await tool(conn, 'botfather_list_bots', { account });
+      out(flags, value, (v) => (v.bots.length ? v.bots.map((b) => '@' + b).join('\n') : '(no bots)'));
+    } else if (sub === 'create') {
+      if (!flags.name) fail(EXIT.USAGE, 'bots create <username> --name <display name>');
+      const value = withToken(await tool(conn, 'botfather_create_bot', { account, name: flags.name, username: bot(name) }));
+      out(flags, value, (v) => `created @${v.username}  ${v.link}\n${tokenLine(v)}`);
+    } else if (sub === 'token') {
+      const value = withToken(await tool(conn, flags.revoke ? 'botfather_revoke_token' : 'botfather_get_token', { account, bot: bot(name) }));
+      out(flags, value, (v) => `@${v.bot}${flags.revoke ? ' (new token, the old one no longer works)' : ''}\n${tokenLine(v)}`);
+    } else if (sub === 'set') {
+      const username = bot(name);
+      const steps = [
+        ['name', 'botfather_set_name', { name: flags.name }],
+        ['description', 'botfather_set_description', { description: flags.description }],
+        ['about', 'botfather_set_about', { about: flags.about }],
+        ['privacy', 'botfather_set_privacy', { enabled: onOff('privacy') }],
+        ['groups', 'botfather_set_join_groups', { enabled: onOff('groups') }],
+      ].filter(([key]) => flags[key] !== undefined);
+      if (!steps.length) fail(EXIT.USAGE, 'bots set <bot> with at least one of --name --description --about --privacy --groups');
+      const done = [];
+      for (const [key, name2, args] of steps) {
+        await tool(conn, name2, { account, bot: username, ...args });
+        done.push(key);
+      }
+      out(flags, { bot: username, updated: done }, (v) => `@${v.bot} updated: ${v.updated.join(', ')}`);
+    } else if (sub === 'commands') {
+      const username = bot(name);
+      const commands = more.map((pair) => {
+        const eq = pair.indexOf('=');
+        if (eq < 1) fail(EXIT.USAGE, `"${pair}": write each command as command=description`);
+        return { command: pair.slice(0, eq).replace(/^\//, ''), description: pair.slice(eq + 1) };
+      });
+      if (!commands.length && !flags.clear) fail(EXIT.USAGE, "bots commands <bot> 'start=Start the bot' …   (or --clear)");
+      // An empty list is a value here: it clears the commands.
+      const result = await rpc(conn, 'tools/call', {
+        name: 'botfather_set_commands',
+        arguments: {
+          ...(account ? { account } : {}), bot: username, commands,
+          ...(isCloud(conn.url) && conn.device ? { device: conn.device } : {}),
+        },
+      });
+      if (result?.isError) fail(EXIT.TOOL, result.content?.[0]?.text || 'the tool failed');
+      out(flags, result.structuredContent ?? {}, () => `@${username}: ${commands.length ? commands.length + ' commands set' : 'commands cleared'}`);
+    } else if (sub === 'delete') {
+      const username = bot(name);
+      if (!flags.confirm) fail(EXIT.USAGE, `deleting cannot be undone. Repeat the username: bots delete ${username} --confirm ${username}`);
+      const value = await tool(conn, 'botfather_delete_bot', { account, bot: username, confirm: bot(flags.confirm) });
+      out(flags, value, (v) => `deleted @${v.bot}`);
+    } else {
+      fail(EXIT.USAGE, 'bots list | create | token | set | commands | delete. See: luckgram --help');
+    }
+  },
+  async botfather(conn, flags, rest) {
+    const [sub, ...words] = rest;
+    const account = flags.account;
+    const show = (m) => `[${m.id}] ${m.out ? 'me' : 'BotFather'}: ${m.text}`
+      + (m.buttons?.length ? '\n    buttons: ' + m.buttons.map((b) => `[${b.text}]`).join(' ') : '');
+    if (sub === 'send') {
+      if (!words.join(' ').trim()) fail(EXIT.USAGE, 'botfather send <text…>');
+      const value = await tool(conn, 'botfather_send', { account, text: words.join(' ') });
+      out(flags, value, (v) => show(v.reply));
+    } else if (sub === 'press') {
+      const id = Number(words[0]);
+      if (!Number.isInteger(id) || words.length < 2) fail(EXIT.USAGE, 'botfather press <message id> <button text…>');
+      const value = await tool(conn, 'botfather_press', { account, message_id: id, button: words.slice(1).join(' ') });
+      out(flags, value, (v) => (v.url ? `link: ${v.url}` : show(v.reply) + (v.changed ? '' : '\n(nothing changed yet)')));
+    } else if (sub === 'read') {
+      const value = await tool(conn, 'botfather_read', { account, limit: intFlag(flags, 'limit') });
+      out(flags, value, (v) => v.messages.map(show).join('\n') || '(no messages)');
+    } else {
+      fail(EXIT.USAGE, 'botfather send | press | read. See: luckgram --help');
+    }
   },
   async tools(conn, flags) {
     const value = await rpc(conn, 'tools/list');

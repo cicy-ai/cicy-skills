@@ -62,6 +62,22 @@ luckgram profile set [--first <名>] [--last <姓>] [--bio <简介>]   Skill：p
 
 `--last ""` 或 `--bio ""` 表示清空。
 
+## 机器人（@BotFather）
+
+```
+luckgram bots list                                              Skill：botfather
+luckgram bots create <用户名> --name <显示名称> [--out <文件>]     每小时 3 次，每天 10 次
+luckgram bots token <机器人> [--revoke] [--out <文件>]           取 API 令牌；--revoke 重置为新令牌
+luckgram bots set <机器人> [--name <名称>] [--description <说明>] [--about <简介>] [--privacy on|off] [--groups on|off]
+luckgram bots commands <机器人> 'start=开始' 'help=使用说明' …     （--clear 清空全部命令）
+luckgram bots delete <机器人> --confirm <机器人>                  无法撤销；每小时 3 次，每天 10 次
+luckgram botfather send <文字…>                                  发一条命令或回答，返回它的回复和按钮
+luckgram botfather press <消息 id> <按钮文字…>                    点它某条消息下的按钮
+luckgram botfather read [--limit N]                              这个会话的最近消息
+```
+
+`--out <文件>` 把机器人令牌写进只有你能读的文件，输出里只显示打码后的令牌。
+
 ## 原始调用
 
 ```

@@ -57,6 +57,13 @@
 | `groups join` | `join_chat` | `groups` |
 | `groups leave` | `leave_chat` | `groups` |
 | `profile set` | `update_profile` | `profile` |
+| `bots list` | `botfather_list_bots` | `botfather` |
+| `bots create` | `botfather_create_bot` | `botfather` |
+| `bots token` | `botfather_get_token`、`botfather_revoke_token` | `botfather` |
+| `bots set` | `botfather_set_name`、`_description`、`_about`、`_privacy`、`_join_groups` | `botfather` |
+| `bots commands` | `botfather_set_commands` | `botfather` |
+| `bots delete` | `botfather_delete_bot` | `botfather` |
+| `botfather send / press / read` | `botfather_send`、`botfather_press`、`botfather_read` | `botfather` |
 
 Skill 在 Luckgram 桌面版里按账号开启。每个工具的完整说明、参数和上限见 <https://luckgram.cc/skills/>。
 

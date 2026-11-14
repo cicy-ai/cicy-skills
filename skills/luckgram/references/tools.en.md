@@ -57,6 +57,13 @@ Written by `luckgram config`. Do not read it: `luckgram status` shows what is sa
 | `groups join` | `join_chat` | `groups` |
 | `groups leave` | `leave_chat` | `groups` |
 | `profile set` | `update_profile` | `profile` |
+| `bots list` | `botfather_list_bots` | `botfather` |
+| `bots create` | `botfather_create_bot` | `botfather` |
+| `bots token` | `botfather_get_token`, `botfather_revoke_token` | `botfather` |
+| `bots set` | `botfather_set_name`, `_description`, `_about`, `_privacy`, `_join_groups` | `botfather` |
+| `bots commands` | `botfather_set_commands` | `botfather` |
+| `bots delete` | `botfather_delete_bot` | `botfather` |
+| `botfather send / press / read` | `botfather_send`, `botfather_press`, `botfather_read` | `botfather` |
 
 Skills are switched on per account in Luckgram Desktop. The full description of each tool, its arguments and limits: <https://luckgram.cc/skills/>.
 

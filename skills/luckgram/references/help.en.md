@@ -62,6 +62,22 @@ luckgram profile set [--first <n>] [--last <n>] [--bio <text>]   skill: profile 
 
 An empty `--last ""` or `--bio ""` removes it.
 
+## Bots (@BotFather)
+
+```
+luckgram bots list                                              skill: botfather
+luckgram bots create <username> --name <display name> [--out <file>]     3/hour, 10/day
+luckgram bots token <bot> [--revoke] [--out <file>]             the API token; --revoke makes a new one
+luckgram bots set <bot> [--name <n>] [--description <t>] [--about <t>] [--privacy on|off] [--groups on|off]
+luckgram bots commands <bot> 'start=Start the bot' 'help=How it works' …    (--clear removes all)
+luckgram bots delete <bot> --confirm <bot>                      cannot be undone; 3/hour, 10/day
+luckgram botfather send <text…>                                 a command or an answer, returns its reply and buttons
+luckgram botfather press <message id> <button text…>            press a button under one of its messages
+luckgram botfather read [--limit N]                             the latest messages of that chat
+```
+
+`--out <file>` writes the bot token to a file only you can read and shows it masked in the output.
+
 ## Raw
 
 ```

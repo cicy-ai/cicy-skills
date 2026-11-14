@@ -1,11 +1,11 @@
 {
   "$schema": "https://skills.cicy-ai.com/v1/manifest.schema.json",
   "name": "luckgram",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "title": "Luckgram",
-  "description": "Work with the Telegram accounts in Luckgram Desktop through its MCP server, local or cloud: accounts, friends, chats, messages, groups, profile. Tokens stay masked.",
+  "description": "Work with the Telegram accounts in Luckgram Desktop through its MCP server, local or cloud: accounts, friends, chats, messages, groups, profile, bots via BotFather. Tokens stay masked.",
   "category": "agent",
-  "tags": ["telegram", "luckgram", "mcp", "accounts", "messages"],
+  "tags": ["telegram", "luckgram", "mcp", "accounts", "messages", "botfather", "bots"],
   "author": "cicy-ai",
   "homepage": "https://luckgram.cc/skills/",
   "license": "MIT",
@@ -33,7 +33,7 @@
   "i18n": {
     "zh-CN": {
       "title": "Luckgram",
-      "description": "通过 Luckgram 桌面版的 MCP 接口（本机或云端）操作 Telegram 账号：账号、好友、会话、消息、群组、资料。令牌全程打码，不会输出。"
+      "description": "通过 Luckgram 桌面版的 MCP 接口（本机或云端）操作 Telegram 账号：账号、好友、会话、消息、群组、资料、通过 BotFather 管理机器人。令牌全程打码，不会输出。"
     }
   }
 }

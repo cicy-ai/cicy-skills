@@ -11,6 +11,7 @@
 - `luckgram chats list | read`
 - `luckgram messages get | send`
 - `luckgram groups join | leave`, `luckgram profile set`
+- `luckgram bots list | create | token | set | commands | delete`, `luckgram botfather send | press | read` — bots, through @BotFather
 - `luckgram devices`, `luckgram calls` — the cloud: computers and the audit list
 - `luckgram status` — what is configured (tokens masked) and whether it answers
 

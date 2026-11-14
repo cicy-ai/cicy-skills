@@ -97,6 +97,43 @@ try {
   assert('profile set with nothing exits 2', run(['profile', 'set']).status === 2);
   assert('--limit must be a number', run(['chats', 'list', '--limit', 'x']).status === 2);
 
+  // ── bots, through BotFather ──
+  const BOT_TOKEN = '7214567890:AAHk3mN9xQ2vB7cL5tR8wY1zP4sD6fG0jKe';
+  assert('bots list', run(['bots', 'list']).stdout.trim() === '@my_shop_bot\n@other_bot');
+  const created = JSON.parse(run(['bots', 'create', '@new_shop_bot', '--name', 'New Shop', '--json']).stdout);
+  assert('bots create strips @ and passes the name', created.echo.username === 'new_shop_bot' && created.echo.name === 'New Shop' && created.token === BOT_TOKEN);
+  assert('bots create needs --name', run(['bots', 'create', 'new_shop_bot']).status === 2);
+  const tokenFile = join(dir, 'bot.token');
+  const saved2 = run(['bots', 'create', 'new_shop_bot', '--name', 'New Shop', '--out', tokenFile]);
+  assert('--out writes the token to a file', readFileSync(tokenFile, 'utf8').trim() === BOT_TOKEN);
+  assert('--out keeps the token out of the output', saved2.status === 0 && !saved2.stdout.includes(BOT_TOKEN) && saved2.stdout.includes('token saved to'));
+  assert('--out keeps the token out of --json too', !run(['bots', 'token', 'my_shop_bot', '--out', tokenFile, '--json']).stdout.includes(BOT_TOKEN));
+  if (process.platform !== 'win32') {
+    assert('the token file is 0600', (statSync(tokenFile).mode & 0o777) === 0o600);
+  }
+  const taken = run(['bots', 'create', 'taken_bot', '--name', 'X']);
+  assert("BotFather's refusal exits 1 with its words", taken.status === 1 && taken.stderr.includes('already taken'));
+  assert('bots token', run(['bots', 'token', 'my_shop_bot']).stdout.includes('token: ' + BOT_TOKEN));
+  assert('bots token --revoke calls revoke', JSON.parse(run(['bots', 'token', 'my_shop_bot', '--revoke', '--json']).stdout).tool === 'botfather_revoke_token');
+  const set = JSON.parse(run(['bots', 'set', 'my_shop_bot', '--name', 'Shop', '--privacy', 'off', '--json']).stdout);
+  assert('bots set runs one tool per flag', set.updated.join(',') === 'name,privacy');
+  assert('bots set --privacy takes on or off', run(['bots', 'set', 'my_shop_bot', '--privacy', 'maybe']).status === 2);
+  assert('bots set with nothing exits 2', run(['bots', 'set', 'my_shop_bot']).status === 2);
+  const cmds = JSON.parse(run(['bots', 'commands', 'my_shop_bot', 'start=Start the bot', '/help=How it works', '--json']).stdout);
+  assert('bots commands parses command=description', cmds.echo.commands.length === 2 && cmds.echo.commands[1].command === 'help' && cmds.echo.commands[0].description === 'Start the bot');
+  assert('bots commands --clear sends an empty list', JSON.parse(run(['bots', 'commands', 'my_shop_bot', '--clear', '--json']).stdout).echo.commands.length === 0);
+  assert('bots commands with nothing exits 2', run(['bots', 'commands', 'my_shop_bot']).status === 2);
+  assert('bots commands rejects a bare word', run(['bots', 'commands', 'my_shop_bot', 'start']).status === 2);
+  assert('bots delete needs --confirm', run(['bots', 'delete', 'my_shop_bot']).status === 2);
+  const deleted = JSON.parse(run(['bots', 'delete', 'my_shop_bot', '--confirm', '@my_shop_bot', '--json']).stdout);
+  assert('bots delete passes the confirmation', deleted.echo.confirm === 'my_shop_bot' && deleted.tool === 'botfather_delete_bot');
+  const sent = run(['botfather', 'send', '/mybots']);
+  assert('botfather send shows the reply and its buttons', sent.stdout.includes('[40] BotFather: Choose a bot.') && sent.stdout.includes('[@my_shop_bot]'));
+  const pressed = JSON.parse(run(['botfather', 'press', '40', 'Edit', 'Bot', '--json']).stdout);
+  assert('botfather press joins the button text', pressed.echo.message_id === 40 && pressed.echo.button === 'Edit Bot');
+  assert('botfather press needs an id and a button', run(['botfather', 'press', '40']).status === 2);
+  assert('botfather read', run(['botfather', 'read', '--limit', '2']).stdout.includes('[41] BotFather: Success! Name updated.'));
+
   // ── refusals keep their own words and exit 1 ──
   const off = run(['chats', 'list', '--account', '7000000000001']);
   assert('skill off exits 1', off.status === 1);
