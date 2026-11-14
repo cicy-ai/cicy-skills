@@ -480,7 +480,8 @@ const COMMANDS = {
     };
     if (sub === 'list') {
       const value = await tool(conn, 'botfather_list_bots', { account });
-      out(flags, value, (v) => (v.bots.length ? v.bots.map((b) => '@' + b).join('\n') : '(no bots)'));
+      out(flags, value, (v) => (v.bots.length ? v.bots.map((b) => '@' + b).join('\n') : '(no bots)')
+        + (v.more && v.reply ? `\n(more: luckgram botfather press ${v.reply.id} "»")` : ''));
     } else if (sub === 'create') {
       if (!flags.name) fail(EXIT.USAGE, 'bots create <username> --name <display name>');
       const value = withToken(await tool(conn, 'botfather_create_bot', { account, name: flags.name, username: bot(name) }));

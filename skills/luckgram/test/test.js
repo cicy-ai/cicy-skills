@@ -100,6 +100,7 @@ try {
   // ── bots, through BotFather ──
   const BOT_TOKEN = '7214567890:AAHk3mN9xQ2vB7cL5tR8wY1zP4sD6fG0jKe';
   assert('bots list', run(['bots', 'list']).stdout.trim() === '@my_shop_bot\n@other_bot');
+  assert('bots list says when there is another page', run(['bots', 'list', '--account', '111']).stdout.includes('(more: luckgram botfather press 30 "»")'));
   const created = JSON.parse(run(['bots', 'create', '@new_shop_bot', '--name', 'New Shop', '--json']).stdout);
   assert('bots create strips @ and passes the name', created.echo.username === 'new_shop_bot' && created.echo.name === 'New Shop' && created.token === BOT_TOKEN);
   assert('bots create needs --name', run(['bots', 'create', 'new_shop_bot']).status === 2);

@@ -34,7 +34,7 @@ function call(name, args) {
   if (name === 'get_messages') return ok({ account, chat_id: '5', chat_name: 'Bob', messages: [{ id: 7, date: 1794630000, out: false, from_id: '5', from_name: 'Bob', text: 'hello' }], echo: args });
   if (name === 'send_message') return args.text === 'limit' ? err('Rate limit for send_message on this account (30 an hour, 200 a day). Try again in 120 seconds. Do not retry sooner.') : ok({ account, queued: true, chat_id: '5', chat_name: 'Bob', echo: args });
   const TOKEN = '7214567890:AAHk3mN9xQ2vB7cL5tR8wY1zP4sD6fG0jKe';
-  if (name === 'botfather_list_bots') return ok({ account, bots: ['my_shop_bot', 'other_bot'], reply: { id: 30, text: 'Choose a bot from the list below:' } });
+  if (name === 'botfather_list_bots') return ok({ account, bots: ['my_shop_bot', 'other_bot'], more: args.account === '111', reply: { id: 30, text: 'Choose a bot from the list below:' } });
   if (name === 'botfather_create_bot') return args.username === 'taken_bot' ? err('BotFather answered: Sorry, this username is already taken. Please try something different.') : ok({ account, created: true, username: args.username, link: 'https://t.me/' + args.username, token: TOKEN, reply: { id: 31, text: 'Done! Use this token: ' + TOKEN }, echo: args });
   if (name === 'botfather_get_token' || name === 'botfather_revoke_token') return ok({ account, bot: args.bot, token: TOKEN, tool: name });
   if (name.startsWith('botfather_set_') || name === 'botfather_delete_bot') return ok({ account, bot: args.bot, done: true, echo: args, tool: name });
