@@ -1,0 +1,57 @@
+#!/usr/bin/env node
+// A tiny MCP server for the tests: answers like Luckgram Desktop (or, with
+// "cloud" as the third argument, like the relay). Writes its port to the file
+// given as the first argument; argv[2] is the token it accepts.
+import { createServer } from 'node:http';
+import { writeFileSync } from 'node:fs';
+
+const [portFile, token, mode] = process.argv.slice(2);
+const accounts = [
+  { id: '111', index: 1, name: 'Alice', username: 'alice', phone: '8613800000001', unread: 5, unread_muted: false, premium: false, active: true },
+  { id: '7000000000001', index: 2, name: '奶油小可爱', unread: 0, unread_muted: false, premium: true, active: false },
+];
+const ok = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: false });
+const err = (text) => ({ content: [{ type: 'text', text }], isError: true });
+
+function call(name, args) {
+  if (mode === 'cloud' && name === 'list_devices') return ok({ devices: [{ id: 'dev-00000001', name: 'Office PC', version: '7.4.2.124', online: true, last_seen: '2026-11-14T06:00:00.000Z' }] });
+  if (name === 'list_accounts') return ok({ accounts, seen_device: args.device ?? null });
+  if (name === 'get_active_account') return ok({ account: accounts.find((a) => a.active) });
+  if (name === 'switch_account') {
+    const found = accounts.find((a) => (args.id !== undefined && a.id === args.id)
+      || (args.username !== undefined && a.username === args.username)
+      || (args.index !== undefined && a.index === args.index));
+    if (!found) return err('No such account is logged in. Call list_accounts to see the accounts.');
+    for (const a of accounts) a.active = (a === found);
+    return ok({ switched: true, already_active: false, account: found });
+  }
+  const account = args.account ?? '111';
+  if (account !== '111') return err(`The "chats" skill is off for account ${account}. The user switches it on in Luckgram Desktop: Settings > Luckgram > Local MCP server.`);
+  if (name === 'list_chats') return ok({ account, total: 1, offset: 0, complete: true, chats: [{ id: '5', type: 'user', name: 'Bob', unread: 2, unread_mark: false, muted: false, pinned: true, last_message_date: 1794630000 }], echo: args });
+  if (name === 'list_friends') return ok({ account, total: 1, offset: 0, friends: [{ id: '5', name: 'Bob', username: 'bob', bot: false, mutual: true }], echo: args });
+  if (name === 'find_user') return ok({ account, user: { id: '9', name: 'Carol', username: args.username ?? 'carol', bot: false, friend: false }, echo: args });
+  if (name === 'add_friend') return ok({ account, added: true, already_friend: false, user: { id: '9', name: 'Carol' }, echo: args });
+  if (name === 'get_messages') return ok({ account, chat_id: '5', chat_name: 'Bob', messages: [{ id: 7, date: 1794630000, out: false, from_id: '5', from_name: 'Bob', text: 'hello' }], echo: args });
+  if (name === 'send_message') return args.text === 'limit' ? err('Rate limit for send_message on this account (30 an hour, 200 a day). Try again in 120 seconds. Do not retry sooner.') : ok({ account, queued: true, chat_id: '5', chat_name: 'Bob', echo: args });
+  if (name === 'update_profile') return ok({ account, updated: true, name: 'Alice', bio: args.bio, echo: args });
+  return { rpcError: { code: -32602, message: 'Unknown tool: ' + name } };
+}
+
+const server = createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => { body += c; });
+  req.on('end', () => {
+    const send = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
+    if (req.headers.authorization !== 'Bearer ' + token) return send(401, { error: 'no' });
+    const m = JSON.parse(body);
+    if (m.method === 'initialize') return send(200, { jsonrpc: '2.0', id: m.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'luckgram-desktop', title: 'Luckgram Desktop', version: '1.0.0' } } });
+    if (m.method === 'tools/list') return send(200, { jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'list_accounts', description: 'List accounts' }, { name: 'list_chats', description: 'List chats' }] } });
+    if (m.method === 'tools/call') {
+      const result = call(m.params.name, m.params.arguments ?? {});
+      return send(200, result.rpcError ? { jsonrpc: '2.0', id: m.id, error: result.rpcError } : { jsonrpc: '2.0', id: m.id, result });
+    }
+    send(200, { jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });
+  });
+});
+server.listen(0, '127.0.0.1', () => writeFileSync(portFile, String(server.address().port)));
+setTimeout(() => process.exit(0), 60_000).unref();
