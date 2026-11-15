@@ -60,6 +60,11 @@ luckgram groups leave <@用户名|会话 id>       Skill：groups    每小时 1
 luckgram groups join-all <@用户名|t.me 链接> [--delay <秒>] [--only <账号>] [--skip <账号>]   所有已登录账号逐个加入，默认间隔 2 秒
 luckgram groups leave-all <@用户名|t.me 链接> [--delay <秒>] [--only <账号>] [--skip <账号>]
 luckgram profile set [--first <名>] [--last <姓>] [--bio <简介>]   Skill：profile   每小时 5 次，每天 10 次
+luckgram proxy list                                              Skill：proxy   代理是所有账号共用的
+luckgram proxy add <tg://socks… | tg://proxy… | t.me 链接> [--no-use]         每小时 20 次，每天 60 次
+luckgram proxy add --type <socks5|http|mtproto> --host <主机> --port <端口> [--user <用户名>] [--password-stdin] [--secret-stdin] [--no-use]
+luckgram proxy use <序号 | direct | system>                                   每小时 20 次，每天 60 次
+luckgram proxy remove <序号>                                                  每小时 20 次，每天 60 次
 ```
 
 `--last ""` 或 `--bio ""` 表示清空。

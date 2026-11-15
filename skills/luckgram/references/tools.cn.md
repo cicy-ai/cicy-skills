@@ -58,6 +58,10 @@
 | `groups leave` | `leave_chat` | `groups` |
 | `groups join-all`、`groups leave-all` | 每个账号各调用一次 `join_chat` / `leave_chat` | 每个账号的 `groups` |
 | `profile set` | `update_profile` | `profile` |
+| `proxy list` | `list_proxies` | `proxy` |
+| `proxy add` | `add_proxy` | `proxy` |
+| `proxy use` | `use_proxy` | `proxy` |
+| `proxy remove` | `remove_proxy` | `proxy` |
 | `bots list` | `botfather_list_bots` | `botfather` |
 | `bots create` | `botfather_create_bot` | `botfather` |
 | `bots token` | `botfather_get_token`、`botfather_revoke_token` | `botfather` |

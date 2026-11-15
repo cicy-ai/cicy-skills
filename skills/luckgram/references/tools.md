@@ -58,6 +58,10 @@ Written by `luckgram config`. Do not read it: `luckgram status` shows what is sa
 | `groups leave` | `leave_chat` | `groups` |
 | `groups join-all`, `groups leave-all` | `join_chat` / `leave_chat` once per account | `groups` on each account |
 | `profile set` | `update_profile` | `profile` |
+| `proxy list` | `list_proxies` | `proxy` |
+| `proxy add` | `add_proxy` | `proxy` |
+| `proxy use` | `use_proxy` | `proxy` |
+| `proxy remove` | `remove_proxy` | `proxy` |
 | `bots list` | `botfather_list_bots` | `botfather` |
 | `bots create` | `botfather_create_bot` | `botfather` |
 | `bots token` | `botfather_get_token`, `botfather_revoke_token` | `botfather` |

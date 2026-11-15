@@ -60,6 +60,11 @@ luckgram groups leave <@username|chat id>     skill: groups    10/hour, 30/day
 luckgram groups join-all <@username|t.me link> [--delay <s>] [--only <ids>] [--skip <ids>]   every logged-in account, 2 s apart
 luckgram groups leave-all <@username|t.me link> [--delay <s>] [--only <ids>] [--skip <ids>]
 luckgram profile set [--first <n>] [--last <n>] [--bio <text>]   skill: profile   5/hour, 10/day
+luckgram proxy list                                              skill: proxy   the proxy is shared by every account
+luckgram proxy add <tg://socks… | tg://proxy… | t.me link> [--no-use]        20/hour, 60/day
+luckgram proxy add --type <socks5|http|mtproto> --host <h> --port <p> [--user <n>] [--password-stdin] [--secret-stdin] [--no-use]
+luckgram proxy use <index | direct | system>                                  20/hour, 60/day
+luckgram proxy remove <index>                                                 20/hour, 60/day
 ```
 
 An empty `--last ""` or `--bio ""` removes it.

@@ -95,6 +95,22 @@ try {
   const bio = JSON.parse(run(['profile', 'set', '--bio', '', '--json']).stdout);
   assert('profile set --bio "" reaches the tool as empty', bio.echo.bio === '');
   assert('profile set with nothing exits 2', run(['profile', 'set']).status === 2);
+  const proxies = run(['proxy', 'list']);
+  assert('proxy list shows the mode and marks the one in use', /mode: through a proxy/.test(proxies.stdout) && /\* 1 {2}socks5 {2}10\.0\.0\.2:1080 {2}user bob {2}\(password\)/.test(proxies.stdout));
+  const added = JSON.parse(run(['proxy', 'add', '--type', 'socks5', '--host', '10.0.0.2', '--port', '1080', '--user', 'bob', '--json']).stdout);
+  assert('proxy add sends the fields', added.echo.type === 'socks5' && added.echo.host === '10.0.0.2' && added.echo.port === 1080 && added.echo.user === 'bob' && added.echo.use === undefined);
+  const secret = JSON.parse(withStdin(['proxy', 'add', '--type', 'socks5', '--host', 'h.io', '--port', '1', '--password-stdin', '--no-use', '--json'], 'p w\n').stdout);
+  assert('proxy add --password-stdin reads the password, --no-use only saves', secret.echo.password === 'p w' && secret.echo.use === false);
+  const linked = JSON.parse(run(['proxy', 'add', 'tg://socks?server=1.2.3.4&port=1080', '--json']).stdout);
+  assert('proxy add <link> sends the link alone', linked.echo.link === 'tg://socks?server=1.2.3.4&port=1080' && linked.echo.type === undefined);
+  assert('proxy add with a link and --host exits 2', run(['proxy', 'add', 'tg://socks?server=1.2.3.4&port=1080', '--host', 'x']).status === 2);
+  assert('proxy add without a port exits 2', run(['proxy', 'add', '--type', 'socks5', '--host', 'x']).status === 2);
+  assert('proxy use 2 sends the index', JSON.parse(run(['proxy', 'use', '2', '--json']).stdout).echo.index === 2);
+  const direct = JSON.parse(run(['proxy', 'use', 'Direct', '--json']).stdout);
+  assert('proxy use direct sends the mode', direct.echo.mode === 'direct' && direct.echo.index === undefined);
+  assert('proxy use x exits 2', run(['proxy', 'use', 'x']).status === 2);
+  assert('proxy remove 1 sends the index', JSON.parse(run(['proxy', 'remove', '1', '--json']).stdout).echo.index === 1);
+  assert('proxy with nothing exits 2', run(['proxy']).status === 2);
   assert('--limit must be a number', run(['chats', 'list', '--limit', 'x']).status === 2);
 
   // ── bots, through BotFather ──

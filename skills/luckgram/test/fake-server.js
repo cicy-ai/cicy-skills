@@ -28,6 +28,10 @@ function call(name, args) {
   if (name === 'join_chat' && args.chat === 'open_group') return ok({ account: args.account ?? '111', joined: args.account !== '111', already_member: args.account === '111', chat_id: '77', chat_name: 'Open group', echo: args });
   const account = args.account ?? '111';
   if (account !== '111') return err(`The "chats" skill is off for account ${account}. The user switches it on in Luckgram Desktop: Settings > Luckgram > Local MCP server.`);
+  if (name === 'list_proxies' || name === 'add_proxy' || name === 'use_proxy' || name === 'remove_proxy') {
+    const proxies = [{ index: 1, type: 'socks5', host: '10.0.0.2', port: 1080, user: 'bob', has_password: true, selected: name !== 'use_proxy' || args.index === 1 }];
+    return ok({ account, mode: args.mode ?? 'proxy', proxies, added: true, index: 1, used: args.use !== false, removed: true, echo: args });
+  }
   if (name === 'list_chats') return ok({ account, total: 1, offset: 0, complete: true, chats: [{ id: '5', type: 'user', name: 'Bob', unread: 2, unread_mark: false, muted: false, pinned: true, last_message_date: 1794630000 }], echo: args });
   if (name === 'list_friends') return ok({ account, total: 1, offset: 0, friends: [{ id: '5', name: 'Bob', username: 'bob', bot: false, mutual: true }], echo: args });
   if (name === 'find_user') return ok({ account, user: { id: '9', name: 'Carol', username: args.username ?? 'carol', bot: false, friend: false }, echo: args });

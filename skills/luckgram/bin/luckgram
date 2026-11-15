@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 
 const NAME = 'luckgram';
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const LOCAL_URL = 'http://127.0.0.1:28765/mcp';
 const CLOUD_URL = 'https://mcp.luckgram.cc/mcp';
 const CLOUD_BACKUP_URL = 'https://lg-mcp.cat158.com/mcp';
@@ -62,6 +62,13 @@ Groups and channels (skill: groups)
 
 Profile            (skill: profile)
   luckgram profile set [--first <name>] [--last <name>] [--bio <text>]
+Proxy              (skill: proxy; the proxy is shared by every account)
+  luckgram proxy list
+  luckgram proxy add <tg://socks… | tg://proxy… | t.me/socks… link> [--no-use]
+  luckgram proxy add --type <socks5|http|mtproto> --host <host> --port <port>
+                     [--user <name>] [--password-stdin] [--secret-stdin] [--no-use]
+  luckgram proxy use <index | direct | system>
+  luckgram proxy remove <index>
 
 Bots, through @BotFather   (skill: botfather)
   luckgram bots list
@@ -91,7 +98,7 @@ Skills are switched on per account by the user in Luckgram Desktop
 `;
 
 // ── arguments ────────────────────────────────────────────────────────────
-const BOOLEAN_FLAGS = new Set(['json', 'unread', 'stdin', 'token-stdin', 'local', 'cloud', 'backup', 'help', 'revoke', 'clear']);
+const BOOLEAN_FLAGS = new Set(['json', 'unread', 'stdin', 'token-stdin', 'local', 'cloud', 'backup', 'help', 'revoke', 'clear', 'password-stdin', 'secret-stdin', 'no-use']);
 
 function parseArgs(argv) {
   const flags = {};
@@ -512,6 +519,49 @@ const COMMANDS = {
     out(flags, value, (v) => (sub === 'join'
       ? (v.started ? 'started' : v.requested ? 'asked to join (an admin approves)' : v.joined ? 'joined' : 'already a member')
       : (v.left ? 'left' : 'was not a member')) + `: ${v.chat_name ?? chat}  (account ${v.account})`);
+  },
+  async proxy(conn, flags, rest) {
+    const sub = rest[0];
+    const usage = 'proxy list | add <link> | add --type <socks5|http|mtproto> --host <host> --port <port> | use <index|direct|system> | remove <index>';
+    const mode = (v) => (v.mode === 'proxy' ? 'through a proxy' : v.mode === 'system' ? 'system proxy' : 'direct connection');
+    const lines = (v) => [`mode: ${mode(v)}`, ...(v.proxies ?? []).map((x) =>
+      `${x.selected ? '*' : ' '} ${x.index}  ${x.type}  ${x.host}:${x.port}` + (x.user ? `  user ${x.user}` : '') + (x.has_password ? '  (password)' : ''))].join('\n');
+    const index = (text) => {
+      const n = Number(text);
+      if (!Number.isInteger(n) || n < 1) fail(EXIT.USAGE, 'the index is a number from "luckgram proxy list"');
+      return n;
+    };
+    if (sub === 'list') {
+      return out(flags, await tool(conn, 'list_proxies', { account: flags.account }), lines);
+    }
+    if (sub === 'add') {
+      const args = { account: flags.account };
+      if (rest[1]) {
+        if (flags.type || flags.host || flags.port) fail(EXIT.USAGE, 'give either a link or --type, --host and --port, not both');
+        args.link = rest[1];
+      } else {
+        if (!flags.type || !flags.host || !flags.port) fail(EXIT.USAGE, usage);
+        const port = Number(flags.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) fail(EXIT.USAGE, '--port is a number, 1 to 65535');
+        if (flags['password-stdin'] && flags['secret-stdin']) fail(EXIT.USAGE, 'give --password-stdin or --secret-stdin, not both');
+        Object.assign(args, { type: flags.type, host: flags.host, port, user: flags.user });
+        // A password or a secret never goes on the command line.
+        if (flags['password-stdin']) args.password = (await readStdin()).replace(/\r?\n$/, '');
+        if (flags['secret-stdin']) args.secret = (await readStdin()).trim();
+      }
+      if (flags['no-use']) args.use = false;
+      const value = await tool(conn, 'add_proxy', args);
+      return out(flags, value, (v) => `${v.added ? 'added' : 'already saved'} as ${v.index}` + (v.used ? ', now in use' : ', not switched to') + '\n' + lines(v));
+    }
+    if (sub === 'use' && rest[1]) {
+      const what = rest[1].toLowerCase();
+      const args = (what === 'direct' || what === 'system') ? { mode: what } : { index: index(rest[1]) };
+      return out(flags, await tool(conn, 'use_proxy', { account: flags.account, ...args }), lines);
+    }
+    if (sub === 'remove' && rest[1]) {
+      return out(flags, await tool(conn, 'remove_proxy', { account: flags.account, index: index(rest[1]) }), (v) => 'removed\n' + lines(v));
+    }
+    fail(EXIT.USAGE, usage);
   },
   async profile(conn, flags, rest) {
     if (rest[0] !== 'set') fail(EXIT.USAGE, 'profile set [--first <name>] [--last <name>] [--bio <text>]');
