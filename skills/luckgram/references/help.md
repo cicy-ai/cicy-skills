@@ -57,6 +57,8 @@ luckgram messages send <chat> --stdin                              long or multi
 ```
 luckgram groups join <@username|chat id>      skill: groups    5/hour, 20/day
 luckgram groups leave <@username|chat id>     skill: groups    10/hour, 30/day
+luckgram groups join-all <@username|t.me link> [--delay <s>] [--only <ids>] [--skip <ids>]   every logged-in account, 2 s apart
+luckgram groups leave-all <@username|t.me link> [--delay <s>] [--only <ids>] [--skip <ids>]
 luckgram profile set [--first <n>] [--last <n>] [--bio <text>]   skill: profile   5/hour, 10/day
 ```
 

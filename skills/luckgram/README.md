@@ -10,7 +10,7 @@
 - `luckgram friends list | find | add | remove`
 - `luckgram chats list | read`
 - `luckgram messages get | send`
-- `luckgram groups join | leave`, `luckgram profile set`
+- `luckgram groups join | leave`, `luckgram groups join-all | leave-all` (every logged-in account), `luckgram profile set`
 - `luckgram bots list | create | token | set | commands | delete`, `luckgram botfather send | press | read` — bots, through @BotFather
 - `luckgram devices`, `luckgram calls` — the cloud: computers and the audit list
 - `luckgram status` — what is configured (tokens masked) and whether it answers

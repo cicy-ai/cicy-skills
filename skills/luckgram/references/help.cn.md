@@ -57,6 +57,8 @@ luckgram messages send <会话> --stdin                            长文本或�
 ```
 luckgram groups join <@用户名|会话 id>        Skill：groups    每小时 5 次，每天 20 次
 luckgram groups leave <@用户名|会话 id>       Skill：groups    每小时 10 次，每天 30 次
+luckgram groups join-all <@用户名|t.me 链接> [--delay <秒>] [--only <账号>] [--skip <账号>]   所有已登录账号逐个加入，默认间隔 2 秒
+luckgram groups leave-all <@用户名|t.me 链接> [--delay <秒>] [--only <账号>] [--skip <账号>]
 luckgram profile set [--first <名>] [--last <姓>] [--bio <简介>]   Skill：profile   每小时 5 次，每天 10 次
 ```
 

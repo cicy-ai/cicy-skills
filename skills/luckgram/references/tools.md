@@ -56,6 +56,7 @@ Written by `luckgram config`. Do not read it: `luckgram status` shows what is sa
 | `messages send` | `send_message` | `messages_send` |
 | `groups join` | `join_chat` | `groups` |
 | `groups leave` | `leave_chat` | `groups` |
+| `groups join-all`, `groups leave-all` | `join_chat` / `leave_chat` once per account | `groups` on each account |
 | `profile set` | `update_profile` | `profile` |
 | `bots list` | `botfather_list_bots` | `botfather` |
 | `bots create` | `botfather_create_bot` | `botfather` |

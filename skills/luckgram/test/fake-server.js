@@ -25,6 +25,7 @@ function call(name, args) {
     for (const a of accounts) a.active = (a === found);
     return ok({ switched: true, already_active: false, account: found });
   }
+  if (name === 'join_chat' && args.chat === 'open_group') return ok({ account: args.account ?? '111', joined: args.account !== '111', already_member: args.account === '111', chat_id: '77', chat_name: 'Open group', echo: args });
   const account = args.account ?? '111';
   if (account !== '111') return err(`The "chats" skill is off for account ${account}. The user switches it on in Luckgram Desktop: Settings > Luckgram > Local MCP server.`);
   if (name === 'list_chats') return ok({ account, total: 1, offset: 0, complete: true, chats: [{ id: '5', type: 'user', name: 'Bob', unread: 2, unread_mark: false, muted: false, pinned: true, last_message_date: 1794630000 }], echo: args });
@@ -41,6 +42,8 @@ function call(name, args) {
   if (name === 'botfather_send') return ok({ account, reply: { id: 40, out: false, text: 'Choose a bot.', buttons: [{ text: '@my_shop_bot' }, { text: 'Docs', url: 'https://core.telegram.org/bots' }] }, echo: args });
   if (name === 'botfather_press') return ok({ account, changed: true, reply: { id: args.message_id, out: false, text: 'Here it is: @my_shop_bot.', buttons: [{ text: 'Edit Bot' }] }, echo: args });
   if (name === 'botfather_read') return ok({ account, messages: [{ id: 41, out: false, text: 'Success! Name updated.' }, { id: 40, out: true, text: 'My Shop' }], echo: args });
+  if (name === 'join_chat') return ok({ account, joined: true, already_member: false, chat_id: '77', chat_name: 'Some group', echo: args });
+  if (name === 'leave_chat') return ok({ account, left: true, was_member: true, chat_id: '77', chat_name: 'Some group', echo: args });
   if (name === 'update_profile') return ok({ account, updated: true, name: 'Alice', bio: args.bio, echo: args });
   return { rpcError: { code: -32602, message: 'Unknown tool: ' + name } };
 }

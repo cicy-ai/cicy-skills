@@ -56,6 +56,7 @@
 | `messages send` | `send_message` | `messages_send` |
 | `groups join` | `join_chat` | `groups` |
 | `groups leave` | `leave_chat` | `groups` |
+| `groups join-all`、`groups leave-all` | 每个账号各调用一次 `join_chat` / `leave_chat` | 每个账号的 `groups` |
 | `profile set` | `update_profile` | `profile` |
 | `bots list` | `botfather_list_bots` | `botfather` |
 | `bots create` | `botfather_create_bot` | `botfather` |

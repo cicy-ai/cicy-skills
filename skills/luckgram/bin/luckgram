@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 
 const NAME = 'luckgram';
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const LOCAL_URL = 'http://127.0.0.1:28765/mcp';
 const CLOUD_URL = 'https://mcp.luckgram.cc/mcp';
 const CLOUD_BACKUP_URL = 'https://lg-mcp.cat158.com/mcp';
@@ -53,8 +53,12 @@ Messages           (skills: messages, messages_send)
   luckgram messages send <chat> --stdin [--reply-to <message id>]
 
 Groups and channels (skill: groups)
-  luckgram groups join  <@username|chat id>
-  luckgram groups leave <@username|chat id>
+  luckgram groups join  <@username|t.me link|chat id>
+  luckgram groups leave <@username|t.me link|chat id>
+  luckgram groups join-all  <@username|t.me link> [--delay <seconds>] [--only <ids>] [--skip <ids>]
+  luckgram groups leave-all <@username|t.me link> [--delay <seconds>] [--only <ids>] [--skip <ids>]
+      Every logged-in account, one after another (2 s apart by default).
+      Accounts whose "groups" skill is off are reported, not joined.
 
 Profile            (skill: profile)
   luckgram profile set [--first <name>] [--last <name>] [--bio <text>]
@@ -239,6 +243,72 @@ async function tool(conn, name, args, { cloudOnly = false } = {}) {
     fail(EXIT.TOOL, result.content?.[0]?.text || 'the tool failed');
   }
   return result?.structuredContent ?? {};
+}
+
+// A public t.me link means its username (older app builds take the name
+// only). Invite links and everything else go through as they are.
+function chatArgument(chat) {
+  if (!chat) return chat;
+  const m = /^(?:https?:\/\/)?(?:t|telegram)\.(?:me|dog)\/([A-Za-z][A-Za-z0-9_]{3,31})\/?(?:[?#].*)?$/.exec(chat.trim());
+  return m && m[1].toLowerCase() !== 'joinchat' ? m[1] : chat;
+}
+
+// Like tool(), but a refusal is a value, not the end of the program.
+async function toolTry(conn, name, args) {
+  const clean = {};
+  for (const [key, value] of Object.entries(args || {})) {
+    if (value !== undefined && value !== '') clean[key] = value;
+  }
+  if (isCloud(conn.url) && conn.device) clean.device = conn.device;
+  const result = await rpc(conn, 'tools/call', { name, arguments: clean });
+  if (result?.isError) return { error: result.content?.[0]?.text || 'the tool failed' };
+  return { value: result?.structuredContent ?? {} };
+}
+
+// join_chat / leave_chat for every logged-in account, one after another.
+async function everyAccount(conn, flags, name, chat) {
+  const delay = flags.delay === undefined ? 2 : Number(flags.delay);
+  if (!Number.isFinite(delay) || delay < 0 || delay > 600) fail(EXIT.USAGE, '--delay is a number of seconds, 0 to 600');
+  const list = (text) => new Set(String(text ?? '').split(',').map((x) => x.trim().replace(/^@/, '').toLowerCase()).filter(Boolean));
+  const only = list(flags.only);
+  const skip = list(flags.skip);
+  const matches = (set, a) => set.has(String(a.id)) || (a.username && set.has(a.username.toLowerCase())) || set.has(String(a.index));
+  const { accounts = [] } = await tool(conn, 'list_accounts', {});
+  const chosen = accounts.filter((a) => (!only.size || matches(only, a)) && !matches(skip, a));
+  if (!chosen.length) fail(EXIT.TOOL, 'no account to work on (check --only / --skip, and "luckgram accounts")');
+  const join = name === 'join_chat';
+  const results = [];
+  for (const [i, a] of chosen.entries()) {
+    if (i && delay) await new Promise((r) => setTimeout(r, delay * 1000));
+    let answer = await toolTry(conn, name, { account: String(a.id), chat });
+    // A computer that was slow to answer has usually done it: ask once more.
+    if (answer.error && /did not answer in time/i.test(answer.error)) {
+      await new Promise((r) => setTimeout(r, 3000));
+      answer = await toolTry(conn, name, { account: String(a.id), chat });
+    }
+    const v = answer.value || {};
+    const status = answer.error
+      ? (/skill/i.test(answer.error) && /off|not (switched )?on|disabled/i.test(answer.error) ? 'skill_off' : 'failed')
+      : join
+        ? (v.started ? 'started' : v.requested ? 'requested' : v.joined ? 'joined' : 'already_member')
+        : (v.left ? 'left' : 'not_member');
+    const row = { account: String(a.id), name: a.name, username: a.username || '', status };
+    if (answer.error) row.error = answer.error;
+    if (v.chat_name) row.chat_name = v.chat_name;
+    results.push(row);
+    if (!flags.json) {
+      process.stderr.write(`[${i + 1}/${chosen.length}] ${a.name}${a.username ? ' @' + a.username : ''}: ${status}${answer.error ? ' - ' + answer.error : ''}\n`);
+    }
+  }
+  const summary = {};
+  for (const r of results) summary[r.status] = (summary[r.status] || 0) + 1;
+  const bad = (summary.failed || 0) + (summary.skill_off || 0);
+  out(flags, { chat, accounts: results.length, summary, results }, () => {
+    const parts = Object.entries(summary).map(([k, n]) => `${n} ${k.replace('_', ' ')}`).join(', ');
+    return `${results.length} accounts: ${parts}`
+      + (summary.skill_off ? '\nSwitch the "groups" skill on for those accounts in Luckgram Desktop (Settings → Luckgram → Local MCP server), then run this again; accounts already in are skipped by Telegram.' : '');
+  });
+  if (bad) process.exit(EXIT.TOOL);
 }
 
 // ── output ───────────────────────────────────────────────────────────────
@@ -431,12 +501,17 @@ const COMMANDS = {
     }
   },
   async groups(conn, flags, rest) {
-    const [sub, chat] = rest;
-    if ((sub !== 'join' && sub !== 'leave') || !chat) fail(EXIT.USAGE, 'groups join <chat> | leave <chat>');
+    const [sub] = rest;
+    const chat = chatArgument(rest[1]);
+    if (sub === 'join-all' || sub === 'leave-all') {
+      if (!chat) fail(EXIT.USAGE, `groups ${sub} <@username|t.me link> [--delay <seconds>] [--only <ids>] [--skip <ids>]`);
+      return everyAccount(conn, flags, sub === 'join-all' ? 'join_chat' : 'leave_chat', chat);
+    }
+    if ((sub !== 'join' && sub !== 'leave') || !chat) fail(EXIT.USAGE, 'groups join <chat> | leave <chat> | join-all <chat> | leave-all <chat>');
     const value = await tool(conn, sub === 'join' ? 'join_chat' : 'leave_chat', { account: flags.account, chat });
     out(flags, value, (v) => (sub === 'join'
-      ? (v.joined ? 'joined' : 'already a member')
-      : (v.left ? 'left' : 'was not a member')) + `: ${v.chat_name}  (account ${v.account})`);
+      ? (v.started ? 'started' : v.requested ? 'asked to join (an admin approves)' : v.joined ? 'joined' : 'already a member')
+      : (v.left ? 'left' : 'was not a member')) + `: ${v.chat_name ?? chat}  (account ${v.account})`);
   },
   async profile(conn, flags, rest) {
     if (rest[0] !== 'set') fail(EXIT.USAGE, 'profile set [--first <name>] [--last <name>] [--bio <text>]');

@@ -148,6 +148,24 @@ try {
   // ── cloud commands on a local profile ──
   assert('devices on a local profile exits 2', run(['devices']).status === 2);
 
+  // ── groups: one account, every account ──
+  const joined = JSON.parse(run(['groups', 'join', 'https://t.me/some_group', '--json']).stdout);
+  assert('groups join turns a t.me link into the username', joined.joined === true && joined.echo.chat === 'some_group');
+  const invite = JSON.parse(run(['groups', 'join', 'https://t.me/+AbCd_123-xyz', '--json']).stdout);
+  assert('groups join passes an invite link through', invite.echo.chat === 'https://t.me/+AbCd_123-xyz');
+  const all = run(['groups', 'join-all', 'https://t.me/open_group', '--delay', '0', '--json']);
+  const allJson = JSON.parse(all.stdout);
+  assert('groups join-all works on every account', all.status === 0 && allJson.accounts === 2
+    && allJson.summary.joined === 1 && allJson.summary.already_member === 1 && allJson.results[1].account === '7000000000001');
+  const partly = run(['groups', 'join-all', '@some_group', '--delay', '0']);
+  assert('groups join-all reports accounts whose skill is off, exit 1', partly.status === 1
+    && partly.stdout.includes('1 joined') && partly.stdout.includes('1 skill off') && partly.stderr.includes('[2/2]'));
+  const onlyOne = JSON.parse(run(['groups', 'leave-all', 'some_group', '--delay', '0', '--only', 'alice', '--json']).stdout);
+  assert('groups leave-all --only picks accounts', onlyOne.accounts === 1 && onlyOne.summary.left === 1);
+  assert('groups join-all --skip everything exits 1', run(['groups', 'join-all', 'some_group', '--skip', '1,2']).status === 1);
+  assert('groups join-all without a chat exits 2', run(['groups', 'join-all']).status === 2);
+  assert('groups join-all with a bad --delay exits 2', run(['groups', 'join-all', 'x_group', '--delay', 'soon']).status === 2);
+
   // ── wrong token, unreachable server ──
   const denied = run(['accounts'], { LUCKGRAM_MCP_URL: localUrl, LUCKGRAM_MCP_TOKEN: 'x'.repeat(43) });
   assert('refused token exits 4', denied.status === 4 && denied.stderr.includes('401'));
