@@ -1,0 +1,721 @@
+#!/usr/bin/env node
+// luckgram — work with the Telegram accounts in Luckgram Desktop through its
+// MCP server (local, or the cloud at mcp.luckgram.cc).
+//
+// Zero deps, pure ESM, Node 18+. Runs wherever Node runs (Linux, macOS,
+// Windows / dsh): no shell, no Linux-only commands.
+//
+// The access token / cloud key lives in ~/cicy-ai/db/luckgram.json (0600) and
+// is never printed: `status` masks it, errors never echo it.
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+
+const NAME = 'luckgram';
+const VERSION = '1.3.0';
+const LOCAL_URL = 'http://127.0.0.1:28765/mcp';
+const CLOUD_URL = 'https://mcp.luckgram.cc/mcp';
+const CLOUD_BACKUP_URL = 'https://lg-mcp.cat158.com/mcp';
+const TIMEOUT_MS = 60_000;
+
+// Exit codes: 0 ok · 1 the tool refused (skill off, rate limit, not found…)
+// · 2 usage · 3 not configured · 4 cannot reach / not authorized.
+const EXIT = { OK: 0, TOOL: 1, USAGE: 2, CONFIG: 3, NETWORK: 4 };
+
+const HELP = `luckgram ${VERSION} — Telegram accounts in Luckgram Desktop, through MCP
+
+Setup
+  luckgram config --local  --token-stdin        this computer (http://127.0.0.1:28765/mcp)
+  luckgram config --cloud  --token-stdin        every computer on your cloud key (mcp.luckgram.cc)
+  luckgram config --url <URL> --token-stdin [--profile <name>]
+  luckgram config --use <profile>               switch the default profile
+  luckgram status                               config (token masked), connection, tools
+
+Accounts
+  luckgram devices                              computers on the cloud key (cloud only)
+  luckgram accounts                             logged-in accounts: id, name, username, unread
+  luckgram active                               the account the window shows
+  luckgram switch <id|@username|+phone|#index>  make an account the active one
+
+Friends            (skills: friends, friends_manage)
+  luckgram friends list   [--query <text>] [--limit N] [--offset N]
+  luckgram friends find   <@username|+phone>
+  luckgram friends add    <id|@username|+phone> [--first <name>] [--last <name>]
+  luckgram friends remove <id|@username>
+
+Chats              (skills: chats, chats_manage)
+  luckgram chats list [--unread] [--limit N] [--offset N]
+  luckgram chats read <chat>
+
+Messages           (skills: messages, messages_send)
+  luckgram messages get  <chat> [--limit N] [--before <message id>]
+  luckgram messages send <chat> <text…> [--reply-to <message id>]
+  luckgram messages send <chat> --stdin [--reply-to <message id>]
+
+Groups and channels (skill: groups)
+  luckgram groups join  <@username|t.me link|chat id>
+  luckgram groups leave <@username|t.me link|chat id>
+  luckgram groups join-all  <@username|t.me link> [--delay <seconds>] [--only <ids>] [--skip <ids>]
+  luckgram groups leave-all <@username|t.me link> [--delay <seconds>] [--only <ids>] [--skip <ids>]
+      Every logged-in account, one after another (2 s apart by default).
+      Accounts whose "groups" skill is off are reported, not joined.
+
+Profile            (skill: profile)
+  luckgram profile set [--first <name>] [--last <name>] [--bio <text>]
+Proxy              (skill: proxy; the proxy is shared by every account)
+  luckgram proxy list
+  luckgram proxy add <tg://socks… | tg://proxy… | t.me/socks… link> [--no-use]
+  luckgram proxy add --link-stdin [--no-use]    (a link with a password or secret in it)
+  luckgram proxy add --type <socks5|http|mtproto> --host <host> --port <port>
+                     [--user <name>] [--password-stdin] [--secret-stdin] [--no-use]
+  luckgram proxy use <index | direct | system>
+  luckgram proxy remove <index>
+
+Bots, through @BotFather   (skill: botfather)
+  luckgram bots list
+  luckgram bots create <username> --name <display name> [--out <file>]
+  luckgram bots token <bot> [--revoke] [--out <file>]
+  luckgram bots set <bot> [--name <n>] [--description <t>] [--about <t>] [--privacy on|off] [--groups on|off]
+  luckgram bots commands <bot> 'start=Start the bot' 'help=How it works' …   (or --clear)
+  luckgram bots delete <bot> --confirm <bot>
+  luckgram botfather send <text…>               anything else: a command or an answer to its question
+  luckgram botfather press <message id> <button text…>
+  luckgram botfather read [--limit N]
+
+Raw
+  luckgram tools                                the server's tool list
+  luckgram call <tool> ['<json arguments>']     call any tool
+  luckgram calls                                audit list of the cloud key (cloud only)
+
+Everywhere
+  --account <id>     which logged-in account (id from "luckgram accounts"); default: the active one
+  --device <name>    which computer, on the cloud; may be left out while one is online
+  --profile <name>   which saved connection; default: the one marked default
+  --json             print the tool's JSON instead of text
+
+<chat> is an id from "luckgram chats list" or a username.
+Skills are switched on per account by the user in Luckgram Desktop
+(Settings → Luckgram → Local MCP server). A skill that is off answers with exit code 1.
+`;
+
+// ── arguments ────────────────────────────────────────────────────────────
+const BOOLEAN_FLAGS = new Set(['json', 'unread', 'stdin', 'token-stdin', 'local', 'cloud', 'backup', 'help', 'revoke', 'clear', 'password-stdin', 'secret-stdin', 'link-stdin', 'no-use']);
+
+function parseArgs(argv) {
+  const flags = {};
+  const rest = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--') { rest.push(...argv.slice(i + 1)); break; }
+    if (a === '-h') { flags.help = true; continue; }
+    if (!a.startsWith('--') || a === '--') { rest.push(a); continue; }
+    const eq = a.indexOf('=');
+    const key = eq < 0 ? a.slice(2) : a.slice(2, eq);
+    if (BOOLEAN_FLAGS.has(key)) { flags[key] = true; continue; }
+    const value = eq >= 0 ? a.slice(eq + 1) : argv[++i];
+    if (value === undefined) fail(EXIT.USAGE, `--${key} needs a value`);
+    flags[key] = value;
+  }
+  return { flags, rest };
+}
+
+function fail(code, message) {
+  process.stderr.write(`${NAME}: ${message}\n`);
+  process.exit(code);
+}
+
+function intFlag(flags, key) {
+  if (flags[key] === undefined) return undefined;
+  const n = Number(flags[key]);
+  if (!Number.isInteger(n)) fail(EXIT.USAGE, `--${key} must be a whole number`);
+  return n;
+}
+
+// ── config ───────────────────────────────────────────────────────────────
+function configPath() {
+  return process.env.CICY_LUCKGRAM_CONFIG || join(homedir(), 'cicy-ai', 'db', 'luckgram.json');
+}
+
+function loadConfig() {
+  try {
+    const value = JSON.parse(readFileSync(configPath(), 'utf8'));
+    return value && typeof value === 'object' && value.profiles ? value : { profiles: {} };
+  } catch {
+    return { profiles: {} };
+  }
+}
+
+function saveConfig(config) {
+  const path = configPath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  try { chmodSync(path, 0o600); } catch { /* Windows */ }
+}
+
+function mask(token) {
+  if (!token) return '(none)';
+  return token.length <= 12 ? '***' : `${token.slice(0, 4)}***${token.slice(-4)} (${token.length} chars)`;
+}
+
+// The connection to use: environment first, then the chosen profile.
+function connection(flags) {
+  if (process.env.LUCKGRAM_MCP_URL || process.env.LUCKGRAM_MCP_TOKEN) {
+    return {
+      profile: '(environment)',
+      url: process.env.LUCKGRAM_MCP_URL || LOCAL_URL,
+      token: process.env.LUCKGRAM_MCP_TOKEN || '',
+      device: flags.device || process.env.LUCKGRAM_DEVICE || '',
+    };
+  }
+  const config = loadConfig();
+  const name = flags.profile || process.env.LUCKGRAM_PROFILE || config.default || Object.keys(config.profiles)[0];
+  const profile = name ? config.profiles[name] : null;
+  if (!profile) {
+    if (flags.profile) fail(EXIT.CONFIG, `no profile "${flags.profile}". Run: luckgram status`);
+    return null;
+  }
+  return {
+    profile: name,
+    url: profile.url,
+    token: profile.token || '',
+    device: flags.device || process.env.LUCKGRAM_DEVICE || profile.device || '',
+  };
+}
+
+function needConnection(flags) {
+  const found = connection(flags);
+  if (!found || !found.token) {
+    fail(EXIT.CONFIG, 'not configured. In Luckgram Desktop open Settings → Luckgram → Local MCP server, '
+      + 'copy the access token (or the cloud key), then run:\n'
+      + '  luckgram config --local --token-stdin     (this computer)\n'
+      + '  luckgram config --cloud --token-stdin     (cloud)\n'
+      + 'and paste the token. Do not put the token on the command line.');
+  }
+  return found;
+}
+
+function isCloud(url) {
+  return /^https:\/\/(mcp\.luckgram\.cc|lg-mcp\.cat158\.com)\//.test(url);
+}
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+// ── MCP ──────────────────────────────────────────────────────────────────
+async function rpc(conn, method, params) {
+  let response;
+  try {
+    response = await fetch(conn.url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${conn.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: params ?? {} }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    const local = conn.url.startsWith('http://127.0.0.1') || conn.url.startsWith('http://localhost');
+    fail(EXIT.NETWORK, `cannot reach ${conn.url} (${error.cause?.code || error.name}). `
+      + (local
+        ? 'Is Luckgram Desktop open on this computer with "Local MCP server" switched on?'
+        : `If luckgram.cc is blocked on this network, use the backup address: luckgram config --cloud --backup --token-stdin`));
+  }
+  if (response.status === 401) {
+    fail(EXIT.NETWORK, 'the server refused the token (401). Copy it again from Luckgram Desktop and run "luckgram config".');
+  }
+  const text = await response.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = null; }
+  if (!response.ok || !body) {
+    fail(EXIT.NETWORK, `${conn.url} answered ${response.status}${body ? '' : ' with something that is not JSON'}.`);
+  }
+  if (body.error) fail(EXIT.TOOL, body.error.message || 'the server refused the request');
+  return body.result;
+}
+
+// Calls a tool. Returns its structured value; a tool error ends with exit 1.
+async function tool(conn, name, args, { cloudOnly = false } = {}) {
+  if (cloudOnly && !isCloud(conn.url)) {
+    fail(EXIT.USAGE, `"${name}" exists on the cloud only (profile "${conn.profile}" is ${conn.url}).`);
+  }
+  const clean = {};
+  for (const [key, value] of Object.entries(args || {})) {
+    if (value !== undefined && value !== '') clean[key] = value;
+  }
+  if (isCloud(conn.url) && conn.device && name !== 'list_devices' && name !== 'list_recent_calls') {
+    clean.device = conn.device;
+  }
+  const result = await rpc(conn, 'tools/call', { name, arguments: clean });
+  if (result?.isError) {
+    fail(EXIT.TOOL, result.content?.[0]?.text || 'the tool failed');
+  }
+  return result?.structuredContent ?? {};
+}
+
+// A public t.me link means its username (older app builds take the name
+// only). Invite links and everything else go through as they are.
+function chatArgument(chat) {
+  if (!chat) return chat;
+  const m = /^(?:https?:\/\/)?(?:t|telegram)\.(?:me|dog)\/([A-Za-z][A-Za-z0-9_]{3,31})\/?(?:[?#].*)?$/.exec(chat.trim());
+  return m && m[1].toLowerCase() !== 'joinchat' ? m[1] : chat;
+}
+
+// Like tool(), but a refusal is a value, not the end of the program.
+async function toolTry(conn, name, args) {
+  const clean = {};
+  for (const [key, value] of Object.entries(args || {})) {
+    if (value !== undefined && value !== '') clean[key] = value;
+  }
+  if (isCloud(conn.url) && conn.device) clean.device = conn.device;
+  const result = await rpc(conn, 'tools/call', { name, arguments: clean });
+  if (result?.isError) return { error: result.content?.[0]?.text || 'the tool failed' };
+  return { value: result?.structuredContent ?? {} };
+}
+
+// join_chat / leave_chat for every logged-in account, one after another.
+async function everyAccount(conn, flags, name, chat) {
+  const delay = flags.delay === undefined ? 2 : Number(flags.delay);
+  if (!Number.isFinite(delay) || delay < 0 || delay > 600) fail(EXIT.USAGE, '--delay is a number of seconds, 0 to 600');
+  const list = (text) => new Set(String(text ?? '').split(',').map((x) => x.trim().replace(/^@/, '').toLowerCase()).filter(Boolean));
+  const only = list(flags.only);
+  const skip = list(flags.skip);
+  const matches = (set, a) => set.has(String(a.id)) || (a.username && set.has(a.username.toLowerCase())) || set.has(String(a.index));
+  const { accounts = [] } = await tool(conn, 'list_accounts', {});
+  const chosen = accounts.filter((a) => (!only.size || matches(only, a)) && !matches(skip, a));
+  if (!chosen.length) fail(EXIT.TOOL, 'no account to work on (check --only / --skip, and "luckgram accounts")');
+  const join = name === 'join_chat';
+  const results = [];
+  for (const [i, a] of chosen.entries()) {
+    if (i && delay) await new Promise((r) => setTimeout(r, delay * 1000));
+    let answer = await toolTry(conn, name, { account: String(a.id), chat });
+    // A computer that was slow to answer has usually done it: ask once more.
+    if (answer.error && /did not answer in time/i.test(answer.error)) {
+      await new Promise((r) => setTimeout(r, 3000));
+      answer = await toolTry(conn, name, { account: String(a.id), chat });
+    }
+    const v = answer.value || {};
+    const status = answer.error
+      ? (/skill/i.test(answer.error) && /off|not (switched )?on|disabled/i.test(answer.error) ? 'skill_off' : 'failed')
+      : join
+        ? (v.started ? 'started' : v.requested ? 'requested' : v.joined ? 'joined' : 'already_member')
+        : (v.left ? 'left' : 'not_member');
+    const row = { account: String(a.id), name: a.name, username: a.username || '', status };
+    if (answer.error) row.error = answer.error;
+    if (v.chat_name) row.chat_name = v.chat_name;
+    results.push(row);
+    if (!flags.json) {
+      process.stderr.write(`[${i + 1}/${chosen.length}] ${a.name}${a.username ? ' @' + a.username : ''}: ${status}${answer.error ? ' - ' + answer.error : ''}\n`);
+    }
+  }
+  const summary = {};
+  for (const r of results) summary[r.status] = (summary[r.status] || 0) + 1;
+  const bad = (summary.failed || 0) + (summary.skill_off || 0);
+  out(flags, { chat, accounts: results.length, summary, results }, () => {
+    const parts = Object.entries(summary).map(([k, n]) => `${n} ${k.replace('_', ' ')}`).join(', ');
+    return `${results.length} accounts: ${parts}`
+      + (summary.skill_off ? '\nSwitch the "groups" skill on for those accounts in Luckgram Desktop (Settings → Luckgram → Local MCP server), then run this again; accounts already in are skipped by Telegram.' : '');
+  });
+  if (bad) process.exit(EXIT.TOOL);
+}
+
+// ── output ───────────────────────────────────────────────────────────────
+function out(flags, value, text) {
+  process.stdout.write((flags.json ? JSON.stringify(value, null, 2) : text(value)).replace(/\n*$/, '\n'));
+}
+
+function width(text) {
+  let w = 0;
+  for (const ch of String(text)) w += ch.codePointAt(0) > 0x2e7f ? 2 : 1;
+  return w;
+}
+
+function table(headers, rows) {
+  if (!rows.length) return '(none)';
+  const all = [headers, ...rows.map((r) => r.map((c) => (c === undefined || c === null ? '' : String(c))))];
+  const widths = headers.map((_, i) => Math.max(...all.map((r) => width(r[i]))));
+  return all.map((r) => r.map((c, i) => c + ' '.repeat(widths[i] - width(c))).join('  ').trimEnd()).join('\n');
+}
+
+const at = (username) => (username ? '@' + username : '');
+const time = (seconds) => (seconds ? new Date(seconds * 1000).toISOString().replace('T', ' ').slice(0, 16) : '');
+
+// ── who / which chat ─────────────────────────────────────────────────────
+// id | @username | +phone | #index  →  the tool's argument.
+function target(text, { phone = true, index = false, idKey = 'user_id' } = {}) {
+  if (!text) fail(EXIT.USAGE, 'who? give an id, an @username' + (phone ? ' or a +phone' : ''));
+  if (text.startsWith('@')) return { username: text.slice(1) };
+  if (index && text.startsWith('#')) return { index: Number(text.slice(1)) };
+  if (phone && text.startsWith('+')) return { phone: text };
+  if (/^\d+$/.test(text)) return { [idKey]: text };
+  return { username: text };
+}
+
+// ── commands ─────────────────────────────────────────────────────────────
+async function cmdConfig(flags) {
+  const config = loadConfig();
+  if (flags.use) {
+    if (!config.profiles[flags.use]) fail(EXIT.CONFIG, `no profile "${flags.use}".`);
+    config.default = flags.use;
+    saveConfig(config);
+    process.stdout.write(`default profile: ${flags.use}\n`);
+    return;
+  }
+  const url = flags.url || (flags.cloud ? (flags.backup ? CLOUD_BACKUP_URL : CLOUD_URL) : flags.local ? LOCAL_URL : '');
+  if (!url) fail(EXIT.USAGE, 'give --local, --cloud or --url <URL>, with --token-stdin. See: luckgram --help');
+  if (!/^https?:\/\/[^\s]+$/.test(url)) fail(EXIT.USAGE, '--url must be an http(s) address ending in /mcp');
+  if (flags.token) {
+    fail(EXIT.USAGE, 'the token is not taken from the command line (it would stay in the shell history). '
+      + 'Use --token-stdin and paste it.');
+  }
+  const name = flags.profile || (isCloud(url) ? 'cloud' : 'local');
+  let token = config.profiles[name]?.token || '';
+  if (flags['token-stdin']) {
+    token = (await readStdin()).trim();
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
+      fail(EXIT.USAGE, 'that does not look like an access token or a cloud key (32+ characters of A-Z a-z 0-9 _ -).');
+    }
+  }
+  if (!token) fail(EXIT.USAGE, 'no token yet for this profile: add --token-stdin and paste it.');
+  if (isCloud(url) !== token.startsWith('lgc_')) {
+    fail(EXIT.USAGE, isCloud(url)
+      ? 'the cloud needs the cloud key (starts with lgc_), not the local access token.'
+      : 'a local address needs the access token, not the cloud key (lgc_…).');
+  }
+  config.profiles[name] = { url, token, ...(flags.device ? { device: flags.device } : {}) };
+  if (!config.default || !config.profiles[config.default]) config.default = name;
+  saveConfig(config);
+  process.stdout.write(`saved profile "${name}": ${url}  token ${mask(token)}\n`
+    + (config.default === name ? '' : `default is still "${config.default}" (luckgram config --use ${name})\n`));
+}
+
+async function cmdStatus(flags) {
+  const config = loadConfig();
+  const conn = connection(flags);
+  const report = {
+    config: configPath(),
+    profiles: Object.fromEntries(Object.entries(config.profiles).map(([name, p]) => [name, {
+      url: p.url, token: mask(p.token), default: config.default === name, ...(p.device ? { device: p.device } : {}),
+    }])),
+    using: conn ? { profile: conn.profile, url: conn.url, token: mask(conn.token), cloud: isCloud(conn.url) } : null,
+    connected: false,
+  };
+  if (conn?.token) {
+    const init = await rpc(conn, 'initialize', {
+      protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: NAME, version: VERSION },
+    });
+    const tools = await rpc(conn, 'tools/list');
+    report.connected = true;
+    report.server = init.serverInfo;
+    report.tools = (tools.tools || []).map((t) => t.name);
+  }
+  out(flags, report, (r) => [
+    `config:    ${r.config}`,
+    ...Object.entries(r.profiles).map(([name, p]) =>
+      `profile:   ${name}${p.default ? ' (default)' : ''}  ${p.url}  token ${p.token}`),
+    r.using ? `using:     ${r.using.profile}  ${r.using.url}` : 'using:     (nothing configured — run: luckgram config --help)',
+    r.connected
+      ? `connected: ${r.server?.title || r.server?.name}, ${r.tools.length} tools`
+      : 'connected: no',
+  ].join('\n'));
+  if (!conn?.token) process.exit(EXIT.CONFIG);
+}
+
+const COMMANDS = {
+  async devices(conn, flags) {
+    const value = await tool(conn, 'list_devices', {}, { cloudOnly: true });
+    out(flags, value, (v) => table(['NAME', 'ID', 'ONLINE', 'VERSION', 'LAST SEEN'],
+      v.devices.map((d) => [d.name, d.id, d.online ? 'yes' : 'no', d.version, d.last_seen.replace('T', ' ').slice(0, 16)])));
+  },
+  async accounts(conn, flags) {
+    const value = await tool(conn, 'list_accounts', {});
+    out(flags, value, (v) => table(['#', 'ID', 'NAME', 'USERNAME', 'PHONE', 'UNREAD', ''],
+      v.accounts.map((a) => [a.index, a.id, a.name, at(a.username), a.phone ? '+' + a.phone : '', a.unread, a.active ? 'active' : ''])));
+  },
+  async active(conn, flags) {
+    const value = await tool(conn, 'get_active_account', {});
+    out(flags, value, (v) => `${v.account.name}  ${at(v.account.username)}  id ${v.account.id}`);
+  },
+  async switch(conn, flags, rest) {
+    const who = target(rest[0], { index: true, idKey: 'id' });
+    const value = await tool(conn, 'switch_account', who);
+    out(flags, value, (v) => `${v.already_active ? 'already active' : 'switched to'}: ${v.account.name}  id ${v.account.id}`);
+  },
+  async friends(conn, flags, rest) {
+    const [sub, who] = rest;
+    const account = flags.account;
+    if (sub === 'list') {
+      const value = await tool(conn, 'list_friends', {
+        account, query: flags.query, limit: intFlag(flags, 'limit'), offset: intFlag(flags, 'offset'),
+      });
+      out(flags, value, (v) => table(['ID', 'NAME', 'USERNAME', 'PHONE', ''],
+        v.friends.map((f) => [f.id, f.name, at(f.username), f.phone ? '+' + f.phone : '', f.bot ? 'bot' : f.mutual ? 'mutual' : '']))
+        + `\n${v.friends.length} of ${v.total}, account ${v.account}`);
+    } else if (sub === 'find') {
+      const value = await tool(conn, 'find_user', { account, ...target(who, { idKey: 'username' }) });
+      out(flags, value, (v) => `${v.user.name}  ${at(v.user.username)}  id ${v.user.id}  ${v.user.friend ? 'friend' : 'not a friend'}`);
+    } else if (sub === 'add') {
+      const value = await tool(conn, 'add_friend', {
+        account, ...target(who), first_name: flags.first, last_name: flags.last,
+      });
+      out(flags, value, (v) => `${v.added ? 'added' : 'already a friend'}: ${v.user.name}  id ${v.user.id}  (account ${v.account})`);
+    } else if (sub === 'remove') {
+      const value = await tool(conn, 'remove_friend', { account, ...target(who, { phone: false }) });
+      out(flags, value, (v) => `${v.removed ? 'removed' : 'was not a friend'}: ${v.user.name}  id ${v.user.id}  (account ${v.account})`);
+    } else {
+      fail(EXIT.USAGE, 'friends list | find | add | remove. See: luckgram --help');
+    }
+  },
+  async chats(conn, flags, rest) {
+    const [sub, chat] = rest;
+    const account = flags.account;
+    if (sub === 'list') {
+      const value = await tool(conn, 'list_chats', {
+        account, unread_only: flags.unread ? true : undefined, limit: intFlag(flags, 'limit'), offset: intFlag(flags, 'offset'),
+      });
+      out(flags, value, (v) => table(['ID', 'TYPE', 'NAME', 'UNREAD', 'LAST MESSAGE', ''],
+        v.chats.map((c) => [c.id, c.type, c.name, c.unread || (c.unread_mark ? '•' : ''), time(c.last_message_date),
+          [c.pinned ? 'pinned' : '', c.muted ? 'muted' : ''].filter(Boolean).join(' ')]))
+        + `\n${v.chats.length} of ${v.total}${v.complete ? '' : ' (the app has not loaded the whole list yet)'}, account ${v.account}`);
+    } else if (sub === 'read') {
+      if (!chat) fail(EXIT.USAGE, 'chats read <chat>');
+      const value = await tool(conn, 'mark_chat_read', { account, chat });
+      out(flags, value, (v) => `marked read: ${v.chat_name} (${v.was_unread} unread before)`);
+    } else {
+      fail(EXIT.USAGE, 'chats list | read <chat>. See: luckgram --help');
+    }
+  },
+  async messages(conn, flags, rest) {
+    const [sub, chat, ...words] = rest;
+    const account = flags.account;
+    if (sub === 'get') {
+      if (!chat) fail(EXIT.USAGE, 'messages get <chat>');
+      const value = await tool(conn, 'get_messages', {
+        account, chat, limit: intFlag(flags, 'limit'), before_id: intFlag(flags, 'before'),
+      });
+      out(flags, value, (v) => `${v.chat_name}  (chat ${v.chat_id}, newest first)\n` + (v.messages.map((m) =>
+        `[${m.id}] ${time(m.date)}  ${m.out ? 'me' : (m.from_name || m.from_id || '')}: `
+        + (m.service ? '(service message)' : (m.text || '') + (m.attachment ? ` [${m.attachment}]` : ''))
+        + (m.reply_to ? `  ↩ ${m.reply_to}` : '')).join('\n') || '(no messages)'));
+    } else if (sub === 'send') {
+      if (!chat) fail(EXIT.USAGE, 'messages send <chat> <text…>  (or --stdin)');
+      const text = flags.stdin ? await readStdin() : words.join(' ');
+      if (!text.trim()) fail(EXIT.USAGE, 'the message text is empty');
+      const value = await tool(conn, 'send_message', { account, chat, text, reply_to: intFlag(flags, 'reply-to') });
+      out(flags, value, (v) => `queued for ${v.chat_name} (account ${v.account}). `
+        + 'The app delivers it like a message typed by hand; check with "luckgram messages get" when it matters.');
+    } else {
+      fail(EXIT.USAGE, 'messages get <chat> | send <chat> <text…>. See: luckgram --help');
+    }
+  },
+  async groups(conn, flags, rest) {
+    const [sub] = rest;
+    const chat = chatArgument(rest[1]);
+    if (sub === 'join-all' || sub === 'leave-all') {
+      if (!chat) fail(EXIT.USAGE, `groups ${sub} <@username|t.me link> [--delay <seconds>] [--only <ids>] [--skip <ids>]`);
+      return everyAccount(conn, flags, sub === 'join-all' ? 'join_chat' : 'leave_chat', chat);
+    }
+    if ((sub !== 'join' && sub !== 'leave') || !chat) fail(EXIT.USAGE, 'groups join <chat> | leave <chat> | join-all <chat> | leave-all <chat>');
+    const value = await tool(conn, sub === 'join' ? 'join_chat' : 'leave_chat', { account: flags.account, chat });
+    out(flags, value, (v) => (sub === 'join'
+      ? (v.started ? 'started' : v.requested ? 'asked to join (an admin approves)' : v.joined ? 'joined' : 'already a member')
+      : (v.left ? 'left' : 'was not a member')) + `: ${v.chat_name ?? chat}  (account ${v.account})`);
+  },
+  async proxy(conn, flags, rest) {
+    const sub = rest[0];
+    const usage = 'proxy list | add <link> | add --type <socks5|http|mtproto> --host <host> --port <port> | use <index|direct|system> | remove <index>';
+    const mode = (v) => (v.mode === 'proxy' ? 'through a proxy' : v.mode === 'system' ? 'system proxy' : 'direct connection');
+    const lines = (v) => [`mode: ${mode(v)}`, ...(v.proxies ?? []).map((x) =>
+      `${x.selected ? '*' : ' '} ${x.index}  ${x.type}  ${x.host}:${x.port}` + (x.user ? `  user ${x.user}` : '') + (x.has_password ? '  (password)' : ''))].join('\n');
+    const index = (text) => {
+      const n = Number(text);
+      if (!Number.isInteger(n) || n < 1) fail(EXIT.USAGE, 'the index is a number from "luckgram proxy list"');
+      return n;
+    };
+    if (sub === 'list') {
+      return out(flags, await tool(conn, 'list_proxies', { account: flags.account }), lines);
+    }
+    if (sub === 'add') {
+      const args = { account: flags.account };
+      if (rest[1] || flags['link-stdin']) {
+        if (flags.type || flags.host || flags.port || (rest[1] && flags['link-stdin'])) fail(EXIT.USAGE, 'give one of: a link, --link-stdin, or --type, --host and --port');
+        // A link with pass= or secret= in it belongs on stdin, not in the shell history.
+        args.link = rest[1] || (await readStdin()).trim();
+        if (!args.link) fail(EXIT.USAGE, 'no link on stdin');
+      } else {
+        if (!flags.type || !flags.host || !flags.port) fail(EXIT.USAGE, usage);
+        const port = Number(flags.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) fail(EXIT.USAGE, '--port is a number, 1 to 65535');
+        if (flags['password-stdin'] && flags['secret-stdin']) fail(EXIT.USAGE, 'give --password-stdin or --secret-stdin, not both');
+        Object.assign(args, { type: flags.type, host: flags.host, port, user: flags.user });
+        // A password or a secret never goes on the command line.
+        if (flags['password-stdin']) args.password = (await readStdin()).replace(/\r?\n$/, '');
+        if (flags['secret-stdin']) args.secret = (await readStdin()).trim();
+      }
+      if (flags['no-use']) args.use = false;
+      const value = await tool(conn, 'add_proxy', args);
+      return out(flags, value, (v) => `${v.added ? 'added' : 'already saved'} as ${v.index}` + (v.used ? ', now in use' : ', not switched to') + '\n' + lines(v));
+    }
+    if (sub === 'use' && rest[1]) {
+      const what = rest[1].toLowerCase();
+      const args = (what === 'direct' || what === 'system') ? { mode: what } : { index: index(rest[1]) };
+      return out(flags, await tool(conn, 'use_proxy', { account: flags.account, ...args }), lines);
+    }
+    if (sub === 'remove' && rest[1]) {
+      return out(flags, await tool(conn, 'remove_proxy', { account: flags.account, index: index(rest[1]) }), (v) => 'removed\n' + lines(v));
+    }
+    fail(EXIT.USAGE, usage);
+  },
+  async profile(conn, flags, rest) {
+    if (rest[0] !== 'set') fail(EXIT.USAGE, 'profile set [--first <name>] [--last <name>] [--bio <text>]');
+    const args = { account: flags.account };
+    if (flags.first !== undefined) args.first_name = flags.first;
+    if (flags.last !== undefined) args.last_name = flags.last;
+    if (flags.bio !== undefined) args.bio = flags.bio;
+    if (Object.keys(args).length < 2) fail(EXIT.USAGE, 'give at least one of --first, --last, --bio');
+    // An empty --last / --bio removes it: the empty string must reach the tool.
+    const result = await rpc(conn, 'tools/call', {
+      name: 'update_profile',
+      arguments: {
+        ...Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined)),
+        ...(isCloud(conn.url) && conn.device ? { device: conn.device } : {}),
+      },
+    });
+    if (result?.isError) fail(EXIT.TOOL, result.content?.[0]?.text || 'the tool failed');
+    out(flags, result.structuredContent ?? {}, (v) => `updated: ${v.name}` + (v.bio !== undefined ? `  bio: ${v.bio || '(empty)'}` : ''));
+  },
+  async bots(conn, flags, rest) {
+    const [sub, name, ...more] = rest;
+    const account = flags.account;
+    const bot = (text) => {
+      if (!text) fail(EXIT.USAGE, 'which bot? give its username');
+      return text.replace(/^@/, '');
+    };
+    // A bot token is a secret: with --out it goes to a file only the owner
+    // can read and the output shows it masked.
+    const withToken = (value) => {
+      if (!flags.out || !value.token) return value;
+      writeFileSync(flags.out, value.token + '\n', { mode: 0o600 });
+      try { chmodSync(flags.out, 0o600); } catch { /* Windows */ }
+      const hidden = JSON.parse(JSON.stringify(value).split(value.token).join(mask(value.token)));
+      return { ...hidden, token_file: flags.out };
+    };
+    const tokenLine = (v) => (v.token_file ? `token saved to ${v.token_file} (${v.token})` : `token: ${v.token}`);
+    const onOff = (key) => {
+      if (flags[key] === undefined) return undefined;
+      if (flags[key] !== 'on' && flags[key] !== 'off') fail(EXIT.USAGE, `--${key} takes on or off`);
+      return flags[key] === 'on';
+    };
+    if (sub === 'list') {
+      const value = await tool(conn, 'botfather_list_bots', { account });
+      out(flags, value, (v) => (v.bots.length ? v.bots.map((b) => '@' + b).join('\n') : '(no bots)')
+        + (v.more && v.reply ? `\n(more: luckgram botfather press ${v.reply.id} "»")` : ''));
+    } else if (sub === 'create') {
+      if (!flags.name) fail(EXIT.USAGE, 'bots create <username> --name <display name>');
+      const value = withToken(await tool(conn, 'botfather_create_bot', { account, name: flags.name, username: bot(name) }));
+      out(flags, value, (v) => `created @${v.username}  ${v.link}\n${tokenLine(v)}`);
+    } else if (sub === 'token') {
+      const value = withToken(await tool(conn, flags.revoke ? 'botfather_revoke_token' : 'botfather_get_token', { account, bot: bot(name) }));
+      out(flags, value, (v) => `@${v.bot}${flags.revoke ? ' (new token, the old one no longer works)' : ''}\n${tokenLine(v)}`);
+    } else if (sub === 'set') {
+      const username = bot(name);
+      const steps = [
+        ['name', 'botfather_set_name', { name: flags.name }],
+        ['description', 'botfather_set_description', { description: flags.description }],
+        ['about', 'botfather_set_about', { about: flags.about }],
+        ['privacy', 'botfather_set_privacy', { enabled: onOff('privacy') }],
+        ['groups', 'botfather_set_join_groups', { enabled: onOff('groups') }],
+      ].filter(([key]) => flags[key] !== undefined);
+      if (!steps.length) fail(EXIT.USAGE, 'bots set <bot> with at least one of --name --description --about --privacy --groups');
+      const done = [];
+      for (const [key, name2, args] of steps) {
+        await tool(conn, name2, { account, bot: username, ...args });
+        done.push(key);
+      }
+      out(flags, { bot: username, updated: done }, (v) => `@${v.bot} updated: ${v.updated.join(', ')}`);
+    } else if (sub === 'commands') {
+      const username = bot(name);
+      const commands = more.map((pair) => {
+        const eq = pair.indexOf('=');
+        if (eq < 1) fail(EXIT.USAGE, `"${pair}": write each command as command=description`);
+        return { command: pair.slice(0, eq).replace(/^\//, ''), description: pair.slice(eq + 1) };
+      });
+      if (!commands.length && !flags.clear) fail(EXIT.USAGE, "bots commands <bot> 'start=Start the bot' …   (or --clear)");
+      // An empty list is a value here: it clears the commands.
+      const result = await rpc(conn, 'tools/call', {
+        name: 'botfather_set_commands',
+        arguments: {
+          ...(account ? { account } : {}), bot: username, commands,
+          ...(isCloud(conn.url) && conn.device ? { device: conn.device } : {}),
+        },
+      });
+      if (result?.isError) fail(EXIT.TOOL, result.content?.[0]?.text || 'the tool failed');
+      out(flags, result.structuredContent ?? {}, () => `@${username}: ${commands.length ? commands.length + ' commands set' : 'commands cleared'}`);
+    } else if (sub === 'delete') {
+      const username = bot(name);
+      if (!flags.confirm) fail(EXIT.USAGE, `deleting cannot be undone. Repeat the username: bots delete ${username} --confirm ${username}`);
+      const value = await tool(conn, 'botfather_delete_bot', { account, bot: username, confirm: bot(flags.confirm) });
+      out(flags, value, (v) => `deleted @${v.bot}`);
+    } else {
+      fail(EXIT.USAGE, 'bots list | create | token | set | commands | delete. See: luckgram --help');
+    }
+  },
+  async botfather(conn, flags, rest) {
+    const [sub, ...words] = rest;
+    const account = flags.account;
+    const show = (m) => `[${m.id}] ${m.out ? 'me' : 'BotFather'}: ${m.text}`
+      + (m.buttons?.length ? '\n    buttons: ' + m.buttons.map((b) => `[${b.text}]`).join(' ') : '');
+    if (sub === 'send') {
+      if (!words.join(' ').trim()) fail(EXIT.USAGE, 'botfather send <text…>');
+      const value = await tool(conn, 'botfather_send', { account, text: words.join(' ') });
+      out(flags, value, (v) => show(v.reply));
+    } else if (sub === 'press') {
+      const id = Number(words[0]);
+      if (!Number.isInteger(id) || words.length < 2) fail(EXIT.USAGE, 'botfather press <message id> <button text…>');
+      const value = await tool(conn, 'botfather_press', { account, message_id: id, button: words.slice(1).join(' ') });
+      out(flags, value, (v) => (v.url ? `link: ${v.url}` : show(v.reply) + (v.changed ? '' : '\n(nothing changed yet)')));
+    } else if (sub === 'read') {
+      const value = await tool(conn, 'botfather_read', { account, limit: intFlag(flags, 'limit') });
+      out(flags, value, (v) => v.messages.map(show).join('\n') || '(no messages)');
+    } else {
+      fail(EXIT.USAGE, 'botfather send | press | read. See: luckgram --help');
+    }
+  },
+  async tools(conn, flags) {
+    const value = await rpc(conn, 'tools/list');
+    out(flags, value, (v) => v.tools.map((t) => `${t.name}\n    ${t.description}`).join('\n'));
+  },
+  async call(conn, flags, rest) {
+    const [name, json] = rest;
+    if (!name) fail(EXIT.USAGE, "call <tool> ['<json arguments>']");
+    let args = {};
+    if (json) {
+      try { args = JSON.parse(json); } catch { fail(EXIT.USAGE, 'the arguments are not valid JSON'); }
+      if (!args || typeof args !== 'object' || Array.isArray(args)) fail(EXIT.USAGE, 'the arguments must be a JSON object');
+    }
+    if (flags.account && args.account === undefined) args.account = flags.account;
+    process.stdout.write(JSON.stringify(await tool(conn, name, args), null, 2) + '\n');
+  },
+  async calls(conn, flags) {
+    const value = await tool(conn, 'list_recent_calls', {}, { cloudOnly: true });
+    out(flags, value, (v) => table(['TIME', 'TOOL', 'DEVICE', 'ACCOUNT', ''],
+      v.calls.map((c) => [c.time.replace('T', ' ').slice(0, 19), c.tool, c.device, c.account, c.failed ? 'failed' : ''])));
+  },
+};
+
+async function main() {
+  const { flags, rest } = parseArgs(process.argv.slice(2));
+  const command = rest.shift();
+  if (!command || command === 'help' || flags.help) {
+    process.stdout.write(HELP);
+    return;
+  }
+  if (command === 'version') { process.stdout.write(VERSION + '\n'); return; }
+  if (command === 'config') return cmdConfig(flags);
+  if (command === 'status') return cmdStatus(flags);
+  const run = COMMANDS[command];
+  if (!run) fail(EXIT.USAGE, `unknown command "${command}". See: luckgram --help`);
+  await run(needConnection(flags), flags, rest);
+}
+
+main().catch((error) => fail(EXIT.NETWORK, error?.message || String(error)));
