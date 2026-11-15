@@ -1,6 +1,6 @@
 ---
 name: luckgram
-description: Work with the Telegram accounts in Luckgram Desktop through its MCP server, local or cloud: accounts, friends, chats, messages, groups, profile, bots via BotFather. Tokens stay masked.
+description: Work with the Telegram accounts in Luckgram Desktop through its MCP server, local or cloud: accounts, friends, chats, messages, groups, profile, proxy, bots via BotFather. Tokens stay masked.
 ---
 
 # Luckgram
