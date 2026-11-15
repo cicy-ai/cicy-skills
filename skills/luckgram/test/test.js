@@ -103,6 +103,9 @@ try {
   assert('proxy add --password-stdin reads the password, --no-use only saves', secret.echo.password === 'p w' && secret.echo.use === false);
   const linked = JSON.parse(run(['proxy', 'add', 'tg://socks?server=1.2.3.4&port=1080', '--json']).stdout);
   assert('proxy add <link> sends the link alone', linked.echo.link === 'tg://socks?server=1.2.3.4&port=1080' && linked.echo.type === undefined);
+  const piped2 = JSON.parse(withStdin(['proxy', 'add', '--link-stdin', '--json'], 'tg://proxy?server=h.io&port=443&secret=ee00\n').stdout);
+  assert('proxy add --link-stdin reads the link', piped2.echo.link === 'tg://proxy?server=h.io&port=443&secret=ee00');
+  assert('proxy add with a link and --link-stdin exits 2', withStdin(['proxy', 'add', 'tg://socks?server=h&port=1', '--link-stdin'], 'x').status === 2);
   assert('proxy add with a link and --host exits 2', run(['proxy', 'add', 'tg://socks?server=1.2.3.4&port=1080', '--host', 'x']).status === 2);
   assert('proxy add without a port exits 2', run(['proxy', 'add', '--type', 'socks5', '--host', 'x']).status === 2);
   assert('proxy use 2 sends the index', JSON.parse(run(['proxy', 'use', '2', '--json']).stdout).echo.index === 2);

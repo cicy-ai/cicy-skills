@@ -62,6 +62,7 @@ luckgram groups leave-all <@用户名|t.me 链接> [--delay <秒>] [--only <账�
 luckgram profile set [--first <名>] [--last <姓>] [--bio <简介>]   Skill：profile   每小时 5 次，每天 10 次
 luckgram proxy list                                              Skill：proxy   代理是所有账号共用的
 luckgram proxy add <tg://socks… | tg://proxy… | t.me 链接> [--no-use]         每小时 20 次，每天 60 次
+luckgram proxy add --link-stdin [--no-use]                                    链接里带 pass= 或 secret= 时从标准输入给
 luckgram proxy add --type <socks5|http|mtproto> --host <主机> --port <端口> [--user <用户名>] [--password-stdin] [--secret-stdin] [--no-use]
 luckgram proxy use <序号 | direct | system>                                   每小时 20 次，每天 60 次
 luckgram proxy remove <序号>                                                  每小时 20 次，每天 60 次

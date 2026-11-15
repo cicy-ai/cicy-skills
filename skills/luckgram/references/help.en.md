@@ -62,6 +62,7 @@ luckgram groups leave-all <@username|t.me link> [--delay <s>] [--only <ids>] [--
 luckgram profile set [--first <n>] [--last <n>] [--bio <text>]   skill: profile   5/hour, 10/day
 luckgram proxy list                                              skill: proxy   the proxy is shared by every account
 luckgram proxy add <tg://socks… | tg://proxy… | t.me link> [--no-use]        20/hour, 60/day
+luckgram proxy add --link-stdin [--no-use]                                    a link with pass= or secret= in it: on stdin
 luckgram proxy add --type <socks5|http|mtproto> --host <h> --port <p> [--user <n>] [--password-stdin] [--secret-stdin] [--no-use]
 luckgram proxy use <index | direct | system>                                  20/hour, 60/day
 luckgram proxy remove <index>                                                 20/hour, 60/day

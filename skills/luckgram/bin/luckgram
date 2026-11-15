@@ -65,6 +65,7 @@ Profile            (skill: profile)
 Proxy              (skill: proxy; the proxy is shared by every account)
   luckgram proxy list
   luckgram proxy add <tg://socks… | tg://proxy… | t.me/socks… link> [--no-use]
+  luckgram proxy add --link-stdin [--no-use]    (a link with a password or secret in it)
   luckgram proxy add --type <socks5|http|mtproto> --host <host> --port <port>
                      [--user <name>] [--password-stdin] [--secret-stdin] [--no-use]
   luckgram proxy use <index | direct | system>
@@ -98,7 +99,7 @@ Skills are switched on per account by the user in Luckgram Desktop
 `;
 
 // ── arguments ────────────────────────────────────────────────────────────
-const BOOLEAN_FLAGS = new Set(['json', 'unread', 'stdin', 'token-stdin', 'local', 'cloud', 'backup', 'help', 'revoke', 'clear', 'password-stdin', 'secret-stdin', 'no-use']);
+const BOOLEAN_FLAGS = new Set(['json', 'unread', 'stdin', 'token-stdin', 'local', 'cloud', 'backup', 'help', 'revoke', 'clear', 'password-stdin', 'secret-stdin', 'link-stdin', 'no-use']);
 
 function parseArgs(argv) {
   const flags = {};
@@ -536,9 +537,11 @@ const COMMANDS = {
     }
     if (sub === 'add') {
       const args = { account: flags.account };
-      if (rest[1]) {
-        if (flags.type || flags.host || flags.port) fail(EXIT.USAGE, 'give either a link or --type, --host and --port, not both');
-        args.link = rest[1];
+      if (rest[1] || flags['link-stdin']) {
+        if (flags.type || flags.host || flags.port || (rest[1] && flags['link-stdin'])) fail(EXIT.USAGE, 'give one of: a link, --link-stdin, or --type, --host and --port');
+        // A link with pass= or secret= in it belongs on stdin, not in the shell history.
+        args.link = rest[1] || (await readStdin()).trim();
+        if (!args.link) fail(EXIT.USAGE, 'no link on stdin');
       } else {
         if (!flags.type || !flags.host || !flags.port) fail(EXIT.USAGE, usage);
         const port = Number(flags.port);
